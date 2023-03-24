@@ -5,3 +5,10 @@ edition = "2021"
 
 [dependencies]
 plex-out = { path = "../plex-out" }
+clap = { version = "4.1.13", features = ["derive", "env"] }
+flexi_logger = { version = "0.25.3", features = ["colors"] }
+tokio = { version = "1.26.0", features = ["full"] }
+console = "0.15.5"
+dialoguer = "0.10.3"
+indicatif = "0.17.3"
+log = "0.4.17"
