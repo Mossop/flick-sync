@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "packages/plex-out",
+    "packages/plex-out-cli",
+]
