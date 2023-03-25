@@ -1,36 +1,63 @@
 use std::{
     io::ErrorKind,
+    ops::Deref,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 mod config;
 mod error;
+mod server;
 mod state;
 
-use config::Config;
+pub use config::ServerConnection;
+use config::{Config, ServerConfig};
 pub use error::Error;
+pub use plex_api;
+use plex_api::{HttpClient, HttpClientBuilder};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{from_str, to_string_pretty};
-use state::State;
+pub use server::Server;
+use state::{ServerState, State};
 use tokio::{
     fs::{read_to_string, write},
-    sync::RwLock,
+    sync::{RwLock, RwLockWriteGuard},
 };
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T = ()> = std::result::Result<T, Error>;
 
 pub const STATE_FILE: &str = ".plexout.state.json";
 pub const CONFIG_FILE: &str = "plexout.json";
 
 struct Inner {
-    _config: RwLock<Config>,
-    _state: RwLock<State>,
-    _path: RwLock<PathBuf>,
+    pub config: RwLock<Config>,
+    pub state: RwLock<State>,
+    pub path: RwLock<PathBuf>,
 }
 
+impl Inner {
+    async fn persist_config(&self, config: &RwLockWriteGuard<'_, Config>) -> Result {
+        let path = self.path.read().await;
+
+        let str = to_string_pretty(&config.deref())?;
+        write(path.join(CONFIG_FILE), str).await?;
+
+        Ok(())
+    }
+
+    async fn persist_state(&self, state: &RwLockWriteGuard<'_, State>) -> Result {
+        let path = self.path.read().await;
+
+        let str = to_string_pretty(&state.deref())?;
+        write(path.join(STATE_FILE), str).await?;
+
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
 pub struct PlexOut {
-    _inner: Arc<Inner>,
+    inner: Arc<Inner>,
 }
 
 async fn read_or_default<S>(path: &Path) -> Result<S>
@@ -58,11 +85,61 @@ impl PlexOut {
         let state: State = read_or_default(&path.join(STATE_FILE)).await?;
 
         Ok(Self {
-            _inner: Arc::new(Inner {
-                _config: RwLock::new(config),
-                _state: RwLock::new(state),
-                _path: RwLock::new(path.to_owned()),
+            inner: Arc::new(Inner {
+                config: RwLock::new(config),
+                state: RwLock::new(state),
+                path: RwLock::new(path.to_owned()),
             }),
         })
+    }
+
+    pub async fn add_server(
+        &self,
+        id: &str,
+        server: plex_api::Server,
+        connection: ServerConnection,
+    ) -> Result {
+        let mut state = self.inner.state.write().await;
+        let mut config = self.inner.config.write().await;
+
+        if config.servers.contains_key(id) {
+            return Err(Error::ServerExists);
+        }
+
+        state.servers.insert(
+            id.to_owned(),
+            ServerState {
+                token: server.client().x_plex_token().to_owned(),
+            },
+        );
+
+        config
+            .servers
+            .insert(id.to_owned(), ServerConfig { connection });
+
+        self.inner.persist_config(&config).await?;
+        self.inner.persist_state(&state).await?;
+
+        Ok(())
+    }
+
+    pub async fn server(&self, id: &str) -> Option<Server> {
+        let config = self.inner.config.read().await;
+        if config.servers.contains_key(id) {
+            Some(Server {
+                id: id.to_owned(),
+                inner: self.inner.clone(),
+            })
+        } else {
+            None
+        }
+    }
+
+    pub async fn client(&self) -> HttpClient {
+        let state = self.inner.state.read().await;
+        HttpClientBuilder::generic()
+            .set_x_plex_client_identifier(state.client_id.clone())
+            .build()
+            .unwrap()
     }
 }

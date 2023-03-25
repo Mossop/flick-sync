@@ -992,9 +992,7 @@ checksum = "6ac9a59f73473f1b8d852421e59e64809f025994837ef743615c6d0c5b305160"
 
 [[package]]
 name = "plex-api"
-version = "0.0.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1326af6f4ecd0b0df9704591de7d930618334edd60a4766377af4918c51afa80"
+version = "0.0.8"
 dependencies = [
  "enum_dispatch",
  "futures",
@@ -1030,6 +1028,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -1045,6 +1044,7 @@ dependencies = [
  "indicatif",
  "log",
  "plex-out",
+ "thiserror",
  "tokio",
 ]
 

@@ -12,6 +12,8 @@ pub enum Error {
         #[from]
         source: serde_json::Error,
     },
+    #[error("A server with this identifier already exists")]
+    ServerExists,
     #[error("Unknown error")]
     Unknown,
 }

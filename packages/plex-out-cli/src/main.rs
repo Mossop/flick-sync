@@ -1,18 +1,31 @@
-use std::{env::current_dir, fmt, path::PathBuf};
+use std::{env::current_dir, path::PathBuf};
 
-use clap::Parser;
-use commands::{Command, Runnable};
+use async_trait::async_trait;
+use clap::{Parser, Subcommand};
+use enum_dispatch::enum_dispatch;
+use error::{err, Error};
 use flexi_logger::Logger;
 use plex_out::{PlexOut, CONFIG_FILE, STATE_FILE};
 use tokio::fs::{metadata, read_dir};
 
-mod commands;
 mod console;
+mod error;
+mod server;
 
 use crate::console::Console;
+use server::Login;
 
-fn d_to_s<D: fmt::Display>(d: D) -> String {
-    d.to_string()
+#[enum_dispatch]
+#[derive(Subcommand)]
+pub enum Command {
+    /// Logs in or re-logs in to a server.
+    Login,
+}
+
+#[async_trait]
+#[enum_dispatch(Command)]
+pub trait Runnable {
+    async fn run(self, plexout: PlexOut, console: Console) -> Result<(), Error>;
 }
 
 #[derive(Parser)]
@@ -26,18 +39,18 @@ struct Args {
     command: Command,
 }
 
-async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf, String> {
+async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf, Error> {
     let path = store.unwrap_or_else(|| current_dir().unwrap());
 
     log::trace!("Checking for store directory at {}", path.display());
     match metadata(&path).await {
         Ok(stats) => {
             if !stats.is_dir() {
-                return Err(format!("Store {} is not a directory", path.display()));
+                return err(format!("Store {} is not a directory", path.display()));
             }
         }
         Err(_) => {
-            return Err(format!("Store {} is not a directory", path.display()));
+            return err(format!("Store {} is not a directory", path.display()));
         }
     }
 
@@ -47,38 +60,38 @@ async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf, String> {
             log::trace!("Store contained state file");
             return Ok(path);
         } else {
-            return Err("Store contained a non-file where a state file was expected".to_string());
+            return err("Store contained a non-file where a state file was expected");
         }
     }
 
     log::trace!("No state file, checking for non-config files in a new store");
-    let mut reader = read_dir(&path).await.map_err(d_to_s)?;
-    while let Some(entry) = reader.next_entry().await.map_err(d_to_s)? {
+    let mut reader = read_dir(&path).await?;
+    while let Some(entry) = reader.next_entry().await? {
         let file_name = entry.file_name();
         let name = match file_name.to_str() {
             Some(s) => s,
             None => {
                 log::error!("Store contained an entry with a non-UTF8 invalid name");
-                return Err("New store is not empty".to_string());
+                return err("New store is not empty");
             }
         };
 
-        let typ = entry.file_type().await.map_err(d_to_s)?;
+        let typ = entry.file_type().await?;
         if typ.is_file() {
             if name != CONFIG_FILE {
                 log::error!("{} exists in a potential new store", name);
-                return Err("New store is not empty".to_string());
+                return err("New store is not empty");
             }
         } else {
             log::error!("{} exists in a potential new store", name);
-            return Err("New store is not empty".to_string());
+            return err("New store is not empty");
         }
     }
 
     Ok(path)
 }
 
-async fn wrapped_main(args: Args, console: Console) -> Result<(), String> {
+async fn wrapped_main(args: Args, console: Console) -> Result<(), Error> {
     let store = validate_store(args.store).await?;
     let plexout = PlexOut::new(&store).await?;
 
@@ -86,12 +99,12 @@ async fn wrapped_main(args: Args, console: Console) -> Result<(), String> {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), String> {
+async fn main() -> Result<(), Error> {
     let args = Args::parse();
 
-    let console = Console::new();
+    let console = Console::default();
 
-    if let Err(e) = Logger::try_with_env_or_str("trace")
+    if let Err(e) = Logger::try_with_env_or_str("plex_out=trace,warn")
         .and_then(|logger| logger.log_to_writer(Box::new(console.clone())).start())
     {
         console.println(format!("Warning, failed to start logging: {}", e));

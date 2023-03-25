@@ -5,6 +5,7 @@ use std::{
 };
 
 use console::{pad_str, Alignment, Style, Term};
+use dialoguer::{Input, Password, Select};
 use flexi_logger::{writers::LogWriter, DeferredNow, Level, Record};
 use indicatif::MultiProgress;
 
@@ -18,14 +19,16 @@ pub struct Console {
     progress: Arc<RwLock<Option<Progress>>>,
 }
 
-impl Console {
-    pub fn new() -> Self {
+impl Default for Console {
+    fn default() -> Self {
         Self {
             term: Term::stdout(),
             progress: Arc::new(RwLock::new(None)),
         }
     }
+}
 
+impl Console {
     fn with_term<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&Term) -> R,
@@ -45,6 +48,35 @@ impl Console {
 
     pub fn println<S: AsRef<str>>(&self, msg: S) {
         self.inner_println(msg).unwrap();
+    }
+
+    pub fn input<P: Into<String>>(&self, prompt: P) -> String {
+        self.with_term(|term| {
+            Input::new()
+                .with_prompt(prompt)
+                .interact_text_on(term)
+                .unwrap()
+        })
+    }
+
+    pub fn password<P: Into<String>>(&self, prompt: P) -> String {
+        self.with_term(|term| {
+            Password::new()
+                .with_prompt(prompt)
+                .interact_on(term)
+                .unwrap()
+        })
+    }
+
+    pub fn select<P: Into<String>, S: ToString>(&self, prompt: P, items: &[S]) -> usize {
+        self.with_term(|term| {
+            Select::new()
+                .with_prompt(prompt)
+                .items(items)
+                .default(0)
+                .interact_on(term)
+                .unwrap()
+        })
     }
 }
 
