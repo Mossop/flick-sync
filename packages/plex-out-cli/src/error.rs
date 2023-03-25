@@ -8,6 +8,11 @@ pub enum Error {
         source: std::io::Error,
     },
     #[error("{source}")]
+    Url {
+        #[from]
+        source: url::ParseError,
+    },
+    #[error("{source}")]
     PlexOut {
         #[from]
         source: plex_out::Error,

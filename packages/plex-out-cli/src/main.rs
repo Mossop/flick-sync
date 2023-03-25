@@ -12,7 +12,7 @@ mod error;
 mod server;
 
 use crate::console::Console;
-use server::Login;
+use server::{Add, Login};
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
@@ -25,6 +25,8 @@ pub trait Runnable {
 pub enum Command {
     /// Logs in or re-logs in to a server.
     Login(Login),
+    /// Adds an item to sync.
+    Add(Add),
 }
 
 #[async_trait]
@@ -32,6 +34,7 @@ impl Runnable for Command {
     async fn run(self, plexout: PlexOut, console: Console) -> Result {
         match self {
             Command::Login(c) => c.run(plexout, console).await,
+            Command::Add(c) => c.run(plexout, console).await,
         }
     }
 }

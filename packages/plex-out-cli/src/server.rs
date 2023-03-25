@@ -4,12 +4,17 @@ use plex_out::{
     plex_api::{
         self,
         device::{Device, DeviceConnection},
-        Feature, MyPlexBuilder, Server,
+        Feature, MetadataItem, MyPlexBuilder, Server,
     },
     PlexOut, ServerConnection,
 };
+use url::Url;
 
-use crate::{console::Console, error::err, Result, Runnable};
+use crate::{
+    console::Console,
+    error::{err, Error},
+    Result, Runnable,
+};
 
 #[derive(Args)]
 pub struct Login {
@@ -132,5 +137,75 @@ impl Runnable for Login {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Args)]
+pub struct Add {
+    /// The web url of the item to add to the list to sync.
+    url: String,
+}
+
+// https://app.plex.tv/desktop/#!/server/fa24702d0698c16dea59894e8ba10b33cf507509/details?key=%2Flibrary%2Fmetadata%2F136320&context=library%3Acontent.library~0~0
+
+#[async_trait]
+impl Runnable for Add {
+    async fn run(self, plexout: PlexOut, console: Console) -> Result {
+        let unexpected = || Error::ErrorMessage("Unexpected URL format".to_string());
+
+        let url = Url::parse(&self.url)?;
+        let fragment = url.fragment().ok_or_else(unexpected)?;
+        if fragment.get(0..1) != Some("!") {
+            return Err(unexpected());
+        }
+        let fragment = &fragment[1..];
+
+        let url = Url::options()
+            .base_url(Some(&Url::parse("https://plex-out.com")?))
+            .parse(fragment)?;
+
+        let mut segments = url.path_segments().ok_or_else(unexpected)?;
+        if !matches!(segments.next(), Some("server")) {
+            return Err(unexpected());
+        }
+
+        let id = segments.next().ok_or_else(unexpected)?;
+        let key = url
+            .query_pairs()
+            .filter_map(|(k, v)| if k == "key" { Some(v) } else { None })
+            .next()
+            .ok_or_else(unexpected)?;
+
+        let rating_key = match key.rfind('/') {
+            Some(idx) => key[idx + 1..].parse::<u32>().map_err(|_| unexpected())?,
+            None => return Err(unexpected()),
+        };
+
+        for server in plexout.servers().await {
+            let plex_server = match server.connect().await {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("Unable to connect to server {}: {}", server.id(), e);
+                    continue;
+                }
+            };
+
+            if plex_server.machine_identifier() != id {
+                continue;
+            }
+
+            let item = plex_server.item_by_id(rating_key).await?;
+            console.println(format!(
+                "Adding '{}' to the sync list for {}",
+                item.title(),
+                server.id(),
+            ));
+
+            server.add_sync(rating_key).await?;
+
+            return Ok(());
+        }
+
+        Err(Error::ErrorMessage("No matching server found".to_string()))
     }
 }

@@ -10,6 +10,10 @@ pub struct Server {
 }
 
 impl Server {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
     pub async fn connect(&self) -> Result<plex_api::Server> {
         let config = self.inner.config.read().await;
         let state = self.inner.state.read().await;
@@ -41,5 +45,14 @@ impl Server {
             }
             ServerConnection::Direct { url } => Ok(plex_api::Server::new(url, client).await?),
         }
+    }
+
+    pub async fn add_sync(&self, rating_key: u32) -> Result {
+        let mut config = self.inner.config.write().await;
+
+        let server_config = config.servers.get_mut(&self.id).unwrap();
+        server_config.syncs.insert(rating_key);
+
+        self.inner.persist_config(&config).await
     }
 }

@@ -121,9 +121,13 @@ impl PlexOut {
             },
         );
 
-        config
-            .servers
-            .insert(id.to_owned(), ServerConfig { connection });
+        config.servers.insert(
+            id.to_owned(),
+            ServerConfig {
+                connection,
+                syncs: Default::default(),
+            },
+        );
 
         self.inner.persist_config(&config).await?;
         self.inner.persist_state(&state).await?;
@@ -141,6 +145,18 @@ impl PlexOut {
         } else {
             None
         }
+    }
+
+    pub async fn servers(&self) -> Vec<Server> {
+        let config = self.inner.config.read().await;
+        config
+            .servers
+            .keys()
+            .map(|id| Server {
+                id: id.to_owned(),
+                inner: self.inner.clone(),
+            })
+            .collect()
     }
 
     pub async fn client(&self) -> HttpClient {

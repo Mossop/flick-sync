@@ -1045,6 +1045,7 @@ dependencies = [
  "plex-out",
  "thiserror",
  "tokio",
+ "url",
 ]
 
 [[package]]
