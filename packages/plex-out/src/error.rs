@@ -2,6 +2,16 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("{source}")]
+    IoError {
+        #[from]
+        source: std::io::Error,
+    },
+    #[error("Unable to deserialize JSON: {source}.")]
+    DeserealiseError {
+        #[from]
+        source: serde_json::Error,
+    },
     #[error("Unknown error")]
     Unknown,
 }
