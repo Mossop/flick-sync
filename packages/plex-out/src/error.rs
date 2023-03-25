@@ -7,13 +7,20 @@ pub enum Error {
         #[from]
         source: std::io::Error,
     },
-    #[error("Unable to deserialize JSON: {source}.")]
+    #[error("Unable to deserialize JSON: {source}")]
     DeserealiseError {
         #[from]
         source: serde_json::Error,
     },
+    #[error("The Plex API returned an error: {source}")]
+    PlexError {
+        #[from]
+        source: plex_api::Error,
+    },
     #[error("A server with this identifier already exists")]
     ServerExists,
+    #[error("The server is no longer registered to this account")]
+    ServerNotFound,
     #[error("Unknown error")]
     Unknown,
 }

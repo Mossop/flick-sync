@@ -9,11 +9,7 @@ use plex_out::{
     PlexOut, ServerConnection,
 };
 
-use crate::{
-    console::Console,
-    error::{err, Error},
-    Runnable,
-};
+use crate::{console::Console, error::err, Result, Runnable};
 
 #[derive(Args)]
 pub struct Login {
@@ -23,9 +19,9 @@ pub struct Login {
 
 #[async_trait]
 impl Runnable for Login {
-    async fn run(self, plexout: PlexOut, console: Console) -> Result<(), Error> {
+    async fn run(self, plexout: PlexOut, console: Console) -> Result {
         match plexout.server(&self.id).await {
-            Some(server) => {
+            Some(_server) => {
                 todo!();
             }
             None => {

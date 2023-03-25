@@ -1039,7 +1039,6 @@ dependencies = [
  "clap",
  "console",
  "dialoguer",
- "enum_dispatch",
  "flexi_logger",
  "indicatif",
  "log",

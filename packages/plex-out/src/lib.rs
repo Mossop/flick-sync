@@ -53,6 +53,14 @@ impl Inner {
 
         Ok(())
     }
+
+    pub async fn client(&self) -> HttpClient {
+        let state = self.state.read().await;
+        HttpClientBuilder::generic()
+            .set_x_plex_client_identifier(state.client_id.clone())
+            .build()
+            .unwrap()
+    }
 }
 
 #[derive(Clone)]
@@ -136,10 +144,6 @@ impl PlexOut {
     }
 
     pub async fn client(&self) -> HttpClient {
-        let state = self.inner.state.read().await;
-        HttpClientBuilder::generic()
-            .set_x_plex_client_identifier(state.client_id.clone())
-            .build()
-            .unwrap()
+        self.inner.client().await
     }
 }

@@ -2,7 +2,6 @@ use std::{env::current_dir, path::PathBuf};
 
 use async_trait::async_trait;
 use clap::{Parser, Subcommand};
-use enum_dispatch::enum_dispatch;
 use error::{err, Error};
 use flexi_logger::Logger;
 use plex_out::{PlexOut, CONFIG_FILE, STATE_FILE};
@@ -15,17 +14,26 @@ mod server;
 use crate::console::Console;
 use server::Login;
 
-#[enum_dispatch]
+pub type Result<T = ()> = std::result::Result<T, Error>;
+
+#[async_trait]
+pub trait Runnable {
+    async fn run(self, plexout: PlexOut, console: Console) -> Result;
+}
+
 #[derive(Subcommand)]
 pub enum Command {
     /// Logs in or re-logs in to a server.
-    Login,
+    Login(Login),
 }
 
 #[async_trait]
-#[enum_dispatch(Command)]
-pub trait Runnable {
-    async fn run(self, plexout: PlexOut, console: Console) -> Result<(), Error>;
+impl Runnable for Command {
+    async fn run(self, plexout: PlexOut, console: Console) -> Result {
+        match self {
+            Command::Login(c) => c.run(plexout, console).await,
+        }
+    }
 }
 
 #[derive(Parser)]
@@ -39,7 +47,7 @@ struct Args {
     command: Command,
 }
 
-async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf, Error> {
+async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf> {
     let path = store.unwrap_or_else(|| current_dir().unwrap());
 
     log::trace!("Checking for store directory at {}", path.display());
@@ -91,7 +99,7 @@ async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf, Error> {
     Ok(path)
 }
 
-async fn wrapped_main(args: Args, console: Console) -> Result<(), Error> {
+async fn wrapped_main(args: Args, console: Console) -> Result {
     let store = validate_store(args.store).await?;
     let plexout = PlexOut::new(&store).await?;
 
@@ -99,7 +107,7 @@ async fn wrapped_main(args: Args, console: Console) -> Result<(), Error> {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result {
     let args = Args::parse();
 
     let console = Console::default();
