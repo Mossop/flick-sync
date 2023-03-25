@@ -6,6 +6,9 @@ pub use error::Error;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+pub const STATE_FILE: &str = ".plexout.state.json";
+pub const CONFIG_FILE: &str = "plexout.json";
+
 pub struct PlexOut {
     _path: PathBuf,
 }
