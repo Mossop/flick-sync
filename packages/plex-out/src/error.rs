@@ -20,7 +20,9 @@ pub enum Error {
     #[error("A server with this identifier already exists")]
     ServerExists,
     #[error("The server is no longer registered to this account")]
-    ServerNotFound,
+    MyPlexServerNotFound,
+    #[error("This server is no longer authenticated correctly. Try logging in again.")]
+    ServerNotAuthenticated,
     #[error("Unknown error")]
     Unknown,
 }

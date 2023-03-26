@@ -4,15 +4,17 @@ use async_trait::async_trait;
 use clap::{Parser, Subcommand};
 use error::{err, Error};
 use flexi_logger::Logger;
-use plex_out::{PlexOut, CONFIG_FILE, STATE_FILE};
+use plex_out::{PlexOut, Server, CONFIG_FILE, STATE_FILE};
+use sync::{Prune, Sync};
 use tokio::fs::{metadata, read_dir};
 
 mod console;
 mod error;
 mod server;
+mod sync;
 
-use crate::console::Console;
-use server::{Add, Login};
+pub use crate::console::Console;
+use server::{Add, List, Login};
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
@@ -27,6 +29,13 @@ pub enum Command {
     Login(Login),
     /// Adds an item to sync.
     Add(Add),
+    /// Updates the lists of items to sync and then list them all.
+    List(List),
+    /// Updates the lists of items to sync and then remove any local content no
+    /// longer included.
+    Prune(Prune),
+    /// Performs a full sync
+    Sync(Sync),
 }
 
 #[async_trait]
@@ -35,7 +44,29 @@ impl Runnable for Command {
         match self {
             Command::Login(c) => c.run(plexout, console).await,
             Command::Add(c) => c.run(plexout, console).await,
+            Command::List(c) => c.run(plexout, console).await,
+            Command::Prune(c) => c.run(plexout, console).await,
+            Command::Sync(c) => c.run(plexout, console).await,
         }
+    }
+}
+
+pub async fn select_servers(plexout: &PlexOut, ids: &Vec<String>) -> Result<Vec<Server>> {
+    if ids.is_empty() {
+        Ok(plexout.servers().await)
+    } else {
+        let mut servers = Vec::new();
+
+        for id in ids {
+            servers.push(
+                plexout
+                    .server(id)
+                    .await
+                    .ok_or_else(|| Error::UnknownServer(id.clone()))?,
+            );
+        }
+
+        Ok(servers)
     }
 }
 

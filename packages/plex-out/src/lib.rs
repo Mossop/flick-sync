@@ -101,6 +101,7 @@ impl PlexOut {
         })
     }
 
+    /// Adds a new server
     pub async fn add_server(
         &self,
         id: &str,

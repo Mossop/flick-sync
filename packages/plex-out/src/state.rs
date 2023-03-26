@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Default, Serialize, Clone, Debug)]
 pub struct ServerState {
     pub token: String,
 }

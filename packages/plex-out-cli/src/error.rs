@@ -22,6 +22,8 @@ pub enum Error {
         #[from]
         source: plex_out::plex_api::Error,
     },
+    #[error("Unknown server {0}")]
+    UnknownServer(String),
     #[error("{0}")]
     ErrorMessage(String),
     #[error("Unknown error")]

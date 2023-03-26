@@ -10,11 +10,7 @@ use plex_out::{
 };
 use url::Url;
 
-use crate::{
-    console::Console,
-    error::{err, Error},
-    Result, Runnable,
-};
+use crate::{error::err, select_servers, Console, Error, Result, Runnable};
 
 #[derive(Args)]
 pub struct Login {
@@ -146,8 +142,6 @@ pub struct Add {
     url: String,
 }
 
-// https://app.plex.tv/desktop/#!/server/fa24702d0698c16dea59894e8ba10b33cf507509/details?key=%2Flibrary%2Fmetadata%2F136320&context=library%3Acontent.library~0~0
-
 #[async_trait]
 impl Runnable for Add {
     async fn run(self, plexout: PlexOut, console: Console) -> Result {
@@ -172,8 +166,7 @@ impl Runnable for Add {
         let id = segments.next().ok_or_else(unexpected)?;
         let key = url
             .query_pairs()
-            .filter_map(|(k, v)| if k == "key" { Some(v) } else { None })
-            .next()
+            .find_map(|(k, v)| if k == "key" { Some(v) } else { None })
             .ok_or_else(unexpected)?;
 
         let rating_key = match key.rfind('/') {
@@ -207,5 +200,21 @@ impl Runnable for Add {
         }
 
         Err(Error::ErrorMessage("No matching server found".to_string()))
+    }
+}
+
+#[derive(Args)]
+pub struct List {
+    /// The servers to list. Can be repeated. When not passed all servers are listed.
+    #[clap(short = 's', long = "server")]
+    ids: Vec<String>,
+}
+
+#[async_trait]
+impl Runnable for List {
+    async fn run(self, plexout: PlexOut, console: Console) -> Result {
+        let servers = select_servers(&plexout, &self.ids).await?;
+
+        todo!();
     }
 }
