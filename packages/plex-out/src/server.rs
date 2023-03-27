@@ -175,8 +175,8 @@ impl<'a> StateSync<'a> {
         self.server_state
             .videos
             .entry(key)
-            .and_modify(|video| video.update_from_episode(episode))
-            .or_insert_with(|| VideoState::from_episode(episode));
+            .and_modify(|video| video.update_from_episode(show, season, episode))
+            .or_insert_with(|| VideoState::from_episode(show, season, episode));
 
         let library = self.add_library(show, || LibraryContent::Shows(HashMap::new()))?;
         library.add_episode(show, season, episode);
@@ -212,7 +212,6 @@ impl<'a> StateSync<'a> {
             .entry(library_id.clone())
             .and_modify(|l| l.title = library_title.clone())
             .or_insert_with(|| LibraryState {
-                id: library_id.clone(),
                 title: library_title.clone(),
                 collections: HashMap::new(),
                 content: cb(),

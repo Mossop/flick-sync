@@ -7,7 +7,6 @@ use uuid::Uuid;
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionState {
-    pub id: u32,
     pub title: String,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub items: HashSet<String>,
@@ -16,7 +15,6 @@ pub struct CollectionState {
 impl CollectionState {
     pub fn from_collection<T>(collection: &Collection<T>) -> Self {
         Self {
-            id: collection.rating_key(),
             title: collection.title().to_owned(),
             items: Default::default(),
         }
@@ -30,7 +28,6 @@ impl CollectionState {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistState {
-    pub id: u32,
     pub title: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub videos: Vec<String>,
@@ -39,7 +36,6 @@ pub struct PlaylistState {
 impl PlaylistState {
     pub fn from_playlist<T>(playlist: &Playlist<T>) -> Self {
         Self {
-            id: playlist.rating_key(),
             title: playlist.title().to_owned(),
             videos: Default::default(),
         }
@@ -60,7 +56,6 @@ pub enum LibraryContent {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryState {
-    pub id: String,
     pub title: String,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub collections: HashMap<String, CollectionState>,
@@ -105,7 +100,6 @@ impl LibraryState {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SeasonState {
-    pub id: u32,
     pub index: u32,
     pub title: String,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
@@ -115,7 +109,6 @@ pub struct SeasonState {
 impl SeasonState {
     pub fn from_season(season: &Season) -> Self {
         Self {
-            id: season.rating_key(),
             index: season.metadata().index.unwrap(),
             title: season.title().to_owned(),
             episodes: Default::default(),
@@ -131,7 +124,6 @@ impl SeasonState {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ShowState {
-    pub id: u32,
     pub title: String,
     pub year: u32,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -148,7 +140,6 @@ impl ShowState {
         let path = format!("{title} ({year})");
 
         Self {
-            id: show.rating_key(),
             title,
             year,
             seasons: Default::default(),
@@ -164,29 +155,31 @@ impl ShowState {
     }
 }
 
-#[derive(Deserialize, Serialize, Clone, Copy, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
-pub enum VideoType {
-    Movie,
-    Episode,
-}
-
-fn is_zero(val: &u32) -> bool {
-    *val == 0
+pub struct MovieState {
+    pub title: String,
+    pub library: String,
+    pub year: u32,
+    pub file_prefix: String,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct VideoState {
-    pub id: u32,
+pub struct EpisodeState {
     pub title: String,
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub year: u32,
-    #[serde(default, skip_serializing_if = "is_zero")]
+    pub library: String,
+    pub show: String,
+    pub season: String,
     pub index: u32,
-    #[serde(rename = "type")]
-    pub video_type: VideoType,
     pub file_prefix: String,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum VideoState {
+    Movie(MovieState),
+    Episode(EpisodeState),
 }
 
 impl VideoState {
@@ -197,49 +190,57 @@ impl VideoState {
         let title = movie.title().to_owned();
         let file_prefix = format!("{title} ({year})");
 
-        Self {
-            id: movie.rating_key(),
+        VideoState::Movie(MovieState {
             title,
+            library: movie.metadata().library_section_id.unwrap().to_string(),
             year,
-            index: 0,
-            video_type: VideoType::Movie,
             file_prefix,
-        }
+        })
     }
 
     pub fn update_from_movie(&mut self, movie: &Movie) {
         let metadata = movie.metadata();
 
-        self.year = metadata.year.unwrap();
-        self.title = movie.title().to_owned();
-        self.video_type = VideoType::Movie;
-    }
-
-    pub fn from_episode(episode: &Episode) -> Self {
-        let metadata = episode.metadata();
-
-        let season = metadata.parent.parent_index.unwrap();
-        let index = metadata.index.unwrap();
-
-        let title = episode.title().to_owned();
-        let file_prefix = format!("S{season}E{index} - {title}");
-
-        Self {
-            id: episode.rating_key(),
-            title,
-            year: 0,
-            index: metadata.index.unwrap(),
-            video_type: VideoType::Episode,
-            file_prefix,
+        match self {
+            Self::Movie(m) => {
+                m.year = metadata.year.unwrap();
+                m.title = movie.title().to_owned();
+            }
+            _ => panic!("Unexpected video type"),
         }
     }
 
-    pub fn update_from_episode(&mut self, episode: &Episode) {
+    pub fn from_episode(show: &Show, season: &Season, episode: &Episode) -> Self {
         let metadata = episode.metadata();
 
-        self.title = episode.title().to_owned();
-        self.video_type = VideoType::Episode;
-        self.index = metadata.index.unwrap();
+        let season_index = metadata.parent.parent_index.unwrap();
+        let index = metadata.index.unwrap();
+
+        let title = episode.title().to_owned();
+        let file_prefix = format!("S{season_index:02}E{index:02} - {title}");
+
+        VideoState::Episode(EpisodeState {
+            title,
+            library: show.metadata().library_section_id.unwrap().to_string(),
+            show: show.rating_key().to_string(),
+            season: season.rating_key().to_string(),
+            index: metadata.index.unwrap(),
+            file_prefix,
+        })
+    }
+
+    pub fn update_from_episode(&mut self, show: &Show, season: &Season, episode: &Episode) {
+        let metadata = episode.metadata();
+
+        match self {
+            Self::Episode(e) => {
+                e.title = episode.title().to_owned();
+                e.show = show.rating_key().to_string();
+                e.season = season.rating_key().to_string();
+                e.index = metadata.index.unwrap();
+            }
+            _ => panic!("Unexpected video type"),
+        }
     }
 }
 
