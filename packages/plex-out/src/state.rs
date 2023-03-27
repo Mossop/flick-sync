@@ -10,7 +10,7 @@ pub struct CollectionState {
     pub id: u32,
     pub title: String,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
-    pub items: HashSet<u32>,
+    pub items: HashSet<String>,
 }
 
 impl CollectionState {
@@ -33,7 +33,7 @@ pub struct PlaylistState {
     pub id: u32,
     pub title: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub videos: Vec<u32>,
+    pub videos: Vec<String>,
 }
 
 impl PlaylistState {
@@ -53,14 +53,14 @@ impl PlaylistState {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(tag = "type", content = "content", rename_all = "lowercase")]
 pub enum LibraryContent {
-    Movies(HashSet<u32>),
+    Movies(HashSet<String>),
     Shows(HashMap<String, ShowState>),
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryState {
-    pub id: u32,
+    pub id: String,
     pub title: String,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub collections: HashMap<String, CollectionState>,
@@ -73,7 +73,7 @@ impl LibraryState {
     pub fn add_movie(&mut self, movie: &Movie) {
         match self.content {
             LibraryContent::Movies(ref mut movies) => {
-                movies.insert(movie.rating_key());
+                movies.insert(movie.rating_key().to_string());
             }
             _ => panic!("Unexpected library type."),
         }
@@ -93,7 +93,9 @@ impl LibraryState {
                     .and_modify(|ss| ss.update_from_season(season))
                     .or_insert_with(|| SeasonState::from_season(season));
 
-                season_state.episodes.insert(episode.rating_key());
+                season_state
+                    .episodes
+                    .insert(episode.rating_key().to_string());
             }
             _ => panic!("Unexpected library type."),
         }
@@ -107,7 +109,7 @@ pub struct SeasonState {
     pub index: u32,
     pub title: String,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
-    pub episodes: HashSet<u32>,
+    pub episodes: HashSet<String>,
 }
 
 impl SeasonState {
@@ -178,6 +180,7 @@ fn is_zero(val: &u32) -> bool {
 pub struct VideoState {
     pub id: u32,
     pub title: String,
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub year: u32,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub index: u32,
@@ -224,7 +227,7 @@ impl VideoState {
         Self {
             id: episode.rating_key(),
             title,
-            year: metadata.year.unwrap(),
+            year: 0,
             index: metadata.index.unwrap(),
             video_type: VideoType::Episode,
             file_prefix,
@@ -234,7 +237,6 @@ impl VideoState {
     pub fn update_from_episode(&mut self, episode: &Episode) {
         let metadata = episode.metadata();
 
-        self.year = metadata.year.unwrap();
         self.title = episode.title().to_owned();
         self.video_type = VideoType::Episode;
         self.index = metadata.index.unwrap();
