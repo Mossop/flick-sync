@@ -21,10 +21,16 @@ pub enum Error {
     ServerExists,
     #[error("The server is no longer registered to this account")]
     MyPlexServerNotFound,
-    #[error("This server is no longer authenticated correctly. Try logging in again.")]
+    #[error("This server is no longer authenticated correctly. Try logging in again")]
     ServerNotAuthenticated,
+    #[error("Item {0} was not found on the server")]
+    ItemNotFound(u32),
+    #[error("Item {0} is not supported.")]
+    ItemNotSupported(u32),
+    #[error("Plex returned incomplete information for item {0}: {1}")]
+    ItemIncomplete(u32, String),
     #[error("Unknown error")]
-    Unknown,
+    Unknown(String),
 }
 
 impl From<Error> for String {

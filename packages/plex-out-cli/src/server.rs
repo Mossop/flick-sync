@@ -215,6 +215,12 @@ impl Runnable for List {
     async fn run(self, plexout: PlexOut, console: Console) -> Result {
         let servers = select_servers(&plexout, &self.ids).await?;
 
-        todo!();
+        for server in servers {
+            if let Err(e) = server.update_state().await {
+                log::error!("Failed to update server {}: {e}", server.id());
+            }
+        }
+
+        Ok(())
     }
 }

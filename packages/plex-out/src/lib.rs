@@ -119,6 +119,7 @@ impl PlexOut {
             id.to_owned(),
             ServerState {
                 token: server.client().x_plex_token().to_owned(),
+                ..Default::default()
             },
         );
 
