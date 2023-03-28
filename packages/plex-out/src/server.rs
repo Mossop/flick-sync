@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 
 use async_recursion::async_recursion;
 use plex_api::{
@@ -11,7 +8,8 @@ use plex_api::{
 
 use crate::{
     state::{
-        CollectionState, LibraryContent, LibraryState, PlaylistState, ServerState, VideoState,
+        CollectionState, LibraryState, PlaylistState, SeasonState, ServerState, ShowState,
+        VideoState,
     },
     Error, Inner, Result, ServerConnection,
 };
@@ -111,6 +109,7 @@ impl Server {
         let mut state = self.inner.state.write().await;
 
         let server_state = state.servers.entry(self.id.clone()).or_default();
+        server_state.name = server.media_container.friendly_name.clone();
 
         let mut state_sync = StateSync {
             server_state,
@@ -135,59 +134,75 @@ struct StateSync<'a> {
     server_state: &'a mut ServerState,
     server: plex_api::Server,
 
-    seen_items: HashSet<String>,
-    seen_libraries: HashSet<String>,
+    seen_items: HashSet<u32>,
+    seen_libraries: HashSet<u32>,
+}
+
+macro_rules! return_if_seen {
+    ($self:expr, $typ:expr) => {
+        if $self.seen_items.contains(&$typ.rating_key()) {
+            return Ok(());
+        }
+        $self.seen_items.insert($typ.rating_key());
+    };
 }
 
 impl<'a> StateSync<'a> {
-    fn add_seen<M: MetadataItem>(&mut self, item: &M) {
-        self.seen_items.insert(item.rating_key().to_string());
-    }
-
     fn add_movie(&mut self, movie: &Movie) -> Result {
-        let key = movie.rating_key().to_string();
-        if self.seen_items.contains(&key) {
-            return Ok(());
-        }
-        self.add_seen(movie);
+        return_if_seen!(self, movie);
 
         self.server_state
             .videos
-            .entry(key)
-            .and_modify(|video| video.update_from_movie(movie))
-            .or_insert_with(|| VideoState::from_movie(movie));
+            .entry(movie.rating_key())
+            .and_modify(|video| video.update(movie))
+            .or_insert_with(|| VideoState::from(movie));
 
-        let library = self.add_library(movie, || LibraryContent::Movies(HashSet::new()))?;
-        library.add_movie(movie);
+        self.add_library(movie)?;
 
         Ok(())
     }
 
-    fn add_episode(&mut self, show: &Show, season: &Season, episode: &Episode) -> Result {
-        let key = episode.rating_key().to_string();
-        if self.seen_items.contains(&key) {
-            return Ok(());
-        }
-        self.add_seen(episode);
-        self.add_seen(season);
-        self.add_seen(show);
+    fn add_episode(&mut self, episode: &Episode) -> Result {
+        return_if_seen!(self, episode);
 
         self.server_state
             .videos
-            .entry(key)
-            .and_modify(|video| video.update_from_episode(show, season, episode))
-            .or_insert_with(|| VideoState::from_episode(show, season, episode));
-
-        let library = self.add_library(show, || LibraryContent::Shows(HashMap::new()))?;
-        library.add_episode(show, season, episode);
+            .entry(episode.rating_key())
+            .and_modify(|video| video.update(episode))
+            .or_insert_with(|| VideoState::from(episode));
 
         Ok(())
     }
 
-    fn add_library<F, T>(&mut self, item: &T, cb: F) -> Result<&mut LibraryState>
+    fn add_season(&mut self, season: &Season) -> Result {
+        return_if_seen!(self, season);
+
+        self.server_state
+            .seasons
+            .entry(season.rating_key())
+            .and_modify(|ss| ss.update(season))
+            .or_insert_with(|| SeasonState::from(season));
+
+        Ok(())
+    }
+
+    fn add_show(&mut self, show: &Show) -> Result {
+        return_if_seen!(self, show);
+
+        self.server_state
+            .shows
+            .entry(show.rating_key())
+            .and_modify(|ss| ss.update(show))
+            .or_insert_with(|| ShowState::from(show));
+
+        self.add_library(show)?;
+
+        Ok(())
+    }
+
+    fn add_library<T>(&mut self, item: &T) -> Result<&mut LibraryState>
     where
         T: MetadataItem,
-        F: FnOnce() -> LibraryContent,
     {
         let library_id = item
             .metadata()
@@ -195,8 +210,7 @@ impl<'a> StateSync<'a> {
             .ok_or(Error::ItemIncomplete(
                 item.rating_key(),
                 "library ID was missing".to_string(),
-            ))?
-            .to_string();
+            ))?;
         let library_title =
             item.metadata()
                 .library_section_title
@@ -209,50 +223,40 @@ impl<'a> StateSync<'a> {
         let library = self
             .server_state
             .libraries
-            .entry(library_id.clone())
+            .entry(library_id)
             .and_modify(|l| l.title = library_title.clone())
             .or_insert_with(|| LibraryState {
+                id: library_id,
                 title: library_title.clone(),
-                collections: HashMap::new(),
-                content: cb(),
             });
         self.seen_libraries.insert(library_id);
 
         Ok(library)
     }
 
-    fn add_collection<T>(&mut self, collection: &Collection<T>, items: HashSet<String>) -> Result {
-        self.add_seen(collection);
+    fn add_collection<T>(&mut self, collection: &Collection<T>, items: HashSet<u32>) -> Result {
+        return_if_seen!(self, collection);
 
-        let library_id = collection
-            .metadata()
-            .library_section_id
-            .ok_or(Error::ItemIncomplete(
-                collection.rating_key(),
-                "library ID was missing".to_string(),
-            ))?
-            .to_string();
-
-        let library = self.server_state.libraries.get_mut(&library_id).unwrap();
-        let collection_state = library
+        let collection_state = self
+            .server_state
             .collections
-            .entry(collection.rating_key().to_string())
-            .and_modify(|cs| cs.update_from_collection(collection))
-            .or_insert_with(|| CollectionState::from_collection(collection));
+            .entry(collection.rating_key())
+            .and_modify(|cs| cs.update(collection))
+            .or_insert_with(|| CollectionState::from(collection));
         collection_state.items = items;
 
         Ok(())
     }
 
-    fn add_playlist(&mut self, playlist: &Playlist<Video>, videos: Vec<String>) -> Result {
-        self.add_seen(playlist);
+    fn add_playlist(&mut self, playlist: &Playlist<Video>, videos: Vec<u32>) -> Result {
+        return_if_seen!(self, playlist);
 
         let playlist_state = self
             .server_state
             .playlists
-            .entry(playlist.rating_key().to_string())
-            .and_modify(|ps| ps.update_from_playlist(playlist))
-            .or_insert_with(|| PlaylistState::from_playlist(playlist));
+            .entry(playlist.rating_key())
+            .and_modify(|ps| ps.update(playlist))
+            .or_insert_with(|| PlaylistState::from(playlist));
         playlist_state.videos = videos;
 
         Ok(())
@@ -268,31 +272,20 @@ impl<'a> StateSync<'a> {
             .retain(|k, _v| self.seen_items.contains(k));
 
         self.server_state
+            .collections
+            .retain(|k, _v| self.seen_items.contains(k));
+
+        self.server_state
+            .shows
+            .retain(|k, _v| self.seen_items.contains(k));
+
+        self.server_state
+            .seasons
+            .retain(|k, _v| self.seen_items.contains(k));
+
+        self.server_state
             .libraries
             .retain(|k, _v| self.seen_libraries.contains(k));
-
-        for library in self.server_state.libraries.values_mut() {
-            library
-                .collections
-                .retain(|k, _v| self.seen_items.contains(k));
-
-            match library.content {
-                LibraryContent::Movies(ref mut movies) => {
-                    movies.retain(|k| self.seen_items.contains(k));
-                }
-                LibraryContent::Shows(ref mut shows) => {
-                    shows.retain(|k, _v| self.seen_items.contains(k));
-
-                    for show in shows.values_mut() {
-                        show.seasons.retain(|k, _v| self.seen_items.contains(k));
-
-                        for season in show.seasons.values_mut() {
-                            season.episodes.retain(|k| self.seen_items.contains(k));
-                        }
-                    }
-                }
-            }
-        }
 
         Ok(())
     }
@@ -311,42 +304,73 @@ impl<'a> StateSync<'a> {
             Item::Movie(movie) => self.add_movie(&movie),
 
             Item::Show(show) => {
+                self.add_show(&show)?;
+
                 for season in show.seasons().await? {
+                    self.add_season(&season)?;
+
                     for episode in season.episodes().await? {
-                        self.add_episode(&show, &season, &episode)?;
+                        self.add_episode(&episode)?;
                     }
                 }
 
                 Ok(())
             }
             Item::Season(season) => {
-                let show = season.show().await?.ok_or_else(|| {
-                    Error::ItemIncomplete(season.rating_key(), "show was missing".to_string())
-                })?;
+                if !self
+                    .seen_items
+                    .contains(&season.metadata().parent.parent_rating_key.unwrap())
+                {
+                    let show = season.show().await?.ok_or_else(|| {
+                        Error::ItemIncomplete(season.rating_key(), "show was missing".to_string())
+                    })?;
+                    self.add_show(&show)?;
+                }
+
+                self.add_season(&season)?;
 
                 for episode in season.episodes().await? {
-                    self.add_episode(&show, &season, &episode)?;
+                    self.add_episode(&episode)?;
                 }
 
                 Ok(())
             }
             Item::Episode(episode) => {
-                let season = episode.season().await?.ok_or_else(|| {
-                    Error::ItemIncomplete(episode.rating_key(), "season was missing".to_string())
-                })?;
+                if !self
+                    .seen_items
+                    .contains(&episode.metadata().parent.parent_rating_key.unwrap())
+                {
+                    let season = episode.season().await?.ok_or_else(|| {
+                        Error::ItemIncomplete(
+                            episode.rating_key(),
+                            "season was missing".to_string(),
+                        )
+                    })?;
 
-                let show = season.show().await?.ok_or_else(|| {
-                    Error::ItemIncomplete(season.rating_key(), "show was missing".to_string())
-                })?;
+                    if !self
+                        .seen_items
+                        .contains(&season.metadata().parent.parent_rating_key.unwrap())
+                    {
+                        let show = season.show().await?.ok_or_else(|| {
+                            Error::ItemIncomplete(
+                                season.rating_key(),
+                                "show was missing".to_string(),
+                            )
+                        })?;
+                        self.add_show(&show)?;
+                    }
 
-                self.add_episode(&show, &season, &episode)
+                    self.add_season(&season)?;
+                }
+
+                self.add_episode(&episode)
             }
 
             Item::MovieCollection(collection) => {
                 let mut items = HashSet::new();
                 let movies = collection.children().await?;
                 for movie in movies {
-                    let key = movie.rating_key().to_string();
+                    let key = movie.rating_key();
                     match self.add_item(Item::Movie(movie)).await {
                         Ok(()) => {
                             items.insert(key);
@@ -361,7 +385,7 @@ impl<'a> StateSync<'a> {
                 let mut items = HashSet::new();
                 let shows = collection.children().await?;
                 for show in shows {
-                    let key = show.rating_key().to_string();
+                    let key = show.rating_key();
                     match self.add_item(Item::Show(show)).await {
                         Ok(()) => {
                             items.insert(key);
@@ -376,7 +400,7 @@ impl<'a> StateSync<'a> {
                 let mut items = Vec::new();
                 let videos = playlist.children().await?;
                 for video in videos {
-                    let key = video.rating_key().to_string();
+                    let key = video.rating_key();
                     let result = match video {
                         Video::Episode(episode) => self.add_item(Item::Episode(episode)).await,
                         Video::Movie(movie) => self.add_item(Item::Movie(movie)).await,
