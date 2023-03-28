@@ -61,7 +61,6 @@ pub struct LibraryState {
     pub collections: HashMap<String, CollectionState>,
     #[serde(flatten)]
     pub content: LibraryContent,
-    pub path: String,
 }
 
 impl LibraryState {
@@ -128,7 +127,6 @@ pub struct ShowState {
     pub year: u32,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub seasons: HashMap<String, SeasonState>,
-    pub path: String,
 }
 
 impl ShowState {
@@ -137,13 +135,11 @@ impl ShowState {
 
         let year = metadata.year.unwrap();
         let title = show.title().to_owned();
-        let path = format!("{title} ({year})");
 
         Self {
             title,
             year,
             seasons: Default::default(),
-            path,
         }
     }
 
@@ -164,6 +160,41 @@ pub struct MovieState {
     pub file_prefix: String,
 }
 
+impl MovieState {
+    fn generate_prefix(movie: &Movie) -> String {
+        let metadata = movie.metadata();
+
+        let library_id = metadata.library_section_id.unwrap().to_string();
+        let year = metadata.year.unwrap();
+        let title = movie.title().to_owned();
+        format!("{library_id}/{title} ({year})/{title} ({year})")
+    }
+
+    pub fn from_movie(movie: &Movie) -> Self {
+        let metadata = movie.metadata();
+
+        MovieState {
+            title: movie.title().to_owned(),
+            library: metadata.library_section_id.unwrap().to_string(),
+            year: metadata.year.unwrap(),
+            file_prefix: Self::generate_prefix(movie),
+        }
+    }
+
+    pub fn update_from_movie(&mut self, movie: &Movie) {
+        let metadata = movie.metadata();
+
+        self.year = metadata.year.unwrap();
+        self.title = movie.title().to_owned();
+
+        let prefix = Self::generate_prefix(movie);
+        if prefix != self.file_prefix {
+            log::warn!("File path for {} changed.", self.title);
+        }
+        self.file_prefix = prefix;
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct EpisodeState {
@@ -175,6 +206,48 @@ pub struct EpisodeState {
     pub file_prefix: String,
 }
 
+impl EpisodeState {
+    fn generate_prefix(show: &Show, episode: &Episode) -> String {
+        let metadata = episode.metadata();
+
+        let library_id = show.metadata().library_section_id.unwrap().to_string();
+        let show_title = show.title();
+        let show_year = show.metadata().year.unwrap();
+        let season_index = metadata.parent.parent_index.unwrap();
+        let index = metadata.index.unwrap();
+        let title = episode.title().to_owned();
+        format!("{library_id}/{show_title} ({show_year})/S{season_index:02}E{index:02} - {title}")
+    }
+
+    pub fn from_episode(show: &Show, season: &Season, episode: &Episode) -> Self {
+        let metadata = episode.metadata();
+
+        EpisodeState {
+            title: episode.title().to_owned(),
+            library: show.metadata().library_section_id.unwrap().to_string(),
+            show: show.rating_key().to_string(),
+            season: season.rating_key().to_string(),
+            index: metadata.index.unwrap(),
+            file_prefix: Self::generate_prefix(show, episode),
+        }
+    }
+
+    pub fn update_from_episode(&mut self, show: &Show, season: &Season, episode: &Episode) {
+        let metadata = episode.metadata();
+
+        self.title = episode.title().to_owned();
+        self.show = show.rating_key().to_string();
+        self.season = season.rating_key().to_string();
+        self.index = metadata.index.unwrap();
+
+        let prefix = Self::generate_prefix(show, episode);
+        if prefix != self.file_prefix {
+            log::warn!("File path for {} changed.", self.title);
+        }
+        self.file_prefix = prefix;
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum VideoState {
@@ -184,60 +257,24 @@ pub enum VideoState {
 
 impl VideoState {
     pub fn from_movie(movie: &Movie) -> Self {
-        let metadata = movie.metadata();
-
-        let year = metadata.year.unwrap();
-        let title = movie.title().to_owned();
-        let file_prefix = format!("{title} ({year})");
-
-        VideoState::Movie(MovieState {
-            title,
-            library: movie.metadata().library_section_id.unwrap().to_string(),
-            year,
-            file_prefix,
-        })
+        Self::Movie(MovieState::from_movie(movie))
     }
 
     pub fn update_from_movie(&mut self, movie: &Movie) {
-        let metadata = movie.metadata();
-
         match self {
-            Self::Movie(m) => {
-                m.year = metadata.year.unwrap();
-                m.title = movie.title().to_owned();
-            }
+            Self::Movie(m) => m.update_from_movie(movie),
             _ => panic!("Unexpected video type"),
         }
     }
 
     pub fn from_episode(show: &Show, season: &Season, episode: &Episode) -> Self {
-        let metadata = episode.metadata();
-
-        let season_index = metadata.parent.parent_index.unwrap();
-        let index = metadata.index.unwrap();
-
-        let title = episode.title().to_owned();
-        let file_prefix = format!("S{season_index:02}E{index:02} - {title}");
-
-        VideoState::Episode(EpisodeState {
-            title,
-            library: show.metadata().library_section_id.unwrap().to_string(),
-            show: show.rating_key().to_string(),
-            season: season.rating_key().to_string(),
-            index: metadata.index.unwrap(),
-            file_prefix,
-        })
+        VideoState::Episode(EpisodeState::from_episode(show, season, episode))
     }
 
     pub fn update_from_episode(&mut self, show: &Show, season: &Season, episode: &Episode) {
-        let metadata = episode.metadata();
-
         match self {
             Self::Episode(e) => {
-                e.title = episode.title().to_owned();
-                e.show = show.rating_key().to_string();
-                e.season = season.rating_key().to_string();
-                e.index = metadata.index.unwrap();
+                e.update_from_episode(show, season, episode);
             }
             _ => panic!("Unexpected video type"),
         }

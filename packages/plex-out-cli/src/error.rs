@@ -22,6 +22,8 @@ pub enum Error {
         #[from]
         source: plex_out::plex_api::Error,
     },
+    #[error("Unable to sync '{0}'")]
+    UnsupportedType(String),
     #[error("Unknown server {0}")]
     UnknownServer(String),
     #[error("{0}")]

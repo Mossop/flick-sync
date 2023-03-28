@@ -4,7 +4,7 @@ use plex_out::{
     plex_api::{
         self,
         device::{Device, DeviceConnection},
-        Feature, MetadataItem, MyPlexBuilder, Server,
+        Feature, Item, MetadataItem, MyPlexBuilder, Server,
     },
     PlexOut, ServerConnection,
 };
@@ -188,6 +188,19 @@ impl Runnable for Add {
             }
 
             let item = plex_server.item_by_id(rating_key).await?;
+            if matches!(
+                item,
+                Item::Photo(_)
+                    | Item::Artist(_)
+                    | Item::MusicAlbum(_)
+                    | Item::Track(_)
+                    | Item::PhotoPlaylist(_)
+                    | Item::MusicPlaylist(_)
+                    | Item::UnknownItem(_)
+            ) {
+                return Err(Error::UnsupportedType(item.title().to_owned()));
+            }
+
             console.println(format!(
                 "Adding '{}' to the sync list for {}",
                 item.title(),

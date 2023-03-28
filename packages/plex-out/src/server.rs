@@ -215,7 +215,6 @@ impl<'a> StateSync<'a> {
                 title: library_title.clone(),
                 collections: HashMap::new(),
                 content: cb(),
-                path: library_title,
             });
         self.seen_libraries.insert(library_id);
 
