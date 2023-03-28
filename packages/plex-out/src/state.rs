@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::path::Path;
 
-use plex_api::{Collection, Metadata, MetadataItem, MetadataType, Playlist, Season, Show};
+use plex_api::{Collection, Metadata, MetadataItem, MetadataType, Playlist, Season, Server, Show};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use time::OffsetDateTime;
+use tokio::fs;
 use uuid::Uuid;
 
 trait ListItem<T> {
@@ -18,13 +20,43 @@ macro_rules! derive_list_item {
             }
         }
     };
-    ($typ:ident<$gen:ident>) => {
-        impl<$gen> ListItem<u32> for $typ<$gen> {
-            fn id(&self) -> u32 {
-                self.id
+}
+
+#[derive(Deserialize, Default, Serialize, Clone, Debug)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum ThumbnailState {
+    #[default]
+    None,
+    #[serde(rename_all = "camelCase")]
+    Downloaded {
+        last_updated: OffsetDateTime,
+        path: String,
+    },
+}
+
+impl ThumbnailState {
+    fn is_none(&self) -> bool {
+        matches!(self, ThumbnailState::None)
+    }
+
+    pub async fn delete_stale(&mut self, root: &Path, if_older: Option<OffsetDateTime>) {
+        if let ThumbnailState::Downloaded { last_updated, path } = self {
+            if let Some(ref dt) = if_older {
+                if dt <= last_updated {
+                    return;
+                }
             }
+
+            log::trace!("Removing old thumbnail file '{path}'");
+            let file = root.join(path);
+
+            if let Err(e) = fs::remove_file(&file).await {
+                log::warn!("Failed to remove file {}: {e}", file.display());
+            }
+
+            *self = ThumbnailState::None;
         }
-    };
+    }
 }
 
 fn from_list<'de, D, K, V>(deserializer: D) -> Result<HashMap<K, V>, D::Error>
@@ -56,6 +88,8 @@ pub struct CollectionState {
     pub title: String,
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub items: HashSet<u32>,
+    #[serde(default, skip_serializing_if = "ThumbnailState::is_none")]
+    pub thumbnail: ThumbnailState,
 }
 
 derive_list_item!(CollectionState);
@@ -67,6 +101,7 @@ impl CollectionState {
             library: collection.metadata().library_section_id.unwrap(),
             title: collection.title().to_owned(),
             items: Default::default(),
+            thumbnail: Default::default(),
         }
     }
 
@@ -82,6 +117,8 @@ pub struct PlaylistState {
     pub title: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub videos: Vec<u32>,
+    #[serde(default, skip_serializing_if = "ThumbnailState::is_none")]
+    pub thumbnail: ThumbnailState,
 }
 
 derive_list_item!(PlaylistState);
@@ -92,6 +129,7 @@ impl PlaylistState {
             id: playlist.rating_key(),
             title: playlist.title().to_owned(),
             videos: Default::default(),
+            thumbnail: Default::default(),
         }
     }
 
@@ -116,8 +154,6 @@ pub struct SeasonState {
     pub show: u32,
     pub index: u32,
     pub title: String,
-    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
-    pub episodes: HashSet<String>,
 }
 
 derive_list_item!(SeasonState);
@@ -131,7 +167,6 @@ impl SeasonState {
             show: metadata.parent.parent_rating_key.unwrap(),
             index: metadata.index.unwrap(),
             title: season.title().to_owned(),
-            episodes: Default::default(),
         }
     }
 
@@ -151,8 +186,8 @@ pub struct ShowState {
     pub library: u32,
     pub title: String,
     pub year: u32,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub seasons: HashMap<String, SeasonState>,
+    #[serde(default, skip_serializing_if = "ThumbnailState::is_none")]
+    pub thumbnail: ThumbnailState,
 }
 
 derive_list_item!(ShowState);
@@ -169,7 +204,7 @@ impl ShowState {
             library: metadata.library_section_id.unwrap(),
             title,
             year,
-            seasons: Default::default(),
+            thumbnail: Default::default(),
         }
     }
 
@@ -254,23 +289,47 @@ impl DownloadState {
     fn is_none(&self) -> bool {
         matches!(self, DownloadState::None)
     }
-}
 
-#[derive(Deserialize, Default, Serialize, Clone, Debug)]
-#[serde(tag = "state", rename_all = "camelCase")]
-pub enum ThumbnailState {
-    #[default]
-    None,
-    #[serde(rename_all = "camelCase")]
-    Downloaded {
-        last_updated: OffsetDateTime,
-        path: String,
-    },
-}
+    pub async fn delete_stale(
+        &mut self,
+        server: &Server,
+        root: &Path,
+        if_older: Option<OffsetDateTime>,
+    ) {
+        let (last_updated, path, session_id) = match self {
+            DownloadState::None => return,
+            DownloadState::Downloading { last_updated, path } => (last_updated, path, None),
+            DownloadState::Transcoding {
+                last_updated,
+                session_id,
+                path,
+            } => (last_updated, path, Some(session_id)),
+            DownloadState::Downloaded { last_updated, path } => (last_updated, path, None),
+            DownloadState::Transcoded { last_updated, path } => (last_updated, path, None),
+        };
 
-impl ThumbnailState {
-    fn is_none(&self) -> bool {
-        matches!(self, ThumbnailState::None)
+        if let Some(ref dt) = if_older {
+            if dt <= last_updated {
+                return;
+            }
+        }
+
+        log::trace!("Removing old video file '{path}'");
+        let file = root.join(path);
+
+        if let Err(e) = fs::remove_file(&file).await {
+            log::warn!("Failed to remove file {}: {e}", file.display());
+        }
+
+        if let Some(session_id) = session_id {
+            if let Ok(session) = server.transcode_session(session_id).await {
+                if let Err(e) = session.cancel().await {
+                    log::warn!("Failed to cancel stale transcode session: {e}");
+                }
+            }
+        }
+
+        *self = DownloadState::None;
     }
 }
 
@@ -307,8 +366,8 @@ impl VideoState {
             id: item.rating_key(),
             title: item.title().to_owned(),
             detail,
-            thumbnail: ThumbnailState::None,
-            download: DownloadState::None,
+            thumbnail: Default::default(),
+            download: Default::default(),
         }
     }
 
@@ -320,6 +379,16 @@ impl VideoState {
             VideoDetail::Movie(ref mut m) => m.update(metadata),
             VideoDetail::Episode(ref mut e) => e.update(metadata),
         }
+    }
+
+    pub async fn delete_stale(
+        &mut self,
+        server: &Server,
+        root: &Path,
+        if_older: Option<OffsetDateTime>,
+    ) {
+        self.thumbnail.delete_stale(root, if_older).await;
+        self.download.delete_stale(server, root, if_older).await;
     }
 }
 

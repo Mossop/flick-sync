@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, path::Path, sync::Arc};
 
 use async_recursion::async_recursion;
 use plex_api::{
@@ -111,20 +111,26 @@ impl Server {
         let server_state = state.servers.entry(self.id.clone()).or_default();
         server_state.name = server.media_container.friendly_name.clone();
 
-        let mut state_sync = StateSync {
-            server_state,
-            server,
-            seen_items: Default::default(),
-            seen_libraries: Default::default(),
-        };
+        {
+            // Scope the write lock on the path.
+            let root = self.inner.path.write().await;
 
-        for key in &server_config.syncs {
-            if let Err(e) = state_sync.add_item_by_key(*key).await {
-                log::warn!("Failed to update item: {e}");
+            let mut state_sync = StateSync {
+                server_state,
+                server,
+                root: &root,
+                seen_items: Default::default(),
+                seen_libraries: Default::default(),
+            };
+
+            for key in &server_config.syncs {
+                if let Err(e) = state_sync.add_item_by_key(*key).await {
+                    log::warn!("Failed to update item: {e}");
+                }
             }
-        }
 
-        state_sync.prune_unseen().await?;
+            state_sync.prune_unseen().await?;
+        }
 
         self.inner.persist_state(&state).await
     }
@@ -133,6 +139,7 @@ impl Server {
 struct StateSync<'a> {
     server_state: &'a mut ServerState,
     server: plex_api::Server,
+    root: &'a Path,
 
     seen_items: HashSet<u32>,
     seen_libraries: HashSet<u32>,
@@ -148,28 +155,42 @@ macro_rules! return_if_seen {
 }
 
 impl<'a> StateSync<'a> {
-    fn add_movie(&mut self, movie: &Movie) -> Result {
+    async fn add_movie(&mut self, movie: &Movie) -> Result {
         return_if_seen!(self, movie);
 
-        self.server_state
+        let video = self
+            .server_state
             .videos
             .entry(movie.rating_key())
             .and_modify(|video| video.update(movie))
             .or_insert_with(|| VideoState::from(movie));
+
+        if let Some(updated) = movie.metadata().updated_at {
+            video
+                .delete_stale(&self.server, self.root, Some(updated))
+                .await;
+        }
 
         self.add_library(movie)?;
 
         Ok(())
     }
 
-    fn add_episode(&mut self, episode: &Episode) -> Result {
+    async fn add_episode(&mut self, episode: &Episode) -> Result {
         return_if_seen!(self, episode);
 
-        self.server_state
+        let video = self
+            .server_state
             .videos
             .entry(episode.rating_key())
             .and_modify(|video| video.update(episode))
             .or_insert_with(|| VideoState::from(episode));
+
+        if let Some(updated) = episode.metadata().updated_at {
+            video
+                .delete_stale(&self.server, self.root, Some(updated))
+                .await;
+        }
 
         Ok(())
     }
@@ -186,14 +207,22 @@ impl<'a> StateSync<'a> {
         Ok(())
     }
 
-    fn add_show(&mut self, show: &Show) -> Result {
+    async fn add_show(&mut self, show: &Show) -> Result {
         return_if_seen!(self, show);
 
-        self.server_state
+        let show_state = self
+            .server_state
             .shows
             .entry(show.rating_key())
             .and_modify(|ss| ss.update(show))
             .or_insert_with(|| ShowState::from(show));
+
+        if let Some(updated) = show.metadata().updated_at {
+            show_state
+                .thumbnail
+                .delete_stale(self.root, Some(updated))
+                .await;
+        }
 
         self.add_library(show)?;
 
@@ -263,6 +292,44 @@ impl<'a> StateSync<'a> {
     }
 
     async fn prune_unseen(&mut self) -> Result {
+        log::info!("Pruning old items");
+
+        for video in self
+            .server_state
+            .videos
+            .values_mut()
+            .filter(|v| !self.seen_items.contains(&v.id))
+        {
+            video.delete_stale(&self.server, self.root, None).await;
+        }
+
+        for collection in self
+            .server_state
+            .collections
+            .values_mut()
+            .filter(|v| !self.seen_items.contains(&v.id))
+        {
+            collection.thumbnail.delete_stale(self.root, None).await;
+        }
+
+        for playlist in self
+            .server_state
+            .playlists
+            .values_mut()
+            .filter(|v| !self.seen_items.contains(&v.id))
+        {
+            playlist.thumbnail.delete_stale(self.root, None).await;
+        }
+
+        for show in self
+            .server_state
+            .shows
+            .values_mut()
+            .filter(|v| !self.seen_items.contains(&v.id))
+        {
+            show.thumbnail.delete_stale(self.root, None).await;
+        }
+
         self.server_state
             .videos
             .retain(|k, _v| self.seen_items.contains(k));
@@ -301,22 +368,30 @@ impl<'a> StateSync<'a> {
     #[async_recursion]
     async fn add_item(&mut self, item: Item) -> Result {
         match item {
-            Item::Movie(movie) => self.add_movie(&movie),
+            Item::Movie(movie) => {
+                log::debug!("Syncing movie '{}' metadata", movie.title());
+
+                self.add_movie(&movie).await
+            }
 
             Item::Show(show) => {
-                self.add_show(&show)?;
+                log::debug!("Syncing show '{}' metadata", show.title());
+
+                self.add_show(&show).await?;
 
                 for season in show.seasons().await? {
                     self.add_season(&season)?;
 
                     for episode in season.episodes().await? {
-                        self.add_episode(&episode)?;
+                        self.add_episode(&episode).await?;
                     }
                 }
 
                 Ok(())
             }
             Item::Season(season) => {
+                log::debug!("Syncing season '{}' metadata", season.title());
+
                 if !self
                     .seen_items
                     .contains(&season.metadata().parent.parent_rating_key.unwrap())
@@ -324,18 +399,20 @@ impl<'a> StateSync<'a> {
                     let show = season.show().await?.ok_or_else(|| {
                         Error::ItemIncomplete(season.rating_key(), "show was missing".to_string())
                     })?;
-                    self.add_show(&show)?;
+                    self.add_show(&show).await?;
                 }
 
                 self.add_season(&season)?;
 
                 for episode in season.episodes().await? {
-                    self.add_episode(&episode)?;
+                    self.add_episode(&episode).await?;
                 }
 
                 Ok(())
             }
             Item::Episode(episode) => {
+                log::debug!("Syncing episode '{}' metadata", episode.title());
+
                 if !self
                     .seen_items
                     .contains(&episode.metadata().parent.parent_rating_key.unwrap())
@@ -357,16 +434,18 @@ impl<'a> StateSync<'a> {
                                 "show was missing".to_string(),
                             )
                         })?;
-                        self.add_show(&show)?;
+                        self.add_show(&show).await?;
                     }
 
                     self.add_season(&season)?;
                 }
 
-                self.add_episode(&episode)
+                self.add_episode(&episode).await
             }
 
             Item::MovieCollection(collection) => {
+                log::debug!("Syncing collection '{}' metadata", collection.title());
+
                 let mut items = HashSet::new();
                 let movies = collection.children().await?;
                 for movie in movies {
@@ -382,6 +461,8 @@ impl<'a> StateSync<'a> {
                 self.add_collection(&collection, items)
             }
             Item::ShowCollection(collection) => {
+                log::debug!("Syncing collection '{}' metadata", collection.title());
+
                 let mut items = HashSet::new();
                 let shows = collection.children().await?;
                 for show in shows {
@@ -397,6 +478,8 @@ impl<'a> StateSync<'a> {
                 self.add_collection(&collection, items)
             }
             Item::VideoPlaylist(playlist) => {
+                log::debug!("Syncing playlist '{}' metadata", playlist.title());
+
                 let mut items = Vec::new();
                 let videos = playlist.children().await?;
                 for video in videos {
