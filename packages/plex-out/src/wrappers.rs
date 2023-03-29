@@ -93,28 +93,34 @@ macro_rules! thumbnail_methods {
                 let server = self.connect().await?;
                 let item = server.item_by_id(self.id).await?;
                 log::debug!("Updating thumbnail for {}", item.title());
-                if let Some(ref thumb) = item.metadata().thumb {
-                    let root = self.inner.path.read().await;
-                    let path = self.file_path("jpg").await;
-                    let target = root.join(&path);
 
-                    if let Some(parent) = target.parent() {
-                        create_dir_all(parent).await?;
-                    }
+                let image = if let Some(ref thumb) = item.metadata().thumb {
+                    thumb.clone()
+                } else {
+                    log::warn!("No thumbnail found for {}", item.title());
+                    return Ok(());
+                };
 
-                    let file = File::create(root.join(&path)).await?;
-                    server
-                        .transcode_artwork(thumb, 320, 320, Default::default(), file)
-                        .await?;
+                let root = self.inner.path.read().await;
+                let path = self.file_path("jpg").await;
+                let target = root.join(&path);
 
-                    let state = ThumbnailState::Downloaded {
-                        last_updated: item.metadata().updated_at.unwrap(),
-                        path,
-                    };
-
-                    self.update_state(|s| s.thumbnail = state).await?;
-                    log::trace!("Thumbnail for {} successfully updated", item.title());
+                if let Some(parent) = target.parent() {
+                    create_dir_all(parent).await?;
                 }
+
+                let file = File::create(root.join(&path)).await?;
+                server
+                    .transcode_artwork(&image, 320, 320, Default::default(), file)
+                    .await?;
+
+                let state = ThumbnailState::Downloaded {
+                    last_updated: item.metadata().updated_at.unwrap(),
+                    path,
+                };
+
+                self.update_state(|s| s.thumbnail = state).await?;
+                log::trace!("Thumbnail for {} successfully updated", item.title());
             }
 
             Ok(())
@@ -334,8 +340,6 @@ pub struct Playlist {
 state_wrapper!(Playlist, PlaylistState, playlists);
 
 impl Playlist {
-    thumbnail_methods!();
-
     pub async fn videos(&self) -> Vec<Video> {
         self.with_server_state(|ss| {
             let ps = ss.playlists.get(&self.id).unwrap();
@@ -354,15 +358,6 @@ impl Playlist {
                     }),
                 })
                 .collect()
-        })
-        .await
-    }
-
-    async fn file_path(&self, extension: &str) -> PathBuf {
-        self.with_server_state(|ss| {
-            let state = ss.playlists.get(&self.id).unwrap();
-
-            PathBuf::from(safe(format!("{}.{extension}", state.title)))
         })
         .await
     }

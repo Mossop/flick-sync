@@ -138,8 +138,6 @@ pub struct PlaylistState {
     pub title: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub videos: Vec<u32>,
-    #[serde(default, skip_serializing_if = "ThumbnailState::is_none")]
-    pub thumbnail: ThumbnailState,
 }
 
 derive_list_item!(PlaylistState);
@@ -150,7 +148,6 @@ impl PlaylistState {
             id: playlist.rating_key(),
             title: playlist.title().to_owned(),
             videos: Default::default(),
-            thumbnail: Default::default(),
         }
     }
 

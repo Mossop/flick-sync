@@ -183,12 +183,6 @@ impl Server {
     pub async fn update_thumbnails(&self) -> Result {
         log::info!("Updating thumbnails");
 
-        for playlist in self.playlists().await {
-            if let Err(e) = playlist.update_thumbnail().await {
-                log::warn!("{e}");
-            }
-        }
-
         for library in self.libraries().await {
             for collection in library.collections().await {
                 if let Err(e) = collection.update_thumbnail().await {
@@ -407,15 +401,6 @@ impl<'a> StateSync<'a> {
             .filter(|v| !self.seen_items.contains(&v.id))
         {
             collection.thumbnail.delete_stale(self.root, None).await;
-        }
-
-        for playlist in self
-            .server_state
-            .playlists
-            .values_mut()
-            .filter(|v| !self.seen_items.contains(&v.id))
-        {
-            playlist.thumbnail.delete_stale(self.root, None).await;
         }
 
         for show in self
