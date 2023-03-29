@@ -9,6 +9,7 @@ mod config;
 mod error;
 mod server;
 mod state;
+mod wrappers;
 
 pub use config::ServerConnection;
 use config::{Config, ServerConfig};
@@ -18,11 +19,13 @@ use plex_api::{HttpClient, HttpClientBuilder};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{from_str, to_string_pretty};
 pub use server::Server;
+pub use state::{DownloadState, ThumbnailState};
 use state::{ServerState, State};
 use tokio::{
     fs::{read_to_string, write},
     sync::{RwLock, RwLockWriteGuard},
 };
+pub use wrappers::*;
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 

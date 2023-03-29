@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use plex_api::{Collection, Metadata, MetadataItem, MetadataType, Playlist, Season, Server, Show};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -29,13 +29,14 @@ pub enum ThumbnailState {
     None,
     #[serde(rename_all = "camelCase")]
     Downloaded {
+        #[serde(with = "time::serde::timestamp")]
         last_updated: OffsetDateTime,
-        path: String,
+        path: PathBuf,
     },
 }
 
 impl ThumbnailState {
-    fn is_none(&self) -> bool {
+    pub fn is_none(&self) -> bool {
         matches!(self, ThumbnailState::None)
     }
 
@@ -47,7 +48,7 @@ impl ThumbnailState {
                 }
             }
 
-            log::trace!("Removing old thumbnail file '{path}'");
+            log::trace!("Removing old thumbnail file '{}'", path.display());
             let file = root.join(path);
 
             if let Err(e) = fs::remove_file(&file).await {
@@ -138,11 +139,19 @@ impl PlaylistState {
     }
 }
 
+#[derive(Deserialize, Serialize, Clone, Copy, Debug)]
+pub enum LibraryType {
+    Movie,
+    Show,
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryState {
     pub id: u32,
     pub title: String,
+    #[serde(rename = "type")]
+    pub library_type: LibraryType,
 }
 
 derive_list_item!(LibraryState);
@@ -219,14 +228,14 @@ impl ShowState {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct MovieState {
-    pub library: String,
+    pub library: u32,
     pub year: u32,
 }
 
 impl MovieState {
     pub fn from(metadata: &Metadata) -> Self {
         MovieState {
-            library: metadata.library_section_id.unwrap().to_string(),
+            library: metadata.library_section_id.unwrap(),
             year: metadata.year.unwrap(),
         }
     }
@@ -264,24 +273,28 @@ pub enum DownloadState {
     None,
     #[serde(rename_all = "camelCase")]
     Downloading {
+        #[serde(with = "time::serde::timestamp")]
         last_updated: OffsetDateTime,
-        path: String,
+        path: PathBuf,
     },
     #[serde(rename_all = "camelCase")]
     Transcoding {
+        #[serde(with = "time::serde::timestamp")]
         last_updated: OffsetDateTime,
         session_id: String,
-        path: String,
+        path: PathBuf,
     },
     #[serde(rename_all = "camelCase")]
     Downloaded {
+        #[serde(with = "time::serde::timestamp")]
         last_updated: OffsetDateTime,
-        path: String,
+        path: PathBuf,
     },
     #[serde(rename_all = "camelCase")]
     Transcoded {
+        #[serde(with = "time::serde::timestamp")]
         last_updated: OffsetDateTime,
-        path: String,
+        path: PathBuf,
     },
 }
 
@@ -314,7 +327,7 @@ impl DownloadState {
             }
         }
 
-        log::trace!("Removing old video file '{path}'");
+        log::trace!("Removing old video file '{}'", path.display());
         let file = root.join(path);
 
         if let Err(e) = fs::remove_file(&file).await {
@@ -354,6 +367,20 @@ pub struct VideoState {
 derive_list_item!(VideoState);
 
 impl VideoState {
+    pub fn movie_state(&self) -> &MovieState {
+        match self.detail {
+            VideoDetail::Movie(ref m) => m,
+            VideoDetail::Episode(_) => panic!("Unexpected type"),
+        }
+    }
+
+    pub fn episode_state(&self) -> &EpisodeState {
+        match self.detail {
+            VideoDetail::Movie(_) => panic!("Unexpected type"),
+            VideoDetail::Episode(ref e) => e,
+        }
+    }
+
     pub fn from<M: MetadataItem>(item: &M) -> Self {
         let metadata = item.metadata();
         let detail = match metadata.metadata_type {

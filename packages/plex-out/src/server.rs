@@ -2,16 +2,16 @@ use std::{collections::HashSet, path::Path, sync::Arc};
 
 use async_recursion::async_recursion;
 use plex_api::{
-    device::DeviceConnection, Collection, Episode, Item, MetadataItem, Movie, MyPlexBuilder,
-    Playlist, Season, Show, Video,
+    device::DeviceConnection, Collection, Episode, Item, MetadataItem, MetadataType, Movie,
+    MyPlexBuilder, Playlist, Season, Show, Video,
 };
 
 use crate::{
     state::{
-        CollectionState, LibraryState, PlaylistState, SeasonState, ServerState, ShowState,
-        VideoState,
+        CollectionState, LibraryState, LibraryType, PlaylistState, SeasonState, ServerState,
+        ShowState, VideoState,
     },
-    Error, Inner, Result, ServerConnection,
+    wrappers, Error, Inner, Result, ServerConnection,
 };
 
 #[derive(Clone)]
@@ -24,6 +24,45 @@ impl Server {
     /// The PlexOut identifier for this server.
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    pub async fn libraries(&self) -> Vec<wrappers::Library> {
+        let state = self.inner.state.read().await;
+        state
+            .servers
+            .get(&self.id)
+            .unwrap()
+            .libraries
+            .iter()
+            .map(|(id, ls)| match ls.library_type {
+                LibraryType::Movie => wrappers::Library::Movie(wrappers::MovieLibrary {
+                    server: self.id.clone(),
+                    id: *id,
+                    inner: self.inner.clone(),
+                }),
+                LibraryType::Show => wrappers::Library::Show(wrappers::ShowLibrary {
+                    server: self.id.clone(),
+                    id: *id,
+                    inner: self.inner.clone(),
+                }),
+            })
+            .collect()
+    }
+
+    pub async fn playlists(&self) -> Vec<wrappers::Playlist> {
+        let state = self.inner.state.read().await;
+        state
+            .servers
+            .get(&self.id)
+            .unwrap()
+            .playlists
+            .keys()
+            .map(|id| wrappers::Playlist {
+                server: self.id.clone(),
+                id: *id,
+                inner: self.inner.clone(),
+            })
+            .collect()
     }
 
     /// Connects to the Plex API for this server.
@@ -249,6 +288,12 @@ impl<'a> StateSync<'a> {
                     "library title was missing".to_string(),
                 ))?;
 
+        let library_type = match item.metadata().metadata_type.as_ref().unwrap() {
+            MetadataType::Movie => LibraryType::Movie,
+            MetadataType::Show => LibraryType::Show,
+            _ => panic!("Unknown library type"),
+        };
+
         let library = self
             .server_state
             .libraries
@@ -257,6 +302,7 @@ impl<'a> StateSync<'a> {
             .or_insert_with(|| LibraryState {
                 id: library_id,
                 title: library_title.clone(),
+                library_type,
             });
         self.seen_libraries.insert(library_id);
 
