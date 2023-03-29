@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
-use async_std::fs::File;
+use async_std::fs::{create_dir_all, File};
 use async_trait::async_trait;
 use plex_api::MetadataItem;
 
@@ -92,9 +92,16 @@ macro_rules! thumbnail_methods {
             if self.thumbnail().await.is_none() {
                 let server = self.connect().await?;
                 let item = server.item_by_id(self.id).await?;
+                log::debug!("Updating thumbnail for {}", item.title());
                 if let Some(ref thumb) = item.metadata().thumb {
                     let root = self.inner.path.read().await;
                     let path = self.file_path("jpg").await;
+                    let target = root.join(&path);
+
+                    if let Some(parent) = target.parent() {
+                        create_dir_all(parent).await?;
+                    }
+
                     let file = File::create(root.join(&path)).await?;
                     server
                         .transcode_artwork(thumb, 320, 320, Default::default(), file)
@@ -106,6 +113,7 @@ macro_rules! thumbnail_methods {
                     };
 
                     self.update_state(|s| s.thumbnail = state).await?;
+                    log::trace!("Thumbnail for {} successfully updated", item.title());
                 }
             }
 
@@ -191,7 +199,30 @@ state_wrapper!(Season, SeasonState, seasons);
 
 impl Season {
     parent!(show, Show, show);
-    children!(episodes, videos, Episode, episode_state().season);
+
+    pub async fn episodes(&self) -> Vec<Episode> {
+        self.with_server_state(|ss| {
+            ss.videos
+                .iter()
+                .filter_map(|(id, s)| {
+                    if let VideoDetail::Episode(ref detail) = s.detail {
+                        if detail.season == self.id {
+                            Some(Episode {
+                                server: self.server.clone(),
+                                id: *id,
+                                inner: self.inner.clone(),
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .await
+    }
 }
 
 #[derive(Clone)]
@@ -253,10 +284,12 @@ impl Movie {
             let m_state = state.movie_state();
             let library_title = &ss.libraries.get(&m_state.library).unwrap().title;
 
-            PathBuf::from(safe(library_title)).join(safe(format!(
-                "{} ({}).{extension}",
-                state.title, m_state.year
-            )))
+            PathBuf::from(safe(library_title))
+                .join(safe(format!("{} ({})", state.title, m_state.year)))
+                .join(safe(format!(
+                    "{} ({}).{extension}",
+                    state.title, m_state.year
+                )))
         })
         .await
     }
@@ -444,7 +477,30 @@ state_wrapper!(MovieLibrary, LibraryState, libraries);
 
 impl MovieLibrary {
     children!(collections, collections, MovieCollection, library);
-    children!(movies, videos, Movie, movie_state().library);
+
+    pub async fn movies(&self) -> Vec<Movie> {
+        self.with_server_state(|ss| {
+            ss.videos
+                .iter()
+                .filter_map(|(id, s)| {
+                    if let VideoDetail::Movie(ref detail) = s.detail {
+                        if detail.library == self.id {
+                            Some(Movie {
+                                server: self.server.clone(),
+                                id: *id,
+                                inner: self.inner.clone(),
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .await
+    }
 }
 
 #[derive(Clone)]

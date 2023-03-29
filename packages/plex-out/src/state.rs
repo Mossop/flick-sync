@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use plex_api::{Collection, Metadata, MetadataItem, MetadataType, Playlist, Season, Server, Show};
@@ -42,6 +43,26 @@ impl ThumbnailState {
 
     pub async fn delete_stale(&mut self, root: &Path, if_older: Option<OffsetDateTime>) {
         if let ThumbnailState::Downloaded { last_updated, path } = self {
+            let file = root.join(&path);
+
+            match fs::metadata(&file).await {
+                Ok(stats) => {
+                    if !stats.is_file() {
+                        log::error!("'{}' was expected to be a file", path.display());
+                        return;
+                    }
+                }
+                Err(e) => {
+                    if e.kind() == ErrorKind::NotFound {
+                        *self = ThumbnailState::None;
+                    } else {
+                        log::error!("Error accessing thumbnail '{}': {e}", path.display());
+                    }
+
+                    return;
+                }
+            }
+
             if let Some(ref dt) = if_older {
                 if dt <= last_updated {
                     return;
@@ -49,7 +70,6 @@ impl ThumbnailState {
             }
 
             log::trace!("Removing old thumbnail file '{}'", path.display());
-            let file = root.join(path);
 
             if let Err(e) = fs::remove_file(&file).await {
                 log::warn!("Failed to remove file {}: {e}", file.display());
@@ -321,6 +341,26 @@ impl DownloadState {
             DownloadState::Transcoded { last_updated, path } => (last_updated, path, None),
         };
 
+        let file = root.join(&path);
+
+        match fs::metadata(&file).await {
+            Ok(stats) => {
+                if !stats.is_file() {
+                    log::error!("'{}' was expected to be a file", path.display());
+                    return;
+                }
+            }
+            Err(e) => {
+                if e.kind() == ErrorKind::NotFound {
+                    *self = DownloadState::None;
+                } else {
+                    log::error!("Error accessing file '{}': {e}", path.display());
+                }
+
+                return;
+            }
+        }
+
         if let Some(ref dt) = if_older {
             if dt <= last_updated {
                 return;
@@ -328,7 +368,6 @@ impl DownloadState {
         }
 
         log::trace!("Removing old video file '{}'", path.display());
-        let file = root.join(path);
 
         if let Err(e) = fs::remove_file(&file).await {
             log::warn!("Failed to remove file {}: {e}", file.display());

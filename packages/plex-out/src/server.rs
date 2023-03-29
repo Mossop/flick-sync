@@ -11,7 +11,7 @@ use crate::{
         CollectionState, LibraryState, LibraryType, PlaylistState, SeasonState, ServerState,
         ShowState, VideoState,
     },
-    wrappers, Error, Inner, Result, ServerConnection,
+    wrappers, Error, Inner, Library, Result, ServerConnection,
 };
 
 #[derive(Clone)]
@@ -140,38 +140,89 @@ impl Server {
 
     /// Updates the state for the synced items
     pub async fn update_state(&self) -> Result {
+        log::info!("Updating item metadata");
         let server = self.connect().await?;
 
         let config = self.inner.config.read().await;
         let server_config = config.servers.get(&self.id).unwrap();
 
-        let mut state = self.inner.state.write().await;
-
-        let server_state = state.servers.entry(self.id.clone()).or_default();
-        server_state.name = server.media_container.friendly_name.clone();
-
         {
-            // Scope the write lock on the path.
-            let root = self.inner.path.write().await;
+            let mut state = self.inner.state.write().await;
 
-            let mut state_sync = StateSync {
-                server_state,
-                server,
-                root: &root,
-                seen_items: Default::default(),
-                seen_libraries: Default::default(),
-            };
+            let server_state = state.servers.entry(self.id.clone()).or_default();
+            server_state.name = server.media_container.friendly_name.clone();
 
-            for key in &server_config.syncs {
-                if let Err(e) = state_sync.add_item_by_key(*key).await {
-                    log::warn!("Failed to update item: {e}");
+            {
+                // Scope the write lock on the path.
+                let root = self.inner.path.write().await;
+
+                let mut state_sync = StateSync {
+                    server_state,
+                    server,
+                    root: &root,
+                    seen_items: Default::default(),
+                    seen_libraries: Default::default(),
+                };
+
+                for key in &server_config.syncs {
+                    if let Err(e) = state_sync.add_item_by_key(*key).await {
+                        log::warn!("Failed to update item: {e}");
+                    }
+                }
+
+                state_sync.prune_unseen().await?;
+            }
+
+            self.inner.persist_state(&state).await?;
+        }
+
+        self.update_thumbnails().await
+    }
+
+    /// Updates thumbnails for synced items.
+    pub async fn update_thumbnails(&self) -> Result {
+        log::info!("Updating thumbnails");
+
+        for playlist in self.playlists().await {
+            if let Err(e) = playlist.update_thumbnail().await {
+                log::warn!("{e}");
+            }
+        }
+
+        for library in self.libraries().await {
+            for collection in library.collections().await {
+                if let Err(e) = collection.update_thumbnail().await {
+                    log::warn!("{e}");
                 }
             }
 
-            state_sync.prune_unseen().await?;
+            match library {
+                Library::Movie(l) => {
+                    for video in l.movies().await {
+                        if let Err(e) = video.update_thumbnail().await {
+                            log::warn!("{e}");
+                        }
+                    }
+                }
+                Library::Show(l) => {
+                    for show in l.shows().await {
+                        if let Err(e) = show.update_thumbnail().await {
+                            log::warn!("{e}");
+                        }
+
+                        for season in show.seasons().await {
+                            for video in season.episodes().await {
+                                if let Err(e) = video.update_thumbnail().await {
+                                    log::warn!("{e}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        self.inner.persist_state(&state).await
+        Ok(())
     }
 }
 
