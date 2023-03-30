@@ -4,7 +4,9 @@ use plex_out::{
     plex_api::{
         self,
         device::{Device, DeviceConnection},
-        Feature, Item, MetadataItem, MyPlexBuilder, Server,
+        library::{Item, MetadataItem},
+        media_container::devices::Feature,
+        MyPlexBuilder, Server,
     },
     PlexOut, ServerConnection,
 };

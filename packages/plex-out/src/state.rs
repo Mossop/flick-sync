@@ -3,7 +3,11 @@ use std::hash::Hash;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use plex_api::{Collection, Metadata, MetadataItem, MetadataType, Playlist, Season, Server, Show};
+use plex_api::{
+    library::{Collection, MetadataItem, Playlist, Season, Show},
+    media_container::server::library::{Metadata, MetadataType},
+    Server,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use time::OffsetDateTime;
 use tokio::fs;

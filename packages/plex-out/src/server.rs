@@ -2,8 +2,10 @@ use std::{collections::HashSet, path::Path, sync::Arc};
 
 use async_recursion::async_recursion;
 use plex_api::{
-    device::DeviceConnection, Collection, Episode, Item, MetadataItem, MetadataType, Movie,
-    MyPlexBuilder, Playlist, Season, Show, Video,
+    device::DeviceConnection,
+    library::{Collection, Episode, Item, MetadataItem, Movie, Playlist, Season, Show, Video},
+    media_container::server::library::MetadataType,
+    MyPlexBuilder,
 };
 
 use crate::{

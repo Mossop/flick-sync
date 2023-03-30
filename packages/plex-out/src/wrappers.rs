@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use async_std::fs::{create_dir_all, File};
 use async_trait::async_trait;
-use plex_api::MetadataItem;
+use plex_api::library::MetadataItem;
 
 use crate::{
     state::{
