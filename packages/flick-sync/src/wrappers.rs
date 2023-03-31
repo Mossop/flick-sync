@@ -23,6 +23,12 @@ fn safe<S: AsRef<str>>(str: S) -> String {
         .collect()
 }
 
+#[derive(Debug, Clone, Copy)]
+enum FileType {
+    Video,
+    Thumbnail,
+}
+
 #[async_trait]
 trait StateWrapper<S> {
     async fn connect(&self) -> Result<plex_api::Server>;
@@ -102,7 +108,7 @@ macro_rules! thumbnail_methods {
                 };
 
                 let root = self.inner.path.read().await;
-                let path = self.file_path("jpg").await;
+                let path = self.file_path(FileType::Thumbnail, "jpg").await;
                 let target = root.join(&path);
 
                 if let Some(parent) = target.parent() {
@@ -179,16 +185,19 @@ impl Show {
     parent!(library, ShowLibrary, library);
     children!(seasons, seasons, Season, show);
 
-    async fn file_path(&self, extension: &str) -> PathBuf {
+    async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.shows.get(&self.id).unwrap();
+
+            let name = match file_type {
+                FileType::Video => format!("{} ({}).{extension}", state.title, state.year),
+                FileType::Thumbnail => format!(".thumb.{extension}"),
+            };
+
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
             PathBuf::from(safe(library_title))
                 .join(safe(format!("{} ({})", state.title, state.year)))
-                .join(safe(format!(
-                    "{} ({}).{extension}",
-                    state.title, state.year
-                )))
+                .join(safe(name))
         })
         .await
     }
@@ -252,7 +261,7 @@ impl Episode {
         self.show().await.library().await
     }
 
-    async fn file_path(&self, extension: &str) -> PathBuf {
+    async fn file_path(&self, _file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.videos.get(&self.id).unwrap();
             let ep_state = state.episode_state();
@@ -284,7 +293,7 @@ impl Movie {
     thumbnail_methods!();
     parent!(library, MovieLibrary, movie_state().library);
 
-    async fn file_path(&self, extension: &str) -> PathBuf {
+    async fn file_path(&self, _file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.videos.get(&self.id).unwrap();
             let m_state = state.movie_state();
@@ -390,12 +399,12 @@ impl MovieCollection {
         .await
     }
 
-    async fn file_path(&self, extension: &str) -> PathBuf {
+    async fn file_path(&self, _file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.collections.get(&self.id).unwrap();
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
 
-            PathBuf::from(safe(library_title)).join(safe(format!("{}.{extension}", state.title)))
+            PathBuf::from(safe(library_title)).join(safe(format!(".{}.{extension}", state.id)))
         })
         .await
     }
@@ -428,12 +437,12 @@ impl ShowCollection {
         .await
     }
 
-    async fn file_path(&self, extension: &str) -> PathBuf {
+    async fn file_path(&self, _file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.collections.get(&self.id).unwrap();
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
 
-            PathBuf::from(safe(library_title)).join(safe(format!("{}.{extension}", state.title)))
+            PathBuf::from(safe(library_title)).join(safe(format!(".{}.{extension}", state.id)))
         })
         .await
     }

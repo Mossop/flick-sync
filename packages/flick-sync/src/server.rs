@@ -356,7 +356,11 @@ impl<'a> StateSync<'a> {
         Ok(library)
     }
 
-    fn add_collection<T>(&mut self, collection: &Collection<T>, items: HashSet<u32>) -> Result {
+    async fn add_collection<T>(
+        &mut self,
+        collection: &Collection<T>,
+        items: HashSet<u32>,
+    ) -> Result {
         return_if_seen!(self, collection);
 
         let collection_state = self
@@ -366,6 +370,13 @@ impl<'a> StateSync<'a> {
             .and_modify(|cs| cs.update(collection))
             .or_insert_with(|| CollectionState::from(collection));
         collection_state.items = items;
+
+        if let Some(updated) = collection.metadata().updated_at {
+            collection_state
+                .thumbnail
+                .delete_stale(self.root, Some(updated))
+                .await;
+        }
 
         Ok(())
     }
@@ -542,7 +553,7 @@ impl<'a> StateSync<'a> {
                     }
                 }
 
-                self.add_collection(&collection, items)
+                self.add_collection(&collection, items).await
             }
             Item::ShowCollection(collection) => {
                 log::debug!("Syncing collection '{}' metadata", collection.title());
@@ -559,7 +570,7 @@ impl<'a> StateSync<'a> {
                     }
                 }
 
-                self.add_collection(&collection, items)
+                self.add_collection(&collection, items).await
             }
             Item::VideoPlaylist(playlist) => {
                 log::debug!("Syncing playlist '{}' metadata", playlist.title());
