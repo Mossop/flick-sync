@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use clap::{Parser, Subcommand};
 use error::{err, Error};
 use flexi_logger::Logger;
-use plex_out::{PlexOut, Server, CONFIG_FILE, STATE_FILE};
+use flick_sync::{FlickSync, Server, CONFIG_FILE, STATE_FILE};
 use sync::{Prune, Sync};
 use tokio::fs::{metadata, read_dir};
 
@@ -20,7 +20,7 @@ pub type Result<T = ()> = std::result::Result<T, Error>;
 
 #[async_trait]
 pub trait Runnable {
-    async fn run(self, plexout: PlexOut, console: Console) -> Result;
+    async fn run(self, flick_sync: FlickSync, console: Console) -> Result;
 }
 
 #[derive(Subcommand)]
@@ -40,26 +40,26 @@ pub enum Command {
 
 #[async_trait]
 impl Runnable for Command {
-    async fn run(self, plexout: PlexOut, console: Console) -> Result {
+    async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         match self {
-            Command::Login(c) => c.run(plexout, console).await,
-            Command::Add(c) => c.run(plexout, console).await,
-            Command::List(c) => c.run(plexout, console).await,
-            Command::Prune(c) => c.run(plexout, console).await,
-            Command::Sync(c) => c.run(plexout, console).await,
+            Command::Login(c) => c.run(flick_sync, console).await,
+            Command::Add(c) => c.run(flick_sync, console).await,
+            Command::List(c) => c.run(flick_sync, console).await,
+            Command::Prune(c) => c.run(flick_sync, console).await,
+            Command::Sync(c) => c.run(flick_sync, console).await,
         }
     }
 }
 
-pub async fn select_servers(plexout: &PlexOut, ids: &Vec<String>) -> Result<Vec<Server>> {
+pub async fn select_servers(flick_sync: &FlickSync, ids: &Vec<String>) -> Result<Vec<Server>> {
     if ids.is_empty() {
-        Ok(plexout.servers().await)
+        Ok(flick_sync.servers().await)
     } else {
         let mut servers = Vec::new();
 
         for id in ids {
             servers.push(
-                plexout
+                flick_sync
                     .server(id)
                     .await
                     .ok_or_else(|| Error::UnknownServer(id.clone()))?,
@@ -135,9 +135,9 @@ async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf> {
 
 async fn wrapped_main(args: Args, console: Console) -> Result {
     let store = validate_store(args.store).await?;
-    let plexout = PlexOut::new(&store).await?;
+    let flick_sync = FlickSync::new(&store).await?;
 
-    args.command.run(plexout, console).await
+    args.command.run(flick_sync, console).await
 }
 
 #[tokio::main]
@@ -146,7 +146,7 @@ async fn main() -> Result {
 
     let console = Console::default();
 
-    if let Err(e) = Logger::try_with_env_or_str("plex_out=trace,warn")
+    if let Err(e) = Logger::try_with_env_or_str("flick_sync=trace,warn")
         .and_then(|logger| logger.log_to_writer(Box::new(console.clone())).start())
     {
         console.println(format!("Warning, failed to start logging: {}", e));

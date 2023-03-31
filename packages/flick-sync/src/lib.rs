@@ -29,8 +29,8 @@ pub use wrappers::*;
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
-pub const STATE_FILE: &str = ".plexout.state.json";
-pub const CONFIG_FILE: &str = "plexout.json";
+pub const STATE_FILE: &str = ".flicksync.state.json";
+pub const CONFIG_FILE: &str = "flicksync.json";
 
 struct Inner {
     pub config: RwLock<Config>,
@@ -67,7 +67,7 @@ impl Inner {
 }
 
 #[derive(Clone)]
-pub struct PlexOut {
+pub struct FlickSync {
     inner: Arc<Inner>,
 }
 
@@ -90,7 +90,7 @@ where
     }
 }
 
-impl PlexOut {
+impl FlickSync {
     pub async fn new(path: &Path) -> Result<Self> {
         let config: Config = read_or_default(&path.join(CONFIG_FILE)).await?;
         let state: State = read_or_default(&path.join(STATE_FILE)).await?;

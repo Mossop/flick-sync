@@ -23,7 +23,7 @@ pub struct Server {
 }
 
 impl Server {
-    /// The PlexOut identifier for this server.
+    /// The FlickSync identifier for this server.
     pub fn id(&self) -> &str {
         &self.id
     }

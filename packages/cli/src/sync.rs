@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use clap::Args;
-use plex_out::PlexOut;
+use flick_sync::FlickSync;
 
 use crate::{select_servers, Console, Result, Runnable};
 
@@ -14,8 +14,8 @@ pub struct Prune {
 
 #[async_trait]
 impl Runnable for Prune {
-    async fn run(self, plexout: PlexOut, console: Console) -> Result {
-        let servers = select_servers(&plexout, &self.ids).await?;
+    async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
+        let servers = select_servers(&flick_sync, &self.ids).await?;
 
         todo!();
     }
@@ -30,8 +30,8 @@ pub struct Sync {
 
 #[async_trait]
 impl Runnable for Sync {
-    async fn run(self, plexout: PlexOut, console: Console) -> Result {
-        let servers = select_servers(&plexout, &self.ids).await?;
+    async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
+        let servers = select_servers(&flick_sync, &self.ids).await?;
 
         todo!();
     }

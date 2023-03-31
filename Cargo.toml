@@ -1,5 +1,5 @@
 [workspace]
 members = [
-    "packages/plex-out",
-    "packages/plex-out-cli",
+    "packages/flick-sync",
+    "packages/cli",
 ]

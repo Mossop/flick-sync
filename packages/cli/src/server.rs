@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use clap::Args;
-use plex_out::{
+use flick_sync::{
     plex_api::{
         self,
         device::{Device, DeviceConnection},
@@ -8,7 +8,7 @@ use plex_out::{
         media_container::devices::Feature,
         MyPlexBuilder, Server,
     },
-    PlexOut, ServerConnection,
+    FlickSync, ServerConnection,
 };
 use url::Url;
 
@@ -22,13 +22,13 @@ pub struct Login {
 
 #[async_trait]
 impl Runnable for Login {
-    async fn run(self, plexout: PlexOut, console: Console) -> Result {
-        match plexout.server(&self.id).await {
+    async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
+        match flick_sync.server(&self.id).await {
             Some(_server) => {
                 todo!();
             }
             None => {
-                let client = plexout.client().await;
+                let client = flick_sync.client().await;
 
                 let method = console.select(
                     "Select how to connect to the new server",
@@ -49,7 +49,7 @@ impl Runnable for Login {
 
                     let connection = ServerConnection::Direct { url };
 
-                    plexout.add_server(&self.id, server, connection).await?;
+                    flick_sync.add_server(&self.id, server, connection).await?;
                 } else {
                     let username = console.input("Username");
                     let password = console.password("Password");
@@ -129,7 +129,7 @@ impl Runnable for Login {
                         id: server.machine_identifier().to_owned(),
                     };
 
-                    plexout.add_server(&self.id, server, connection).await?;
+                    flick_sync.add_server(&self.id, server, connection).await?;
                 }
             }
         }
@@ -146,7 +146,7 @@ pub struct Add {
 
 #[async_trait]
 impl Runnable for Add {
-    async fn run(self, plexout: PlexOut, console: Console) -> Result {
+    async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let unexpected = || Error::ErrorMessage("Unexpected URL format".to_string());
 
         let url = Url::parse(&self.url)?;
@@ -157,7 +157,7 @@ impl Runnable for Add {
         let fragment = &fragment[1..];
 
         let url = Url::options()
-            .base_url(Some(&Url::parse("https://plex-out.com")?))
+            .base_url(Some(&Url::parse("https://nowhere.flick-sync")?))
             .parse(fragment)?;
 
         let mut segments = url.path_segments().ok_or_else(unexpected)?;
@@ -176,7 +176,7 @@ impl Runnable for Add {
             None => return Err(unexpected()),
         };
 
-        for server in plexout.servers().await {
+        for server in flick_sync.servers().await {
             let plex_server = match server.connect().await {
                 Ok(s) => s,
                 Err(e) => {
@@ -227,8 +227,8 @@ pub struct List {
 
 #[async_trait]
 impl Runnable for List {
-    async fn run(self, plexout: PlexOut, console: Console) -> Result {
-        let servers = select_servers(&plexout, &self.ids).await?;
+    async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
+        let servers = select_servers(&flick_sync, &self.ids).await?;
 
         for server in servers {
             if let Err(e) = server.update_state().await {

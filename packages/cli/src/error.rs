@@ -13,14 +13,14 @@ pub enum Error {
         source: url::ParseError,
     },
     #[error("{source}")]
-    PlexOut {
+    FlickSync {
         #[from]
-        source: plex_out::Error,
+        source: flick_sync::Error,
     },
     #[error("{source}")]
     Plex {
         #[from]
-        source: plex_out::plex_api::Error,
+        source: flick_sync::plex_api::Error,
     },
     #[error("Unable to sync '{0}'")]
     UnsupportedType(String),

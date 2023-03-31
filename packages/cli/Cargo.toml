@@ -1,10 +1,10 @@
 [package]
-name = "plex-out-cli"
+name = "flick-sync-cli"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-plex-out = { path = "../plex-out" }
+flick-sync = { path = "../flick-sync" }
 clap = { version = "4.1.13", features = ["derive", "env"] }
 flexi_logger = { version = "0.25.3", features = ["colors"] }
 tokio = { version = "1.26.0", features = ["full"] }
