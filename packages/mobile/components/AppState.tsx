@@ -9,17 +9,16 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { StorageAccessFramework } from "expo-file-system";
 import { SplashScreen } from "expo-router";
+import { State } from "../modules/state";
 
 const SETTINGS_KEY = "settings";
-
-interface MediaState {}
 
 interface Settings {
   store: string;
 }
 
 interface ContextState {
-  mediaState: MediaState;
+  mediaState: State;
   settings: Settings;
 }
 
@@ -33,7 +32,7 @@ class AppState {
     return this.contextState?.settings;
   }
 
-  public get mediaState(): MediaState {
+  public get mediaState(): State {
     return this.contextState?.mediaState;
   }
 
@@ -72,7 +71,7 @@ async function loadSettings(): Promise<Settings> {
   }
 }
 
-async function loadMediaState(store: string): Promise<MediaState> {
+async function loadMediaState(store: string): Promise<State> {
   console.log(`Loading media state from ${store}`);
   try {
     let stateStr = await StorageAccessFramework.readAsStringAsync(
@@ -83,7 +82,9 @@ async function loadMediaState(store: string): Promise<MediaState> {
     console.error("State read failed", e);
   }
 
-  return {};
+  return {
+    clientId: "",
+  };
 }
 
 async function init(): Promise<ContextState> {
@@ -108,7 +109,7 @@ export function useSettings(): Settings {
   return useAppState().settings;
 }
 
-export function useMediaState(): MediaState {
+export function useMediaState(): State {
   return useAppState().mediaState;
 }
 

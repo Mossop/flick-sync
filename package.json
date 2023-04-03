@@ -1,6 +1,7 @@
 {
   "private": true,
   "scripts": {
-    "start": "cd packages/mobile && npm start"
+    "start": "cd packages/mobile && npm start",
+    "gentypes": "typeshare --lang typescript -o packages/mobile/modules/state.d.ts packages/flick-sync"
   }
 }

@@ -11,6 +11,7 @@ use plex_api::{
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use time::OffsetDateTime;
 use tokio::fs;
+use typeshare::typeshare;
 use uuid::Uuid;
 
 trait ListItem<T> {
@@ -106,11 +107,13 @@ where
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[typeshare]
 #[serde(rename_all = "camelCase")]
 pub struct CollectionState {
     pub id: u32,
     pub library: u32,
     pub title: String,
+    #[typeshare(serialized_as = "Vec<u32>")]
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub items: HashSet<u32>,
     #[serde(default, skip_serializing_if = "ThumbnailState::is_none")]
@@ -136,6 +139,7 @@ impl CollectionState {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[typeshare]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistState {
     pub id: u32,
@@ -161,12 +165,14 @@ impl PlaylistState {
 }
 
 #[derive(Deserialize, Serialize, Clone, Copy, Debug)]
+#[serde(rename_all = "lowercase")]
 pub enum LibraryType {
     Movie,
     Show,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[typeshare]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryState {
     pub id: u32,
@@ -178,6 +184,7 @@ pub struct LibraryState {
 derive_list_item!(LibraryState);
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[typeshare]
 #[serde(rename_all = "camelCase")]
 pub struct SeasonState {
     pub id: u32,
@@ -210,6 +217,7 @@ impl SeasonState {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[typeshare]
 #[serde(rename_all = "camelCase")]
 pub struct ShowState {
     pub id: u32,
@@ -247,6 +255,7 @@ impl ShowState {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[typeshare]
 #[serde(rename_all = "camelCase")]
 pub struct MovieState {
     pub library: u32,
@@ -267,6 +276,7 @@ impl MovieState {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[typeshare]
 #[serde(rename_all = "camelCase")]
 pub struct EpisodeState {
     pub season: u32,
@@ -394,6 +404,7 @@ pub enum VideoDetail {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[typeshare]
 pub struct VideoState {
     pub id: u32,
     pub title: String,
@@ -460,6 +471,7 @@ impl VideoState {
 }
 
 #[derive(Deserialize, Default, Serialize, Clone, Debug)]
+#[typeshare]
 #[serde(rename_all = "camelCase")]
 pub struct ServerState {
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -471,6 +483,7 @@ pub struct ServerState {
         serialize_with = "into_list",
         deserialize_with = "from_list"
     )]
+    #[typeshare(serialized_as = "Vec<PlaylistState>")]
     pub playlists: HashMap<u32, PlaylistState>,
     #[serde(
         default,
@@ -478,6 +491,7 @@ pub struct ServerState {
         serialize_with = "into_list",
         deserialize_with = "from_list"
     )]
+    #[typeshare(serialized_as = "Vec<CollectionState>")]
     pub collections: HashMap<u32, CollectionState>,
     #[serde(
         default,
@@ -485,6 +499,7 @@ pub struct ServerState {
         serialize_with = "into_list",
         deserialize_with = "from_list"
     )]
+    #[typeshare(serialized_as = "Vec<LibraryState>")]
     pub libraries: HashMap<u32, LibraryState>,
     #[serde(
         default,
@@ -492,6 +507,7 @@ pub struct ServerState {
         serialize_with = "into_list",
         deserialize_with = "from_list"
     )]
+    #[typeshare(serialized_as = "Vec<ShowState>")]
     pub shows: HashMap<u32, ShowState>,
     #[serde(
         default,
@@ -499,6 +515,7 @@ pub struct ServerState {
         serialize_with = "into_list",
         deserialize_with = "from_list"
     )]
+    #[typeshare(serialized_as = "Vec<SeasonState>")]
     pub seasons: HashMap<u32, SeasonState>,
     #[serde(
         default,
@@ -506,10 +523,13 @@ pub struct ServerState {
         serialize_with = "into_list",
         deserialize_with = "from_list"
     )]
+    #[typeshare(serialized_as = "Vec<VideoState>")]
     pub videos: HashMap<u32, VideoState>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[typeshare]
+#[serde(rename_all = "camelCase")]
 pub struct State {
     pub client_id: String,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
