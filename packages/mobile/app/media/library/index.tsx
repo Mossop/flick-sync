@@ -1,9 +1,12 @@
 import { StyleSheet, View, Text } from "react-native";
+import { useLibrary } from "../../../modules/util";
 
 export default function Library() {
+  let library = useLibrary();
+
   return (
     <View style={styles.container}>
-      <Text>library</Text>
+      <Text>{library.title}</Text>
     </View>
   );
 }
