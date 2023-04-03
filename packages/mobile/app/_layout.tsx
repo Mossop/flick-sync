@@ -18,7 +18,11 @@ export default function Layout() {
   return (
     <AppStateProvider>
       <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-        <Stack />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+          }}
+        />
       </ThemeProvider>
     </AppStateProvider>
   );

@@ -1,17 +1,5 @@
-import { StyleSheet, View, Text } from "react-native";
+import { Redirect } from "expo-router";
 
 export default function Index() {
-  return (
-    <View style={styles.container}>
-      <Text>index</Text>
-    </View>
-  );
+  return <Redirect href="library" />;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
