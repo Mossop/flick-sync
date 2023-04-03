@@ -1,1 +1,17 @@
-/target
+/target/
+/packages/mobile/node_modules/
+/packages/mobile/.expo/
+/packages/mobile/dist/
+/packages/mobile/web-build/
+
+npm-debug.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+.DS_Store
+
+# Temporary files created by Metro to check the health of the file watcher
+.metro-health-check*
