@@ -3,11 +3,26 @@ import * as RustState from "./ruststate";
 
 type Replace<T, V> = Omit<T, keyof V> & V;
 
+function optional<T>(
+  failover: T,
+  decoder: JsonDecoder.Decoder<T>
+): JsonDecoder.Decoder<T> {
+  return JsonDecoder.optional(decoder).map(
+    (val: T | undefined) => val ?? failover
+  );
+}
+
+function optionalArray<T>(
+  decoder: JsonDecoder.Decoder<T[]>
+): JsonDecoder.Decoder<T[]> {
+  return optional([], decoder);
+}
+
 export type ThumbnailState =
   | { state: "none" }
   | { state: "downloaded"; path: string };
 
-const ThumbnailStateDecoder = JsonDecoder.failover(
+const ThumbnailStateDecoder = optional(
   { state: "none" },
   JsonDecoder.oneOf<ThumbnailState>(
     [
@@ -36,7 +51,7 @@ export type DownloadState =
   | { state: "downloaded"; path: string }
   | { state: "transcoded"; path: string };
 
-const DownloadStateDecoder = JsonDecoder.failover(
+const DownloadStateDecoder = optional(
   { state: "none" },
   JsonDecoder.oneOf<DownloadState>(
     [
@@ -92,10 +107,7 @@ const CollectionStateDecoder = JsonDecoder.object<CollectionState>(
     id: JsonDecoder.number,
     library: JsonDecoder.number,
     title: JsonDecoder.string,
-    items: JsonDecoder.failover(
-      [],
-      JsonDecoder.array(JsonDecoder.number, "number[]")
-    ),
+    items: optionalArray(JsonDecoder.array(JsonDecoder.number, "number[]")),
     thumbnail: ThumbnailStateDecoder,
   },
   "CollectionState"
@@ -112,10 +124,7 @@ const PlaylistStateDecoder = JsonDecoder.object<PlaylistState>(
   {
     id: JsonDecoder.number,
     title: JsonDecoder.string,
-    videos: JsonDecoder.failover(
-      [],
-      JsonDecoder.array(JsonDecoder.number, "number[]")
-    ),
+    videos: optionalArray(JsonDecoder.array(JsonDecoder.number, "number[]")),
   },
   "PlaylistState"
 );
@@ -238,30 +247,20 @@ export type ServerState = Replace<
 const ServerStateDecoder = JsonDecoder.object<ServerState>(
   {
     name: JsonDecoder.string,
-    playlists: JsonDecoder.failover(
-      [],
+    playlists: optionalArray(
       JsonDecoder.array(PlaylistStateDecoder, "PlaylistState[]")
     ),
-    collections: JsonDecoder.failover(
-      [],
+    collections: optionalArray(
       JsonDecoder.array(CollectionStateDecoder, "CollectionState[]")
     ),
-    libraries: JsonDecoder.failover(
-      [],
+    libraries: optionalArray(
       JsonDecoder.array(LibraryStateDecoder, "LibraryState[]")
     ),
-    shows: JsonDecoder.failover(
-      [],
-      JsonDecoder.array(ShowStateDecoder, "ShowState[]")
-    ),
-    seasons: JsonDecoder.failover(
-      [],
+    shows: optionalArray(JsonDecoder.array(ShowStateDecoder, "ShowState[]")),
+    seasons: optionalArray(
       JsonDecoder.array(SeasonStateDecoder, "SeasonState[]")
     ),
-    videos: JsonDecoder.failover(
-      [],
-      JsonDecoder.array(VideoStateDecoder, "VideoState[]")
-    ),
+    videos: optionalArray(JsonDecoder.array(VideoStateDecoder, "VideoState[]")),
   },
   "ServerState"
 );
@@ -275,7 +274,7 @@ export type State = Replace<
 
 export const StateDecoder = JsonDecoder.object<State>(
   {
-    servers: JsonDecoder.failover(
+    servers: optional(
       {},
       JsonDecoder.dictionary(ServerStateDecoder, "Record<string, ServerState>")
     ),
