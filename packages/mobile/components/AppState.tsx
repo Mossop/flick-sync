@@ -9,7 +9,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { StorageAccessFramework } from "expo-file-system";
 import { SplashScreen } from "expo-router";
-import { State } from "../modules/state";
+import { State, StateDecoder } from "../modules/state";
 
 const SETTINGS_KEY = "settings";
 
@@ -77,14 +77,12 @@ async function loadMediaState(store: string): Promise<State> {
     let stateStr = await StorageAccessFramework.readAsStringAsync(
       store + "/document/primary%3Aflicksync%2F.flicksync.state.json"
     );
-    return JSON.parse(stateStr);
+    return StateDecoder.decodeToPromise(JSON.parse(stateStr));
   } catch (e) {
     console.error("State read failed", e);
   }
 
-  return {
-    clientId: "",
-  };
+  return { servers: {} };
 }
 
 async function init(): Promise<ContextState> {
