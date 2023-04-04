@@ -129,7 +129,7 @@ const PlaylistStateDecoder = JsonDecoder.object<PlaylistState>(
   "PlaylistState"
 );
 
-enum LibraryType {
+export enum LibraryType {
   Movie = "movie",
   Show = "show",
 }

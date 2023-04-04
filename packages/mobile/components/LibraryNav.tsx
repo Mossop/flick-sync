@@ -1,11 +1,8 @@
 import { StackRouter } from "@react-navigation/native";
-import { Link, Navigator, Slot, useRouter } from "expo-router";
+import { Navigator, Slot, useRouter } from "expo-router";
 import { useMemo, useRef } from "react";
-import { DrawerLayoutAndroid, Pressable, View, StyleSheet } from "react-native";
+import { DrawerLayoutAndroid, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { MaterialIcons } from "@expo/vector-icons";
-import { Divider, IconButton, Text } from "@react-native-material/core";
-import * as Styles from "../modules/styles";
 import {
   Library,
   Playlist,
@@ -13,6 +10,9 @@ import {
   useLibrary,
   usePlaylists,
 } from "../modules/util";
+import { LibraryType } from "../modules/state";
+import { Appbar, Drawer } from "react-native-paper";
+import { MaterialIcons } from "@expo/vector-icons";
 
 export default function LibraryNav() {
   let drawer = useRef<DrawerLayoutAndroid>(null);
@@ -22,14 +22,17 @@ export default function LibraryNav() {
     [drawer]
   );
   let renderDrawer = useMemo(
-    () => () => <Drawer closeDrawer={closeDrawer} />,
+    () => () => <DrawerContent closeDrawer={closeDrawer} />,
     [closeDrawer]
   );
 
   return (
     <Navigator router={StackRouter}>
-      <DrawerLayoutAndroid ref={drawer} renderNavigationView={renderDrawer}>
-        <SafeAreaView mode="margin" edges={["top"]} style={{ height: 0 }} />
+      <DrawerLayoutAndroid
+        ref={drawer}
+        renderNavigationView={renderDrawer}
+        drawerWidth={300}
+      >
         <Header openDrawer={openDrawer} />
         <Slot />
       </DrawerLayoutAndroid>
@@ -37,7 +40,7 @@ export default function LibraryNav() {
   );
 }
 
-function Drawer({ closeDrawer }: { closeDrawer: () => void }) {
+function DrawerContent({ closeDrawer }: { closeDrawer: () => void }) {
   let libraries = useLibraries();
   let playlists = usePlaylists();
 
@@ -66,43 +69,39 @@ function Drawer({ closeDrawer }: { closeDrawer: () => void }) {
   };
 
   return (
-    <SafeAreaView edges={["top", "bottom", "left"]}>
-      <View style={styles.drawer}>
-        {libraries.map((library) => (
-          <Pressable
-            key={library.id}
-            style={styles.drawerItem}
-            onPress={() => openLibrary(library)}
-          >
-            <MaterialIcons
-              key={library.id}
-              name="video-library"
-              size={Styles.HEADING_BUTTON_SIZE}
-              style={Styles.buttonIcon}
-            />
-            <Text variant="h6">{library.title}</Text>
-          </Pressable>
-        ))}
+    <View style={styles.drawer}>
+      <SafeAreaView edges={["top", "bottom", "left"]}>
+        {libraries.length > 0 && (
+          <Drawer.Section title="Libraries" showDivider={playlists.length > 0}>
+            {libraries.map((library) => (
+              <Drawer.Item
+                key={library.id}
+                onPress={() => openLibrary(library)}
+                icon={
+                  library.type == LibraryType.Movie
+                    ? "movie"
+                    : (props) => <MaterialIcons name="tv" {...props} />
+                }
+                label={library.title}
+              />
+            ))}
+          </Drawer.Section>
+        )}
 
-        <Divider />
-
-        {playlists.map((playlist) => (
-          <Pressable
-            key={playlist.id}
-            style={styles.drawerItem}
-            onPress={() => openPlaylist(playlist)}
-          >
-            <MaterialIcons
-              key={playlist.id}
-              name="playlist-play"
-              size={Styles.HEADING_BUTTON_SIZE}
-              style={Styles.buttonIcon}
-            />
-            <Text variant="h6">{playlist.title}</Text>
-          </Pressable>
-        ))}
-      </View>
-    </SafeAreaView>
+        {playlists.length > 0 && (
+          <Drawer.Section title="Playlists" showDivider={false}>
+            {playlists.map((playlist) => (
+              <Drawer.Item
+                key={playlist.id}
+                onPress={() => openPlaylist(playlist)}
+                icon="playlist-play"
+                label={playlist.title}
+              />
+            ))}
+          </Drawer.Section>
+        )}
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -110,30 +109,15 @@ function Header({ openDrawer }: { openDrawer: () => void }) {
   let library = useLibrary();
 
   return (
-    <View style={styles.header}>
-      <IconButton
-        onPress={openDrawer}
-        icon={(props) => <MaterialIcons name="menu" {...props} />}
-      />
-      <Text variant="h6">{library.title}</Text>
-    </View>
+    <Appbar.Header>
+      <Appbar.Action icon="menu" onPress={openDrawer} />
+      <Appbar.Content title={library.title} />
+    </Appbar.Header>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-start",
-  },
   drawer: {
-    flexDirection: "column",
-    alignItems: "stretch",
-    justifyContent: "flex-start",
-  },
-  drawerItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-start",
+    flex: 1,
   },
 });

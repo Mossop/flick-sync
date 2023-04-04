@@ -6,6 +6,7 @@ import {
 import { Stack } from "expo-router";
 import { useColorScheme } from "react-native";
 import { AppStateProvider } from "../components/AppState";
+import { Provider as PaperProvider } from "react-native-paper";
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -18,11 +19,13 @@ export default function Layout() {
   return (
     <AppStateProvider>
       <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-          }}
-        />
+        <PaperProvider>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+            }}
+          />
+        </PaperProvider>
       </ThemeProvider>
     </AppStateProvider>
   );
