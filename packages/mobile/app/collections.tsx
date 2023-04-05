@@ -1,8 +1,9 @@
 import { Text } from "react-native";
 import AppView from "../components/AppView";
 import { LibraryState } from "../modules/state";
+import { memo } from "react";
 
-export default function LibraryCollections({
+export default memo(function LibraryCollections({
   library,
 }: {
   library: LibraryState;
@@ -12,4 +13,4 @@ export default function LibraryCollections({
       <Text>{library.title} collections</Text>
     </AppView>
   );
-}
+});

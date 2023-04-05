@@ -31,14 +31,12 @@ function Library({ route }: ScreenProps) {
 
   return (
     <LibraryNav.Navigator initialRouteName="contents">
-      <LibraryNav.Screen
-        name="contents"
-        component={() => <LibraryContent library={library} />}
-      />
-      <LibraryNav.Screen
-        name="collections"
-        component={() => <LibraryCollections library={library} />}
-      />
+      <LibraryNav.Screen name="contents">
+        {() => <LibraryContent library={library} />}
+      </LibraryNav.Screen>
+      <LibraryNav.Screen name="collections">
+        {() => <LibraryCollections library={library} />}
+      </LibraryNav.Screen>
     </LibraryNav.Navigator>
   );
 }

@@ -1,11 +1,22 @@
 import { Text } from "react-native";
 import AppView from "../components/AppView";
-import { LibraryState } from "../modules/state";
+import { LibraryState, isMovieLibrary } from "../modules/state";
+import Movies from "../components/Movies";
+import Shows from "../components/Shows";
+import { memo } from "react";
 
-export default function LibraryContent({ library }: { library: LibraryState }) {
+export default memo(function LibraryContent({
+  library,
+}: {
+  library: LibraryState;
+}) {
   return (
     <AppView title={library.title}>
-      <Text>{library.title}</Text>
+      {isMovieLibrary(library) ? (
+        <Movies movies={library.contents} />
+      ) : (
+        <Shows shows={library.contents} />
+      )}
     </AppView>
   );
-}
+});

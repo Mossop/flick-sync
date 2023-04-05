@@ -25,5 +25,7 @@ export default function AppView({
 const styles = StyleSheet.create({
   base: {
     flex: 1,
+    alignItems: "stretch",
+    justifyContent: "flex-start",
   },
 });
