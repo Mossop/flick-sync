@@ -1,6 +1,14 @@
 import { Appbar } from "react-native-paper";
-import { useAppDrawer } from "./AppNavigator";
 import { StyleSheet, View, ViewProps } from "react-native";
+import { useAppDrawer } from "./AppNavigator";
+
+const styles = StyleSheet.create({
+  base: {
+    flex: 1,
+    alignItems: "stretch",
+    justifyContent: "flex-start",
+  },
+});
 
 export default function AppView({
   title,
@@ -21,11 +29,3 @@ export default function AppView({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  base: {
-    flex: 1,
-    alignItems: "stretch",
-    justifyContent: "flex-start",
-  },
-});

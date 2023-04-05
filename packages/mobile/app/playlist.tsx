@@ -5,17 +5,17 @@ import AppView from "../components/AppView";
 export default function Playlist({ route }: ScreenProps) {
   let playlists = usePlaylists();
   let params = route.params ?? {};
-  let playlist = playlists.find(
+  let currentPlaylist = playlists.find(
     (playlist) =>
       // @ts-ignore
-      playlist.server.id == params["server"] &&
+      playlist.server.id == params.server &&
       // @ts-ignore
-      playlist.id.toString() == params["playlist"]
+      playlist.id.toString() == params.playlist,
   );
 
   return (
-    <AppView title={playlist?.title ?? ""}>
-      <Text>{playlist?.title}</Text>
+    <AppView title={currentPlaylist?.title ?? ""}>
+      <Text>{currentPlaylist?.title}</Text>
     </AppView>
   );
 }

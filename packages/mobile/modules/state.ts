@@ -5,15 +5,15 @@ type Replace<T, V> = Omit<T, keyof V> & V;
 
 function optional<T>(
   failover: T,
-  decoder: JsonDecoder.Decoder<T>
+  decoder: JsonDecoder.Decoder<T>,
 ): JsonDecoder.Decoder<T> {
   return JsonDecoder.optional(decoder).map(
-    (val: T | undefined) => val ?? failover
+    (val: T | undefined) => val ?? failover,
   );
 }
 
 function optionalArray<T>(
-  decoder: JsonDecoder.Decoder<T>
+  decoder: JsonDecoder.Decoder<T>,
 ): JsonDecoder.Decoder<T[]> {
   return optional([], JsonDecoder.array(decoder, "[]"));
 }
@@ -22,9 +22,8 @@ function decode<T>(decoder: JsonDecoder.Decoder<T>, val: any): T {
   let result = decoder.decode(val);
   if (result.isOk()) {
     return result.value;
-  } else {
-    throw new Error(result.error);
   }
+  throw new Error(result.error);
 }
 
 function getOrThrow<K, V>(map: Map<K, V>, key: K, error: string): V {
@@ -38,7 +37,7 @@ function getOrThrow<K, V>(map: Map<K, V>, key: K, error: string): V {
 
 function mapIndex<V>(
   map: Map<number, V>,
-  error: string
+  error: string,
 ): JsonDecoder.Decoder<V> {
   return JsonDecoder.number.map((id) => getOrThrow(map, id, `${error}: ${id}`));
 }
@@ -59,18 +58,18 @@ const ThumbnailStateDecoder = optional(
         {
           state: JsonDecoder.isExactly("none"),
         },
-        "none"
+        "none",
       ),
       JsonDecoder.object(
         {
           state: JsonDecoder.isExactly("downloaded"),
           path: JsonDecoder.string,
         },
-        "downloaded"
+        "downloaded",
       ),
     ],
-    "ThumbnailState"
-  )
+    "ThumbnailState",
+  ),
 );
 
 export type DownloadState =
@@ -88,39 +87,39 @@ const DownloadStateDecoder = optional(
         {
           state: JsonDecoder.isExactly("none"),
         },
-        "none"
+        "none",
       ),
       JsonDecoder.object(
         {
           state: JsonDecoder.isExactly("downloading"),
           path: JsonDecoder.string,
         },
-        "downloading"
+        "downloading",
       ),
       JsonDecoder.object(
         {
           state: JsonDecoder.isExactly("transcoding"),
           path: JsonDecoder.string,
         },
-        "transcoding"
+        "transcoding",
       ),
       JsonDecoder.object(
         {
           state: JsonDecoder.isExactly("downloaded"),
           path: JsonDecoder.string,
         },
-        "downloaded"
+        "downloaded",
       ),
       JsonDecoder.object(
         {
           state: JsonDecoder.isExactly("transcoded"),
           path: JsonDecoder.string,
         },
-        "transcoded"
+        "transcoded",
       ),
     ],
-    "DownloadState"
-  )
+    "DownloadState",
+  ),
 );
 
 export type ShowCollectionState = Replace<
@@ -141,16 +140,6 @@ export type MovieCollectionState = Replace<
 >;
 
 export type CollectionState = MovieCollectionState | ShowCollectionState;
-
-export function isMovieCollection(
-  c: CollectionState
-): c is MovieCollectionState {
-  return isMovieLibrary(c.library);
-}
-
-export function isShowCollection(c: CollectionState): c is ShowCollectionState {
-  return isShowLibrary(c.library);
-}
 
 export type PlaylistState = Replace<
   RustState.PlaylistState,
@@ -192,6 +181,16 @@ export function isMovieLibrary(l: LibraryState): l is MovieLibraryState {
 
 export function isShowLibrary(l: LibraryState): l is ShowLibraryState {
   return l.type == LibraryType.Show;
+}
+
+export function isMovieCollection(
+  c: CollectionState,
+): c is MovieCollectionState {
+  return isMovieLibrary(c.library);
+}
+
+export function isShowCollection(c: CollectionState): c is ShowCollectionState {
+  return isShowLibrary(c.library);
 }
 
 export type SeasonState = Replace<
@@ -266,18 +265,18 @@ export type ServerState = Replace<
   }
 >;
 
-function decodeServerState(val: any): ServerState {
-  if (val === null || val === undefined) {
-    throw new Error(`Unexpected server state '${val}'`);
+function decodeServerState(json: any): ServerState {
+  if (json === null || json === undefined) {
+    throw new Error(`Unexpected server state '${json}'`);
   }
 
-  if (typeof val != "object") {
-    throw new Error(`Unexpected server state type '${typeof val}'`);
+  if (typeof json != "object") {
+    throw new Error(`Unexpected server state type '${typeof json}'`);
   }
 
   let serverState: ServerState = {
     id: "",
-    name: decode(JsonDecoder.string, val.name),
+    name: decode(JsonDecoder.string, json.name),
     playlists: new Map(),
     collections: new Map(),
     libraries: new Map(),
@@ -295,7 +294,7 @@ function decodeServerState(val: any): ServerState {
       contents: JsonDecoder.constant([]),
       collections: JsonDecoder.constant([]),
     },
-    "ShowLibraryState"
+    "ShowLibraryState",
   );
 
   const MovieLibraryStateDecoder = JsonDecoder.object<MovieLibraryState>(
@@ -307,17 +306,17 @@ function decodeServerState(val: any): ServerState {
       contents: JsonDecoder.constant([]),
       collections: JsonDecoder.constant([]),
     },
-    "MovieLibraryState"
+    "MovieLibraryState",
   );
 
   const LibraryStateDecoder = JsonDecoder.oneOf<LibraryState>(
     [MovieLibraryStateDecoder, ShowLibraryStateDecoder],
-    "LibraryState"
+    "LibraryState",
   );
 
   serverState.libraries = decode(
     optionalArray(LibraryStateDecoder).map(mapped),
-    val.libraries
+    json.libraries,
   );
 
   const ShowStateDecoder = JsonDecoder.object<ShowState>(
@@ -334,12 +333,12 @@ function decodeServerState(val: any): ServerState {
       thumbnail: ThumbnailStateDecoder,
       seasons: JsonDecoder.constant([]),
     },
-    "ShowState"
+    "ShowState",
   );
 
   serverState.shows = decode(
     optionalArray(ShowStateDecoder).map(mapped),
-    val.shows
+    json.shows,
   );
 
   for (let show of serverState.shows.values()) {
@@ -354,12 +353,12 @@ function decodeServerState(val: any): ServerState {
       index: JsonDecoder.number,
       episodes: JsonDecoder.constant([]),
     },
-    "SeasonState"
+    "SeasonState",
   );
 
   serverState.seasons = decode(
     optionalArray(SeasonStateDecoder).map(mapped),
-    val.seasons
+    json.seasons,
   );
 
   for (let season of serverState.seasons.values()) {
@@ -376,7 +375,7 @@ function decodeServerState(val: any): ServerState {
       }),
       year: JsonDecoder.number,
     },
-    "MovieState"
+    "MovieState",
   );
 
   const EpisodeDetailDecoder = JsonDecoder.object<EpisodeDetail>(
@@ -384,7 +383,7 @@ function decodeServerState(val: any): ServerState {
       season: mapIndex(serverState.seasons, `Unknown season`),
       index: JsonDecoder.number,
     },
-    "EpisodeState"
+    "EpisodeState",
   );
 
   const MovieStateDecoder = JsonDecoder.object<MovieState>(
@@ -395,7 +394,7 @@ function decodeServerState(val: any): ServerState {
       download: DownloadStateDecoder,
       detail: MovieDetailDecoder,
     },
-    "MovieState"
+    "MovieState",
   );
 
   const EpisodeStateDecoder = JsonDecoder.object<EpisodeState>(
@@ -406,17 +405,17 @@ function decodeServerState(val: any): ServerState {
       download: DownloadStateDecoder,
       detail: EpisodeDetailDecoder,
     },
-    "EpisodeState"
+    "EpisodeState",
   );
 
   const VideoStateDecoder = JsonDecoder.oneOf<VideoState>(
     [MovieStateDecoder, EpisodeStateDecoder],
-    "VideoState"
+    "VideoState",
   );
 
   serverState.videos = decode(
     optionalArray(VideoStateDecoder).map(mapped),
-    val.videos
+    json.videos,
   );
 
   for (let video of serverState.videos.values()) {
@@ -445,11 +444,11 @@ function decodeServerState(val: any): ServerState {
           }
 
           return val;
-        })
+        }),
       ),
       thumbnail: ThumbnailStateDecoder,
     },
-    "MovieCollectionState"
+    "MovieCollectionState",
   );
 
   const ShowCollectionStateDecoder = JsonDecoder.object<ShowCollectionState>(
@@ -470,21 +469,21 @@ function decodeServerState(val: any): ServerState {
           }
 
           return val;
-        })
+        }),
       ),
       thumbnail: ThumbnailStateDecoder,
     },
-    "ShowCollectionState"
+    "ShowCollectionState",
   );
 
   const CollectionStateDecoder = JsonDecoder.oneOf<CollectionState>(
     [MovieCollectionStateDecoder, ShowCollectionStateDecoder],
-    "CollectionState"
+    "CollectionState",
   );
 
   serverState.collections = decode(
     optionalArray(CollectionStateDecoder).map(mapped),
-    val.collections
+    json.collections,
   );
 
   for (let collection of serverState.collections.values()) {
@@ -502,12 +501,12 @@ function decodeServerState(val: any): ServerState {
       server: JsonDecoder.constant(serverState),
       videos: optionalArray(mapIndex(serverState.videos, "Unknown video")),
     },
-    "PlaylistState"
+    "PlaylistState",
   );
 
   serverState.playlists = decode(
     optionalArray(PlaylistStateDecoder).map(mapped),
-    val.playlists
+    json.playlists,
   );
 
   return serverState;
@@ -526,17 +525,18 @@ export const StateDecoder = JsonDecoder.object<State>(
       new Map(),
       JsonDecoder.dictionary(
         JsonDecoder.succeed.map(decodeServerState),
-        "Record<string, ServerState>"
+        "Record<string, ServerState>",
       ).map(
         (rec) =>
           new Map(
             Object.entries(rec).map(([id, ss]) => {
+              // eslint-disable-next-line no-param-reassign
               ss.id = id;
               return [id, ss];
-            })
-          )
-      )
+            }),
+          ),
+      ),
     ),
   },
-  "State"
+  "State",
 );

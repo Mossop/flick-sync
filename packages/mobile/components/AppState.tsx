@@ -25,7 +25,7 @@ interface ContextState {
 class AppState {
   constructor(
     private contextState: ContextState,
-    private contextSetter: Dispatch<SetStateAction<ContextState | undefined>>
+    private contextSetter: Dispatch<SetStateAction<ContextState | undefined>>,
   ) {}
 
   public get settings(): Settings {
@@ -37,11 +37,9 @@ class AppState {
   }
 
   public path(path: string): string {
-    return (
-      this.settings.store +
-      "/document/primary%3Aflicksync%2F" +
-      encodeURIComponent(path)
-    );
+    return `${
+      this.settings.store
+    }/document/primary%3Aflicksync%2F${encodeURIComponent(path)}`;
   }
 }
 
@@ -57,6 +55,7 @@ async function loadSettings(): Promise<Settings> {
     console.error(e);
   }
 
+  // eslint-disable-next-line no-constant-condition
   while (true) {
     let permission =
       await StorageAccessFramework.requestDirectoryPermissionsAsync(null);
@@ -69,9 +68,8 @@ async function loadSettings(): Promise<Settings> {
       await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 
       return settings;
-    } else {
-      console.log("Permission denied");
     }
+    console.log("Permission denied");
   }
 }
 
@@ -79,9 +77,9 @@ async function loadMediaState(store: string): Promise<State> {
   console.log(`Loading media state from ${store}`);
   try {
     let stateStr = await StorageAccessFramework.readAsStringAsync(
-      store + "/document/primary%3Aflicksync%2F.flicksync.state.json"
+      `${store}/document/primary%3Aflicksync%2F.flicksync.state.json`,
     );
-    return StateDecoder.decodeToPromise(JSON.parse(stateStr));
+    return await StateDecoder.decodeToPromise(JSON.parse(stateStr));
   } catch (e) {
     console.error("State read failed", e);
   }

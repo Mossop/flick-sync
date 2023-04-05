@@ -1,16 +1,16 @@
 import { NavigationContainer } from "@react-navigation/native";
-import { AppStateProvider } from "./components/AppState";
 import { Provider as PaperProvider } from "react-native-paper";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { createMaterialBottomTabNavigator } from "@react-navigation/material-bottom-tabs";
+import { useMemo } from "react";
+import { AppStateProvider } from "./components/AppState";
 import Video from "./app/video";
 import createAppNavigator from "./components/AppNavigator";
 import Settings from "./app/settings";
 import Playlist from "./app/playlist";
-import { createMaterialBottomTabNavigator } from "@react-navigation/material-bottom-tabs";
 import LibraryContent from "./app/contents";
 import LibraryCollections from "./app/collections";
 import { ScreenProps, useLibraries } from "./modules/util";
-import { useMemo } from "react";
 
 const LibraryNav = createMaterialBottomTabNavigator();
 
@@ -22,9 +22,9 @@ function Library({ route }: ScreenProps) {
       libraries.find(
         (lib) =>
           // @ts-ignore
-          lib.server.id == params["server"] &&
+          lib.server.id == params.server &&
           // @ts-ignore
-          lib.id.toString() == params["library"]
+          lib.id.toString() == params.library,
       ) ?? libraries[0]
     );
   }, [libraries, route.params]);

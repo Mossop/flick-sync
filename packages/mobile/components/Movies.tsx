@@ -1,8 +1,15 @@
-import { MovieState } from "../modules/state";
 import { ScrollView, StyleSheet } from "react-native";
+import { MovieState } from "../modules/state";
 import Thumbnail from "./Thumbnail";
 import GridView from "./GridView";
 import { POSTER_HEIGHT, POSTER_WIDTH } from "../modules/styles";
+
+const styles = StyleSheet.create({
+  thumb: {
+    width: POSTER_WIDTH,
+    height: POSTER_HEIGHT,
+  },
+});
 
 export default function Movies({ movies }: { movies: MovieState[] }) {
   return (
@@ -17,10 +24,3 @@ export default function Movies({ movies }: { movies: MovieState[] }) {
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  thumb: {
-    width: POSTER_WIDTH,
-    height: POSTER_HEIGHT,
-  },
-});

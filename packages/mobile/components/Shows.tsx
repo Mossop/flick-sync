@@ -1,8 +1,15 @@
-import { ShowState } from "../modules/state";
 import { ScrollView, StyleSheet } from "react-native";
+import { ShowState } from "../modules/state";
 import Thumbnail from "./Thumbnail";
 import GridView from "./GridView";
 import { POSTER_HEIGHT, POSTER_WIDTH } from "../modules/styles";
+
+const styles = StyleSheet.create({
+  thumb: {
+    width: POSTER_WIDTH,
+    height: POSTER_HEIGHT,
+  },
+});
 
 export default function Shows({ shows }: { shows: ShowState[] }) {
   return (
@@ -17,10 +24,3 @@ export default function Shows({ shows }: { shows: ShowState[] }) {
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  thumb: {
-    width: POSTER_WIDTH,
-    height: POSTER_HEIGHT,
-  },
-});

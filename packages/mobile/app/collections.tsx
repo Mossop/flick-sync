@@ -1,16 +1,10 @@
 import { Text } from "react-native";
+import { memo } from "react";
 import AppView from "../components/AppView";
 import { LibraryState } from "../modules/state";
-import { memo } from "react";
 
-export default memo(function LibraryCollections({
-  library,
-}: {
-  library: LibraryState;
-}) {
-  return (
-    <AppView title={library.title}>
-      <Text>{library.title} collections</Text>
-    </AppView>
-  );
-});
+export default memo(({ library }: { library: LibraryState }) => (
+  <AppView title={library.title}>
+    <Text>{library.title} collections</Text>
+  </AppView>
+));

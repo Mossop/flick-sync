@@ -1,5 +1,4 @@
 import {
-  NavigationProp,
   ParamListBase,
   StackActionHelpers,
   StackNavigationState,
@@ -7,7 +6,6 @@ import {
   StackRouterOptions,
   createNavigatorFactory,
   useNavigationBuilder,
-  useRoute,
 } from "@react-navigation/native";
 import {
   NativeStackNavigationEventMap,
@@ -17,10 +15,10 @@ import {
 import { DrawerLayoutAndroid, View, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackNavigatorProps } from "@react-navigation/native-stack/lib/typescript/src/types";
-import { ReactNode, createContext, useContext, useMemo, useRef } from "react";
-import { useLibraries, usePlaylists } from "../modules/util";
-import { Appbar, Drawer } from "react-native-paper";
+import { ReactNode, createContext, useContext, useRef } from "react";
+import { Drawer } from "react-native-paper";
 import { MaterialIcons } from "@expo/vector-icons";
+import { useLibraries, usePlaylists } from "../modules/util";
 import { LibraryState, LibraryType, PlaylistState } from "../modules/state";
 
 const styles = StyleSheet.create({
@@ -49,32 +47,6 @@ const DrawerContext = createContext<AppDrawer>({
   closeDrawer: () => {},
 });
 export const useAppDrawer = () => useContext(DrawerContext);
-
-function AppNavigatorView({
-  navigation,
-  children,
-}: {
-  navigation: Navigation;
-  children: ReactNode;
-}) {
-  let drawer = useRef<DrawerLayoutAndroid>(null);
-  let appDrawer = {
-    openDrawer: () => drawer.current?.openDrawer(),
-    closeDrawer: () => drawer.current?.closeDrawer(),
-  };
-
-  return (
-    <DrawerContext.Provider value={appDrawer}>
-      <DrawerLayoutAndroid
-        ref={drawer}
-        renderNavigationView={() => <DrawerContent navigation={navigation} />}
-        drawerWidth={300}
-      >
-        {children}
-      </DrawerLayoutAndroid>
-    </DrawerContext.Provider>
-  );
-}
 
 function DrawerContent({ navigation }: { navigation: Navigation }) {
   let { closeDrawer } = useAppDrawer();
@@ -143,6 +115,32 @@ function DrawerContent({ navigation }: { navigation: Navigation }) {
         />
       </SafeAreaView>
     </View>
+  );
+}
+
+function AppNavigatorView({
+  navigation,
+  children,
+}: {
+  navigation: Navigation;
+  children: ReactNode;
+}) {
+  let drawer = useRef<DrawerLayoutAndroid>(null);
+  let appDrawer = {
+    openDrawer: () => drawer.current?.openDrawer(),
+    closeDrawer: () => drawer.current?.closeDrawer(),
+  };
+
+  return (
+    <DrawerContext.Provider value={appDrawer}>
+      <DrawerLayoutAndroid
+        ref={drawer}
+        renderNavigationView={() => <DrawerContent navigation={navigation} />}
+        drawerWidth={300}
+      >
+        {children}
+      </DrawerLayoutAndroid>
+    </DrawerContext.Provider>
   );
 }
 

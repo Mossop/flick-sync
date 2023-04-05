@@ -1,11 +1,11 @@
-import { createContext, useContext, useMemo } from "react";
-import { useMediaState } from "../components/AppState";
-import { LibraryState, PlaylistState } from "./state";
+import { useMemo } from "react";
 import {
   RouteProp,
   ParamListBase,
   NavigationProp,
 } from "@react-navigation/native";
+import { useMediaState } from "../components/AppState";
+import { LibraryState, PlaylistState } from "./state";
 
 export interface ScreenProps {
   route: RouteProp<ParamListBase>;
@@ -17,7 +17,7 @@ export function useLibraries(): LibraryState[] {
 
   return useMemo(() => {
     let libraries = Array.from(mediaState.servers.values()).flatMap((server) =>
-      Array.from(server.libraries.values())
+      Array.from(server.libraries.values()),
     );
 
     libraries.sort((a, b) => a.title.localeCompare(b.title));
@@ -31,7 +31,7 @@ export function usePlaylists(): PlaylistState[] {
 
   return useMemo(() => {
     let playlists = Array.from(mediaState.servers.values()).flatMap((server) =>
-      Array.from(server.playlists.values())
+      Array.from(server.playlists.values()),
     );
 
     playlists.sort((a, b) => a.title.localeCompare(b.title));
