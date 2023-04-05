@@ -31,10 +31,22 @@ function Library({ route }: ScreenProps) {
 
   return (
     <LibraryNav.Navigator initialRouteName="contents">
-      <LibraryNav.Screen name="contents">
+      <LibraryNav.Screen
+        name="contents"
+        options={{
+          tabBarIcon: "bookshelf",
+          tabBarLabel: "Library",
+        }}
+      >
         {() => <LibraryContent library={library} />}
       </LibraryNav.Screen>
-      <LibraryNav.Screen name="collections">
+      <LibraryNav.Screen
+        name="collections"
+        options={{
+          tabBarIcon: "bookmark-box-multiple",
+          tabBarLabel: "Collections",
+        }}
+      >
         {() => <LibraryCollections library={library} />}
       </LibraryNav.Screen>
     </LibraryNav.Navigator>
