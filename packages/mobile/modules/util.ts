@@ -5,7 +5,7 @@ import {
   ParamListBase,
 } from "@react-navigation/native";
 import { useMediaState } from "../components/AppState";
-import { LibraryState, PlaylistState } from "./state";
+import { LibraryState, MovieState, PlaylistState, ShowState } from "./state";
 
 export interface ScreenProps<
   Params extends ParamListBase = ParamListBase,
@@ -41,4 +41,31 @@ export function usePlaylists(): PlaylistState[] {
 
     return playlists;
   }, [mediaState]);
+}
+
+function sorted<T>(list: T[], comparator: (a: T, b: T) => number): T[] {
+  let result = [...list];
+
+  result.sort(comparator);
+  return result;
+}
+
+export function moviesByYear(movies: MovieState[]): MovieState[] {
+  return sorted(movies, (a, b) => a.detail.year - b.detail.year);
+}
+
+export function showsByYear(movies: ShowState[]): ShowState[] {
+  return sorted(movies, (a, b) => a.year - b.year);
+}
+
+function plain(st: string): string {
+  return st;
+}
+
+export function byTitle<T extends { title: string }>(items: T[]): T[] {
+  return sorted(items, (a, b) => plain(a.title).localeCompare(plain(b.title)));
+}
+
+export function useMapped<T>(val: T[], mapper: (val: T[]) => T[]): T[] {
+  return useMemo(() => mapper(val), [val]);
 }

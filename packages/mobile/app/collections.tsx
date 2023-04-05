@@ -1,10 +1,14 @@
-import { memo } from "react";
 import AppView from "../components/AppView";
-import { LibraryState } from "../modules/state";
+import { CollectionState, LibraryState } from "../modules/state";
 import Collections from "../components/Collections";
+import { byTitle, useMapped } from "../modules/util";
 
-export default memo(({ library }: { library: LibraryState }) => (
-  <AppView title={library.title}>
-    <Collections collections={library.collections} />
-  </AppView>
-));
+export default function CollectionList({ library }: { library: LibraryState }) {
+  let collections = useMapped<CollectionState>(library.collections, byTitle);
+
+  return (
+    <AppView title={library.title}>
+      <Collections collections={collections} />
+    </AppView>
+  );
+}
