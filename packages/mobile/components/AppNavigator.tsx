@@ -17,7 +17,7 @@ import { NativeStackNavigatorProps } from "@react-navigation/native-stack/lib/ty
 import { ReactNode, createContext, useContext, useRef } from "react";
 import { Drawer } from "react-native-paper";
 import { MaterialIcons } from "@expo/vector-icons";
-import { useLibraries, usePlaylists } from "../modules/util";
+import { ScreenProps, useLibraries, usePlaylists } from "../modules/util";
 import { LibraryState, LibraryType, PlaylistState } from "../modules/state";
 
 const styles = StyleSheet.create({
@@ -36,11 +36,20 @@ interface PlaylistParams {
   playlist: number;
 }
 
+interface CollectionParams {
+  server: string;
+  collection: number;
+}
+
 export interface AppRoutes {
   library: LibraryParams | undefined;
   playlist: PlaylistParams;
+  collection: CollectionParams;
   [key: string]: object | undefined;
 }
+
+export type AppScreenProps<R extends keyof AppRoutes = keyof AppRoutes> =
+  ScreenProps<AppRoutes, R>;
 
 type Navigation = ReturnType<
   typeof useNavigationBuilder<

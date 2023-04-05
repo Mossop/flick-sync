@@ -5,16 +5,20 @@ import { createMaterialBottomTabNavigator } from "@react-navigation/material-bot
 import { useMemo } from "react";
 import { AppStateProvider } from "./components/AppState";
 import Video from "./app/video";
-import createAppNavigator from "./components/AppNavigator";
+import createAppNavigator, {
+  AppScreenProps,
+  AppRoutes,
+} from "./components/AppNavigator";
 import Settings from "./app/settings";
 import Playlist from "./app/playlist";
 import LibraryContent from "./app/contents";
 import LibraryCollections from "./app/collections";
-import { Routes, ScreenProps, useLibraries } from "./modules/util";
+import { useLibraries } from "./modules/util";
+import Collection from "./app/collection";
 
 const LibraryNav = createMaterialBottomTabNavigator();
 
-function Library({ route }: ScreenProps<"library">) {
+function Library({ route }: AppScreenProps<"library">) {
   let libraries = useLibraries();
   let library = useMemo(
     () =>
@@ -58,12 +62,13 @@ function Library({ route }: ScreenProps<"library">) {
   return <LibraryContent library={library} />;
 }
 
-const AppNav = createAppNavigator<Routes>();
+const AppNav = createAppNavigator<AppRoutes>();
 
 function App() {
   return (
     <AppNav.Navigator initialRouteName="library">
       <AppNav.Screen name="library" component={Library} />
+      <AppNav.Screen name="collection" component={Collection} />
       <AppNav.Screen name="playlist" component={Playlist} />
       <AppNav.Screen name="settings" component={Settings} />
     </AppNav.Navigator>

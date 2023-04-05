@@ -1,4 +1,4 @@
-import { ScrollView, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 import { MovieState } from "../modules/state";
 import Thumbnail from "./Thumbnail";
 import GridView from "./GridView";
@@ -13,14 +13,12 @@ const styles = StyleSheet.create({
 
 export default function Movies({ movies }: { movies: MovieState[] }) {
   return (
-    <ScrollView>
-      <GridView itemWidth={POSTER_WIDTH}>
-        {movies.map((movie) => (
-          <GridView.Item key={movie.id}>
-            <Thumbnail style={styles.thumb} thumbnail={movie.thumbnail} />
-          </GridView.Item>
-        ))}
-      </GridView>
-    </ScrollView>
+    <GridView itemWidth={POSTER_WIDTH}>
+      {movies.map((movie) => (
+        <GridView.Item key={movie.id}>
+          <Thumbnail style={styles.thumb} thumbnail={movie.thumbnail} />
+        </GridView.Item>
+      ))}
+    </GridView>
   );
 }

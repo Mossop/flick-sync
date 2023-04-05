@@ -1,27 +1,18 @@
 import { useMemo } from "react";
-import { RouteProp, NavigationProp } from "@react-navigation/native";
+import {
+  RouteProp,
+  NavigationProp,
+  ParamListBase,
+} from "@react-navigation/native";
 import { useMediaState } from "../components/AppState";
 import { LibraryState, PlaylistState } from "./state";
 
-interface LibraryParams {
-  server: string;
-  library: number;
-}
-
-interface PlaylistParams {
-  server: string;
-  playlist: number;
-}
-
-export interface Routes {
-  library: LibraryParams | undefined;
-  playlist: PlaylistParams;
-  [key: string]: object | undefined;
-}
-
-export interface ScreenProps<Screen extends keyof Routes = keyof Routes> {
-  route: RouteProp<Routes, Screen>;
-  navigation: NavigationProp<Routes, Screen>;
+export interface ScreenProps<
+  Params extends ParamListBase = ParamListBase,
+  Screen extends keyof Params = keyof Params,
+> {
+  route: RouteProp<Params, Screen>;
+  navigation: NavigationProp<Params, Screen>;
 }
 
 export function useLibraries(): LibraryState[] {
