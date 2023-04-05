@@ -10,24 +10,21 @@ import Settings from "./app/settings";
 import Playlist from "./app/playlist";
 import LibraryContent from "./app/contents";
 import LibraryCollections from "./app/collections";
-import { ScreenProps, useLibraries } from "./modules/util";
+import { Routes, ScreenProps, useLibraries } from "./modules/util";
 
 const LibraryNav = createMaterialBottomTabNavigator();
 
-function Library({ route }: ScreenProps) {
+function Library({ route }: ScreenProps<"library">) {
   let libraries = useLibraries();
-  let library = useMemo(() => {
-    let params = route.params ?? {};
-    return (
+  let library = useMemo(
+    () =>
       libraries.find(
         (lib) =>
-          // @ts-ignore
-          lib.server.id == params.server &&
-          // @ts-ignore
-          lib.id.toString() == params.library,
-      ) ?? libraries[0]
-    );
-  }, [libraries, route.params]);
+          lib.server.id == route.params?.server &&
+          lib.id == route.params?.library,
+      ) ?? libraries[0],
+    [libraries, route.params],
+  );
 
   if (!library) {
     return null;
@@ -61,7 +58,7 @@ function Library({ route }: ScreenProps) {
   return <LibraryContent library={library} />;
 }
 
-const AppNav = createAppNavigator();
+const AppNav = createAppNavigator<Routes>();
 
 function App() {
   return (

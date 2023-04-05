@@ -1,5 +1,4 @@
 import {
-  ParamListBase,
   StackActionHelpers,
   StackNavigationState,
   StackRouter,
@@ -27,11 +26,27 @@ const styles = StyleSheet.create({
   },
 });
 
+interface LibraryParams {
+  server: string;
+  library: number;
+}
+
+interface PlaylistParams {
+  server: string;
+  playlist: number;
+}
+
+export interface AppRoutes {
+  library: LibraryParams | undefined;
+  playlist: PlaylistParams;
+  [key: string]: object | undefined;
+}
+
 type Navigation = ReturnType<
   typeof useNavigationBuilder<
-    StackNavigationState<ParamListBase>,
+    StackNavigationState<AppRoutes>,
     StackRouterOptions,
-    StackActionHelpers<ParamListBase>,
+    StackActionHelpers<AppRoutes>,
     NativeStackNavigationOptions,
     NativeStackNavigationEventMap
   >
@@ -56,7 +71,7 @@ function DrawerContent({ navigation }: { navigation: Navigation }) {
   let openLibrary = (library: LibraryState) => {
     navigation.navigate("library", {
       server: library.server.id,
-      library: library.id.toString(),
+      library: library.id,
       screen: "contents",
     });
     closeDrawer();
@@ -65,7 +80,7 @@ function DrawerContent({ navigation }: { navigation: Navigation }) {
   let openPlaylist = (playlist: PlaylistState) => {
     navigation.navigate("playlist", {
       server: playlist.server.id,
-      playlist: playlist.id.toString(),
+      playlist: playlist.id,
     });
     closeDrawer();
   };
@@ -154,9 +169,9 @@ function AppNavigator({
 }: NativeStackNavigatorProps) {
   const { state, descriptors, navigation, NavigationContent } =
     useNavigationBuilder<
-      StackNavigationState<ParamListBase>,
+      StackNavigationState<AppRoutes>,
       StackRouterOptions,
-      StackActionHelpers<ParamListBase>,
+      StackActionHelpers<AppRoutes>,
       NativeStackNavigationOptions,
       NativeStackNavigationEventMap
     >(StackRouter, {
@@ -185,7 +200,7 @@ function AppNavigator({
 }
 
 export default createNavigatorFactory<
-  StackNavigationState<ParamListBase>,
+  StackNavigationState<AppRoutes>,
   NativeStackNavigationOptions,
   NativeStackNavigationEventMap,
   typeof AppNavigator
