@@ -1,11 +1,10 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "Flick Sync",
+    "slug": "flicksync",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/images/splash.png",
@@ -25,7 +24,6 @@
       }
     },
     "web": {
-      "bundler": "metro",
       "favicon": "./assets/images/favicon.png"
     }
   }

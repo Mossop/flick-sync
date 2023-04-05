@@ -1,6 +1,7 @@
 {
   "name": "flick-sync-mobile",
   "version": "1.0.0",
+  "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -14,12 +15,13 @@
   "dependencies": {
     "@expo/vector-icons": "^13.0.0",
     "@react-native-async-storage/async-storage": "1.17.11",
+    "@react-navigation/material-bottom-tabs": "^6.2.15",
     "@react-navigation/native": "^6.0.2",
+    "@react-navigation/native-stack": "^6.9.12",
     "expo": "~48.0.9",
     "expo-av": "~13.2.1",
     "expo-file-system": "~15.2.2",
     "expo-image": "~1.0.0",
-    "expo-router": "^1.0.0-rc5",
     "expo-splash-screen": "~0.18.1",
     "expo-status-bar": "~1.4.4",
     "expo-system-ui": "~2.2.1",

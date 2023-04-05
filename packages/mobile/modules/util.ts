@@ -1,7 +1,16 @@
-import { useSearchParams } from "expo-router";
-import { useMemo } from "react";
+import { createContext, useContext, useMemo } from "react";
 import { useMediaState } from "../components/AppState";
 import { LibraryState, PlaylistState } from "./state";
+import {
+  RouteProp,
+  ParamListBase,
+  NavigationProp,
+} from "@react-navigation/native";
+
+export interface ScreenProps {
+  route: RouteProp<ParamListBase>;
+  navigation: NavigationProp<ParamListBase>;
+}
 
 export function useLibraries(): LibraryState[] {
   let mediaState = useMediaState();
@@ -29,25 +38,4 @@ export function usePlaylists(): PlaylistState[] {
 
     return playlists;
   }, [mediaState]);
-}
-
-export function useLibrary(): LibraryState {
-  let params = useSearchParams();
-  let libraries = useLibraries();
-
-  return (
-    libraries.find(
-      (lib) =>
-        lib.id.toString() == params.library && lib.server.id == params.server
-    ) ?? libraries[0]
-  );
-}
-
-export function usePlaylist(): PlaylistState | undefined {
-  let params = useSearchParams();
-  let playlists = usePlaylists();
-
-  return playlists.find(
-    (pl) => pl.id.toString() == params.playlist && pl.server.id == params.server
-  );
 }

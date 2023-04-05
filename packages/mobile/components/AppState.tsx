@@ -8,7 +8,7 @@ import {
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { StorageAccessFramework } from "expo-file-system";
-import { SplashScreen } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { State, StateDecoder } from "../modules/state";
 
 const SETTINGS_KEY = "settings";
@@ -62,9 +62,13 @@ async function loadSettings(): Promise<Settings> {
       await StorageAccessFramework.requestDirectoryPermissionsAsync(null);
     if (permission.granted) {
       console.log(`Got permission for ${permission.directoryUri}`);
-      return {
+      let settings: Settings = {
         store: permission.directoryUri,
       };
+
+      await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+
+      return settings;
     } else {
       console.log("Permission denied");
     }
@@ -82,16 +86,23 @@ async function loadMediaState(store: string): Promise<State> {
     console.error("State read failed", e);
   }
 
-  return { servers: {} };
+  return { servers: new Map() };
 }
 
 async function init(): Promise<ContextState> {
-  let settings = await loadSettings();
+  // Keep the splash screen visible while we fetch resources
+  SplashScreen.preventAutoHideAsync();
 
-  return {
-    settings,
-    mediaState: await loadMediaState(settings.store),
-  };
+  try {
+    let settings = await loadSettings();
+
+    return {
+      settings,
+      mediaState: await loadMediaState(settings.store),
+    };
+  } finally {
+    SplashScreen.hideAsync();
+  }
 }
 
 let deferredInit = init();
@@ -116,7 +127,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   if (!state) {
     deferredInit.then(setState);
-    return <SplashScreen />;
+    return null;
   }
 
   let appSettings = new AppState(state, setState);

@@ -529,7 +529,12 @@ export const StateDecoder = JsonDecoder.object<State>(
         "Record<string, ServerState>"
       ).map(
         (rec) =>
-          new Map(Object.entries(rec).map(([id, ss]) => [id, { ...ss, id }]))
+          new Map(
+            Object.entries(rec).map(([id, ss]) => {
+              ss.id = id;
+              return [id, ss];
+            })
+          )
       )
     ),
   },

@@ -1,16 +1,16 @@
-import { StyleSheet, View, Text } from "react-native";
+import { Text, StyleSheet } from "react-native";
+import AppView from "../components/AppView";
 
 export default function Settings() {
   return (
-    <View style={styles.container}>
+    <AppView title="Settings" style={styles.container}>
       <Text>settings</Text>
-    </View>
+    </AppView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     alignItems: "center",
     justifyContent: "center",
   },
