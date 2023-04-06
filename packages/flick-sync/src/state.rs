@@ -2,14 +2,16 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use std::result;
 
+use plex_api::library::MediaItem;
 use plex_api::{
     library::{Collection, MetadataItem, Playlist, Season, Show},
     media_container::server::library::{Metadata, MetadataType},
     Server,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use time::OffsetDateTime;
+use time::{Date, OffsetDateTime};
 use tokio::fs;
 use typeshare::typeshare;
 use uuid::Uuid;
@@ -28,17 +30,13 @@ macro_rules! derive_list_item {
     };
 }
 
-#[derive(Deserialize, Default, Serialize, Clone, Debug)]
+#[derive(Deserialize, Default, Serialize, Clone, Debug, PartialEq)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum ThumbnailState {
     #[default]
     None,
     #[serde(rename_all = "camelCase")]
-    Downloaded {
-        #[serde(with = "time::serde::timestamp")]
-        last_updated: OffsetDateTime,
-        path: PathBuf,
-    },
+    Downloaded { path: PathBuf },
 }
 
 impl ThumbnailState {
@@ -46,15 +44,14 @@ impl ThumbnailState {
         matches!(self, ThumbnailState::None)
     }
 
-    pub async fn delete_stale(&mut self, root: &Path, if_older: Option<OffsetDateTime>) {
-        if let ThumbnailState::Downloaded { last_updated, path } = self {
+    pub async fn verify(&mut self, root: &Path) {
+        if let ThumbnailState::Downloaded { path } = self {
             let file = root.join(&path);
 
             match fs::metadata(&file).await {
                 Ok(stats) => {
                     if !stats.is_file() {
                         log::error!("'{}' was expected to be a file", path.display());
-                        return;
                     }
                 }
                 Err(e) => {
@@ -63,17 +60,14 @@ impl ThumbnailState {
                     } else {
                         log::error!("Error accessing thumbnail '{}': {e}", path.display());
                     }
-
-                    return;
                 }
             }
+        }
+    }
 
-            if let Some(ref dt) = if_older {
-                if dt <= last_updated {
-                    return;
-                }
-            }
-
+    pub async fn delete(&mut self, root: &Path) {
+        if let ThumbnailState::Downloaded { path } = self {
+            let file = root.join(&path);
             log::trace!("Removing old thumbnail file '{}'", path.display());
 
             if let Err(e) = fs::remove_file(&file).await {
@@ -85,7 +79,7 @@ impl ThumbnailState {
     }
 }
 
-fn from_list<'de, D, K, V>(deserializer: D) -> Result<HashMap<K, V>, D::Error>
+fn from_list<'de, D, K, V>(deserializer: D) -> result::Result<HashMap<K, V>, D::Error>
 where
     D: Deserializer<'de>,
     K: Hash + Eq,
@@ -97,7 +91,7 @@ where
         .collect())
 }
 
-fn into_list<S, K, V>(map: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
+fn into_list<S, K, V>(map: &HashMap<K, V>, serializer: S) -> result::Result<S::Ok, S::Error>
 where
     S: Serializer,
     V: Serialize,
@@ -116,6 +110,9 @@ pub struct CollectionState {
     #[typeshare(serialized_as = "Vec<u32>")]
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
     pub items: HashSet<u32>,
+    #[serde(with = "time::serde::timestamp")]
+    #[typeshare(serialized_as = "number")]
+    pub last_updated: OffsetDateTime,
     #[serde(default, skip_serializing_if = "ThumbnailState::is_none")]
     pub thumbnail: ThumbnailState,
 }
@@ -129,12 +126,29 @@ impl CollectionState {
             library: collection.metadata().library_section_id.unwrap(),
             title: collection.title().to_owned(),
             items: Default::default(),
+            last_updated: collection.metadata().updated_at.unwrap(),
             thumbnail: Default::default(),
         }
     }
 
-    pub fn update<T>(&mut self, collection: &Collection<T>) {
+    pub async fn update<T>(&mut self, collection: &Collection<T>, root: &Path) {
         self.title = collection.title().to_owned();
+
+        self.thumbnail.verify(root).await;
+
+        if self.thumbnail != ThumbnailState::None
+            && collection.metadata().updated_at.unwrap() > self.last_updated
+        {
+            self.thumbnail.delete(root).await;
+        }
+    }
+
+    pub async fn delete(&mut self, root: &Path) {
+        self.thumbnail.verify(root).await;
+
+        if self.thumbnail != ThumbnailState::None {
+            self.thumbnail.delete(root).await;
+        }
     }
 }
 
@@ -224,6 +238,9 @@ pub struct ShowState {
     pub library: u32,
     pub title: String,
     pub year: u32,
+    #[serde(with = "time::serde::timestamp")]
+    #[typeshare(serialized_as = "number")]
+    pub last_updated: OffsetDateTime,
     #[serde(default, skip_serializing_if = "ThumbnailState::is_none")]
     pub thumbnail: ThumbnailState,
 }
@@ -242,15 +259,32 @@ impl ShowState {
             library: metadata.library_section_id.unwrap(),
             title,
             year,
+            last_updated: metadata.updated_at.unwrap(),
             thumbnail: Default::default(),
         }
     }
 
-    pub fn update(&mut self, show: &Show) {
+    pub async fn update(&mut self, show: &Show, root: &Path) {
         let metadata = show.metadata();
 
         self.year = metadata.year.unwrap();
         self.title = show.title().to_owned();
+
+        self.thumbnail.verify(root).await;
+
+        if self.thumbnail != ThumbnailState::None
+            && metadata.updated_at.unwrap() > self.last_updated
+        {
+            self.thumbnail.delete(root).await;
+        }
+    }
+
+    pub async fn delete(&mut self, root: &Path) {
+        self.thumbnail.verify(root).await;
+
+        if self.thumbnail != ThumbnailState::None {
+            self.thumbnail.delete(root).await;
+        }
     }
 }
 
@@ -297,36 +331,19 @@ impl EpisodeState {
     }
 }
 
-#[derive(Deserialize, Default, Serialize, Clone, Debug)]
+#[derive(Deserialize, Default, Serialize, Clone, Debug, PartialEq)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum DownloadState {
     #[default]
     None,
     #[serde(rename_all = "camelCase")]
-    Downloading {
-        #[serde(with = "time::serde::timestamp")]
-        last_updated: OffsetDateTime,
-        path: PathBuf,
-    },
+    Downloading { path: PathBuf },
     #[serde(rename_all = "camelCase")]
-    Transcoding {
-        #[serde(with = "time::serde::timestamp")]
-        last_updated: OffsetDateTime,
-        session_id: String,
-        path: PathBuf,
-    },
+    Transcoding { session_id: String, path: PathBuf },
     #[serde(rename_all = "camelCase")]
-    Downloaded {
-        #[serde(with = "time::serde::timestamp")]
-        last_updated: OffsetDateTime,
-        path: PathBuf,
-    },
+    Downloaded { path: PathBuf },
     #[serde(rename_all = "camelCase")]
-    Transcoded {
-        #[serde(with = "time::serde::timestamp")]
-        last_updated: OffsetDateTime,
-        path: PathBuf,
-    },
+    Transcoded { path: PathBuf },
 }
 
 impl DownloadState {
@@ -334,22 +351,13 @@ impl DownloadState {
         matches!(self, DownloadState::None)
     }
 
-    pub async fn delete_stale(
-        &mut self,
-        server: &Server,
-        root: &Path,
-        if_older: Option<OffsetDateTime>,
-    ) {
-        let (last_updated, path, session_id) = match self {
+    pub async fn verify(&mut self, server: &Server, root: &Path) {
+        let (path, session_id) = match self {
             DownloadState::None => return,
-            DownloadState::Downloading { last_updated, path } => (last_updated, path, None),
-            DownloadState::Transcoding {
-                last_updated,
-                session_id,
-                path,
-            } => (last_updated, path, Some(session_id)),
-            DownloadState::Downloaded { last_updated, path } => (last_updated, path, None),
-            DownloadState::Transcoded { last_updated, path } => (last_updated, path, None),
+            DownloadState::Downloading { path } => (path, None),
+            DownloadState::Transcoding { session_id, path } => (path, Some(session_id)),
+            DownloadState::Downloaded { path } => (path, None),
+            DownloadState::Transcoded { path } => (path, None),
         };
 
         let file = root.join(&path);
@@ -358,25 +366,39 @@ impl DownloadState {
             Ok(stats) => {
                 if !stats.is_file() {
                     log::error!("'{}' was expected to be a file", path.display());
+                }
+
+                return;
+            }
+            Err(e) => {
+                if e.kind() != ErrorKind::NotFound {
+                    log::error!("Error accessing file '{}': {e}", path.display());
                     return;
                 }
             }
-            Err(e) => {
-                if e.kind() == ErrorKind::NotFound {
-                    *self = DownloadState::None;
-                } else {
-                    log::error!("Error accessing file '{}': {e}", path.display());
+        }
+
+        if let Some(session_id) = session_id {
+            if let Ok(session) = server.transcode_session(session_id).await {
+                if let Err(e) = session.cancel().await {
+                    log::warn!("Failed to cancel stale transcode session: {e}");
                 }
-
-                return;
             }
         }
 
-        if let Some(ref dt) = if_older {
-            if dt <= last_updated {
-                return;
-            }
-        }
+        *self = DownloadState::None;
+    }
+
+    pub async fn delete(&mut self, server: &Server, root: &Path) {
+        let (path, session_id) = match self {
+            DownloadState::None => return,
+            DownloadState::Downloading { path } => (path, None),
+            DownloadState::Transcoding { session_id, path } => (path, Some(session_id)),
+            DownloadState::Downloaded { path } => (path, None),
+            DownloadState::Transcoded { path } => (path, None),
+        };
+
+        let file = root.join(&path);
 
         log::trace!("Removing old video file '{}'", path.display());
 
@@ -397,6 +419,16 @@ impl DownloadState {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[typeshare]
+#[serde(rename_all = "camelCase")]
+pub struct VideoPart {
+    #[typeshare(serialized_as = "number")]
+    pub duration: u64,
+    #[serde(default, skip_serializing_if = "DownloadState::is_none")]
+    pub download: DownloadState,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum VideoDetail {
     Movie(MovieState),
@@ -405,14 +437,21 @@ pub enum VideoDetail {
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[typeshare]
+#[serde(rename_all = "camelCase")]
 pub struct VideoState {
     pub id: u32,
     pub title: String,
     pub detail: VideoDetail,
+    #[typeshare(serialized_as = "string")]
+    pub air_date: Date,
     #[serde(default, skip_serializing_if = "ThumbnailState::is_none")]
     pub thumbnail: ThumbnailState,
-    #[serde(default, skip_serializing_if = "DownloadState::is_none")]
-    pub download: DownloadState,
+    #[typeshare(serialized_as = "number")]
+    pub media_id: u64,
+    #[serde(with = "time::serde::timestamp")]
+    #[typeshare(serialized_as = "number")]
+    pub last_updated: OffsetDateTime,
+    pub parts: Vec<VideoPart>,
 }
 
 derive_list_item!(VideoState);
@@ -432,7 +471,7 @@ impl VideoState {
         }
     }
 
-    pub fn from<M: MetadataItem>(item: &M) -> Self {
+    pub fn from<M: MediaItem>(item: &M) -> Self {
         let metadata = item.metadata();
         let detail = match metadata.metadata_type {
             Some(MetadataType::Movie) => VideoDetail::Movie(MovieState::from(metadata)),
@@ -440,16 +479,29 @@ impl VideoState {
             _ => panic!("Unexpected video type: {:?}", metadata.metadata_type),
         };
 
+        let media = &item.media()[0];
+        let parts: Vec<VideoPart> = media
+            .parts()
+            .iter()
+            .map(|p| VideoPart {
+                duration: p.metadata().duration.unwrap(),
+                download: Default::default(),
+            })
+            .collect();
+
         Self {
             id: item.rating_key(),
             title: item.title().to_owned(),
             detail,
+            air_date: metadata.originally_available_at.unwrap(),
             thumbnail: Default::default(),
-            download: Default::default(),
+            media_id: media.metadata().id,
+            last_updated: metadata.updated_at.unwrap(),
+            parts,
         }
     }
 
-    pub fn update<M: MetadataItem>(&mut self, item: &M) {
+    pub async fn update<M: MetadataItem>(&mut self, item: &M, server: &Server, root: &Path) {
         let metadata = item.metadata();
         self.title = item.title().to_owned();
 
@@ -457,16 +509,36 @@ impl VideoState {
             VideoDetail::Movie(ref mut m) => m.update(metadata),
             VideoDetail::Episode(ref mut e) => e.update(metadata),
         }
+
+        self.thumbnail.verify(root).await;
+        for part in self.parts.iter_mut() {
+            part.download.verify(server, root).await;
+        }
+
+        if metadata.updated_at.unwrap() > self.last_updated {
+            if self.thumbnail != ThumbnailState::None {
+                self.thumbnail.delete(root).await;
+            }
+            for part in self.parts.iter_mut() {
+                if part.download != DownloadState::None {
+                    part.download.verify(server, root).await;
+                }
+            }
+        }
     }
 
-    pub async fn delete_stale(
-        &mut self,
-        server: &Server,
-        root: &Path,
-        if_older: Option<OffsetDateTime>,
-    ) {
-        self.thumbnail.delete_stale(root, if_older).await;
-        self.download.delete_stale(server, root, if_older).await;
+    pub async fn delete(&mut self, server: &Server, root: &Path) {
+        self.thumbnail.verify(root).await;
+        if self.thumbnail != ThumbnailState::None {
+            self.thumbnail.delete(root).await;
+        }
+
+        for part in self.parts.iter_mut() {
+            part.download.verify(server, root).await;
+            if part.download != DownloadState::None {
+                part.download.delete(server, root).await;
+            }
+        }
     }
 }
 

@@ -248,14 +248,9 @@ impl<'a> StateSync<'a> {
             .server_state
             .videos
             .entry(movie.rating_key())
-            .and_modify(|video| video.update(movie))
             .or_insert_with(|| VideoState::from(movie));
 
-        if let Some(updated) = movie.metadata().updated_at {
-            video
-                .delete_stale(&self.server, self.root, Some(updated))
-                .await;
-        }
+        video.update(movie, &self.server, self.root).await;
 
         self.add_library(movie)?;
 
@@ -269,14 +264,9 @@ impl<'a> StateSync<'a> {
             .server_state
             .videos
             .entry(episode.rating_key())
-            .and_modify(|video| video.update(episode))
             .or_insert_with(|| VideoState::from(episode));
 
-        if let Some(updated) = episode.metadata().updated_at {
-            video
-                .delete_stale(&self.server, self.root, Some(updated))
-                .await;
-        }
+        video.update(episode, &self.server, self.root).await;
 
         Ok(())
     }
@@ -300,15 +290,9 @@ impl<'a> StateSync<'a> {
             .server_state
             .shows
             .entry(show.rating_key())
-            .and_modify(|ss| ss.update(show))
             .or_insert_with(|| ShowState::from(show));
 
-        if let Some(updated) = show.metadata().updated_at {
-            show_state
-                .thumbnail
-                .delete_stale(self.root, Some(updated))
-                .await;
-        }
+        show_state.update(show, self.root).await;
 
         self.add_library(show)?;
 
@@ -367,16 +351,10 @@ impl<'a> StateSync<'a> {
             .server_state
             .collections
             .entry(collection.rating_key())
-            .and_modify(|cs| cs.update(collection))
             .or_insert_with(|| CollectionState::from(collection));
         collection_state.items = items;
 
-        if let Some(updated) = collection.metadata().updated_at {
-            collection_state
-                .thumbnail
-                .delete_stale(self.root, Some(updated))
-                .await;
-        }
+        collection_state.update(collection, self.root).await;
 
         Ok(())
     }
@@ -404,7 +382,7 @@ impl<'a> StateSync<'a> {
             .values_mut()
             .filter(|v| !self.seen_items.contains(&v.id))
         {
-            video.delete_stale(&self.server, self.root, None).await;
+            video.delete(&self.server, self.root).await;
         }
 
         for collection in self
@@ -413,7 +391,7 @@ impl<'a> StateSync<'a> {
             .values_mut()
             .filter(|v| !self.seen_items.contains(&v.id))
         {
-            collection.thumbnail.delete_stale(self.root, None).await;
+            collection.delete(self.root).await;
         }
 
         for show in self
@@ -422,7 +400,7 @@ impl<'a> StateSync<'a> {
             .values_mut()
             .filter(|v| !self.seen_items.contains(&v.id))
         {
-            show.thumbnail.delete_stale(self.root, None).await;
+            show.delete(self.root).await;
         }
 
         self.server_state

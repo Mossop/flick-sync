@@ -7,6 +7,7 @@ export interface CollectionState {
 	library: number;
 	title: string;
 	items?: number[];
+	lastUpdated: number;
 	thumbnail?: ThumbnailState;
 }
 
@@ -34,6 +35,7 @@ export interface ShowState {
 	library: number;
 	title: string;
 	year: number;
+	lastUpdated: number;
 	thumbnail?: ThumbnailState;
 }
 
@@ -47,12 +49,20 @@ export interface EpisodeState {
 	index: number;
 }
 
+export interface VideoPart {
+	duration: number;
+	download?: DownloadState;
+}
+
 export interface VideoState {
 	id: number;
 	title: string;
 	detail: VideoDetail;
+	airDate: string;
 	thumbnail?: ThumbnailState;
-	download?: DownloadState;
+	mediaId: number;
+	lastUpdated: number;
+	parts: VideoPart[];
 }
 
 export interface ServerState {

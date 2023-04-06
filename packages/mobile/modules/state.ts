@@ -123,7 +123,7 @@ const DownloadStateDecoder = optional(
 );
 
 export type ShowCollectionState = Replace<
-  RustState.CollectionState,
+  Omit<RustState.CollectionState, "lastUpdated">,
   {
     library: ShowLibraryState;
     items: ShowState[];
@@ -202,7 +202,7 @@ export type SeasonState = Replace<
 >;
 
 export type ShowState = Replace<
-  RustState.ShowState,
+  Omit<RustState.ShowState, "lastUpdated">,
   {
     library: ShowLibraryState;
     thumbnail: ThumbnailState;
@@ -224,14 +224,27 @@ export type EpisodeDetail = Replace<
   }
 >;
 
+export type VideoPart = Replace<
+  RustState.VideoPart,
+  { download: DownloadState }
+>;
+
+const VideoPartDecoder = JsonDecoder.object<VideoPart>(
+  {
+    duration: JsonDecoder.number,
+    download: DownloadStateDecoder,
+  },
+  "VideoPart",
+);
+
 export type VideoDetail = MovieDetail | EpisodeDetail;
 
 export type MovieState = Replace<
-  RustState.VideoState,
+  Omit<RustState.VideoState, "lastUpdated" | "mediaId">,
   {
     detail: MovieDetail;
     thumbnail: ThumbnailState;
-    download: DownloadState;
+    parts: VideoPart[];
   }
 >;
 
@@ -391,7 +404,8 @@ function decodeServerState(json: any): ServerState {
       id: JsonDecoder.number,
       title: JsonDecoder.string,
       thumbnail: ThumbnailStateDecoder,
-      download: DownloadStateDecoder,
+      airDate: JsonDecoder.string,
+      parts: JsonDecoder.array(VideoPartDecoder, "VideoPart[]"),
       detail: MovieDetailDecoder,
     },
     "MovieState",
@@ -402,7 +416,8 @@ function decodeServerState(json: any): ServerState {
       id: JsonDecoder.number,
       title: JsonDecoder.string,
       thumbnail: ThumbnailStateDecoder,
-      download: DownloadStateDecoder,
+      airDate: JsonDecoder.string,
+      parts: JsonDecoder.array(VideoPartDecoder, "VideoPart[]"),
       detail: EpisodeDetailDecoder,
     },
     "EpisodeState",

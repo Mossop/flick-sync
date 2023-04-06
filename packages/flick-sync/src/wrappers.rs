@@ -120,10 +120,7 @@ macro_rules! thumbnail_methods {
                     .transcode_artwork(&image, 320, 320, Default::default(), file)
                     .await?;
 
-                let state = ThumbnailState::Downloaded {
-                    last_updated: item.metadata().updated_at.unwrap(),
-                    path,
-                };
+                let state = ThumbnailState::Downloaded { path };
 
                 self.update_state(|s| s.thumbnail = state).await?;
                 log::trace!("Thumbnail for {} successfully updated", item.title());
