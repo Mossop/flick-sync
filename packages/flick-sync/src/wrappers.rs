@@ -187,7 +187,7 @@ impl Show {
             let state = ss.shows.get(&self.id).unwrap();
 
             let name = match file_type {
-                FileType::Video => format!("{} ({}).{extension}", state.title, state.year),
+                FileType::Video => panic!("Unexpected"),
                 FileType::Thumbnail => format!(".thumb.{extension}"),
             };
 
@@ -258,7 +258,7 @@ impl Episode {
         self.show().await.library().await
     }
 
-    async fn file_path(&self, _file_type: FileType, extension: &str) -> PathBuf {
+    async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.videos.get(&self.id).unwrap();
             let ep_state = state.episode_state();
@@ -266,12 +266,20 @@ impl Episode {
             let show = ss.shows.get(&season.show).unwrap();
             let library_title = &ss.libraries.get(&show.library).unwrap().title;
 
+            let name = match file_type {
+                FileType::Video => format!(
+                    "S{:02}E{:02} - {}.{extension}",
+                    season.index, ep_state.index, state.title
+                ),
+                FileType::Thumbnail => format!(
+                    ".S{:02}E{:02}.thumb.{extension}",
+                    season.index, ep_state.index
+                ),
+            };
+
             PathBuf::from(safe(library_title))
                 .join(safe(format!("{} ({})", show.title, show.year)))
-                .join(safe(format!(
-                    "S{:02}E{:02} {}.{extension}",
-                    season.index, ep_state.index, state.title
-                )))
+                .join(safe(name))
         })
         .await
     }
@@ -290,18 +298,20 @@ impl Movie {
     thumbnail_methods!();
     parent!(library, MovieLibrary, movie_state().library);
 
-    async fn file_path(&self, _file_type: FileType, extension: &str) -> PathBuf {
+    async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.videos.get(&self.id).unwrap();
             let m_state = state.movie_state();
             let library_title = &ss.libraries.get(&m_state.library).unwrap().title;
 
+            let name = match file_type {
+                FileType::Video => format!("{} ({}).{extension}", state.title, m_state.year),
+                FileType::Thumbnail => format!(".thumb.{extension}",),
+            };
+
             PathBuf::from(safe(library_title))
                 .join(safe(format!("{} ({})", state.title, m_state.year)))
-                .join(safe(format!(
-                    "{} ({}).{extension}",
-                    state.title, m_state.year
-                )))
+                .join(safe(name))
         })
         .await
     }
