@@ -41,10 +41,16 @@ interface CollectionParams {
   collection: number;
 }
 
+interface ShowParams {
+  server: string;
+  show: number;
+}
+
 export interface AppRoutes {
   library: LibraryParams | undefined;
   playlist: PlaylistParams;
   collection: CollectionParams;
+  show: ShowParams;
   [key: string]: object | undefined;
 }
 

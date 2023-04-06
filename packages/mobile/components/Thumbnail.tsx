@@ -3,9 +3,6 @@ import { ThumbnailState } from "../modules/state";
 import { useAppState } from "./AppState";
 
 const styles = StyleSheet.create({
-  scroller: {
-    width: 1,
-  },
   image: {
     width: 150,
     height: 150,

@@ -15,6 +15,7 @@ import LibraryContent from "./app/contents";
 import LibraryCollections from "./app/collections";
 import { useLibraries } from "./modules/util";
 import Collection from "./app/collection";
+import Show from "./app/show";
 
 const LibraryNav = createMaterialBottomTabNavigator();
 
@@ -69,6 +70,7 @@ function App() {
     <AppNav.Navigator initialRouteName="library">
       <AppNav.Screen name="library" component={Library} />
       <AppNav.Screen name="collection" component={Collection} />
+      <AppNav.Screen name="show" component={Show} />
       <AppNav.Screen name="playlist" component={Playlist} />
       <AppNav.Screen name="settings" component={Settings} />
     </AppNav.Navigator>

@@ -5,7 +5,13 @@ import {
   ParamListBase,
 } from "@react-navigation/native";
 import { useMediaState } from "../components/AppState";
-import { LibraryState, MovieState, PlaylistState, ShowState } from "./state";
+import {
+  EpisodeState,
+  LibraryState,
+  MovieState,
+  PlaylistState,
+  ShowState,
+} from "./state";
 
 export interface ScreenProps<
   Params extends ParamListBase = ParamListBase,
@@ -50,6 +56,15 @@ function sorted<T>(list: T[], comparator: (a: T, b: T) => number): T[] {
   return result;
 }
 
+export function byIndex(episodes: EpisodeState[]): EpisodeState[] {
+  return sorted(episodes, (a, b) => {
+    if (a.detail.season.index == b.detail.season.index) {
+      return a.detail.index - b.detail.index;
+    }
+    return a.detail.season.index - b.detail.season.index;
+  });
+}
+
 export function moviesByYear(movies: MovieState[]): MovieState[] {
   return sorted(movies, (a, b) => a.detail.year - b.detail.year);
 }
@@ -59,7 +74,11 @@ export function showsByYear(movies: ShowState[]): ShowState[] {
 }
 
 function plain(st: string): string {
-  return st;
+  let lower = st.toLocaleLowerCase().trim();
+  if (lower.startsWith("the ")) {
+    return lower.substring(4);
+  }
+  return lower;
 }
 
 export function byTitle<T extends { title: string }>(items: T[]): T[] {
