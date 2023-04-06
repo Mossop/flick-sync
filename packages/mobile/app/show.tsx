@@ -4,7 +4,7 @@ import AppView from "../components/AppView";
 import { useMediaState } from "../components/AppState";
 import { AppScreenProps } from "../components/AppNavigator";
 import { byIndex } from "../modules/util";
-import Episodes from "../components/Episodes";
+import Videos from "../components/Videos";
 
 export default function Show({ route }: AppScreenProps<"show">) {
   let mediaState = useMediaState();
@@ -27,7 +27,7 @@ export default function Show({ route }: AppScreenProps<"show">) {
   return (
     <AppView title={show.title}>
       <ScrollView>
-        <Episodes episodes={episodes} />
+        <Videos videos={episodes} />
       </ScrollView>
     </AppView>
   );
