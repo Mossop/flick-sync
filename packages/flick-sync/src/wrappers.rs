@@ -527,6 +527,10 @@ impl Episode {
         self.show().await.library().await
     }
 
+    pub async fn title(&self) -> String {
+        self.with_state(|s| s.title.clone()).await
+    }
+
     pub async fn parts(&self) -> Vec<VideoPart> {
         self.with_state(|vs| {
             vs.parts
@@ -591,6 +595,10 @@ impl Movie {
     thumbnail_methods!();
     parent!(library, MovieLibrary, movie_state().library);
 
+    pub async fn title(&self) -> String {
+        self.with_state(|s| s.title.clone()).await
+    }
+
     pub async fn parts(&self) -> Vec<VideoPart> {
         self.with_state(|vs| {
             vs.parts
@@ -645,6 +653,13 @@ impl Video {
         match self {
             Self::Movie(v) => Library::Movie(v.library().await),
             Self::Episode(v) => Library::Show(v.library().await),
+        }
+    }
+
+    pub async fn title(&self) -> String {
+        match self {
+            Self::Movie(v) => v.title().await,
+            Self::Episode(v) => v.title().await,
         }
     }
 

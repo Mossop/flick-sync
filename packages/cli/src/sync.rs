@@ -37,7 +37,12 @@ impl Progress for DownloadProgress {
     }
 }
 
-async fn download_part(sync_state: SyncState<'_>, part: VideoPart, console: Console) {
+async fn download_part(
+    title: String,
+    sync_state: SyncState<'_>,
+    part: VideoPart,
+    console: Console,
+) {
     if part.is_downloaded().await {
         return;
     }
@@ -49,7 +54,7 @@ async fn download_part(sync_state: SyncState<'_>, part: VideoPart, console: Cons
 
     let _permit = sync_state.download_permits.acquire().await.unwrap();
 
-    let bar = console.add_progress();
+    let bar = console.add_progress(&title);
     if let Err(e) = part.download(DownloadProgress { bar: bar.clone() }).await {
         log::error!("{e}");
     }
@@ -78,8 +83,14 @@ impl Runnable for Sync {
 
         for server in servers {
             for video in server.videos().await {
+                let title = video.title().await;
                 for part in video.parts().await {
-                    jobs.push(download_part(state.clone(), part, console.clone()));
+                    jobs.push(download_part(
+                        title.clone(),
+                        state.clone(),
+                        part,
+                        console.clone(),
+                    ));
                 }
             }
         }

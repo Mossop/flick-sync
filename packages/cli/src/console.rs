@@ -7,7 +7,7 @@ use std::{
 use console::{pad_str, Alignment, Style, Term};
 use dialoguer::{Input, Password, Select};
 use flexi_logger::{writers::LogWriter, DeferredNow, Level, Record};
-use indicatif::{MultiProgress, ProgressBar};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 #[derive(Default)]
 struct Progress {
@@ -51,8 +51,15 @@ impl Default for Console {
 }
 
 impl Console {
-    pub fn add_progress(&self) -> Bar {
-        let inner_bar = ProgressBar::new(100);
+    pub fn add_progress(&self, msg: &str) -> Bar {
+        let inner_bar = ProgressBar::new(100)
+            .with_message(msg.to_owned())
+            .with_style(
+                ProgressStyle::with_template(
+                    "{msg:30!} {wide_bar}    {bytes:>10}/{total_bytes:10}",
+                )
+                .unwrap(),
+            );
 
         let mut p_state = self.progress.write().unwrap();
         let progress = p_state.get_or_insert(Default::default());
