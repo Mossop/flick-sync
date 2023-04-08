@@ -54,7 +54,7 @@ async fn download_part(
 
     let _permit = sync_state.download_permits.acquire().await.unwrap();
 
-    let bar = console.add_progress(&title);
+    let bar = console.add_progress_bar(&title);
     if let Err(e) = part.download(DownloadProgress { bar: bar.clone() }).await {
         log::error!("{e}");
     }

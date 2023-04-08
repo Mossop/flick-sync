@@ -1,6 +1,6 @@
 use std::{
     io,
-    ops::Deref,
+    ops::{Deref, DerefMut},
     sync::{Arc, RwLock},
 };
 
@@ -10,15 +10,15 @@ use flexi_logger::{writers::LogWriter, DeferredNow, Level, Record};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 #[derive(Default)]
-struct Progress {
-    progress: MultiProgress,
-    bars: usize,
+struct ProgressBars {
+    bars: MultiProgress,
+    count: usize,
 }
 
 #[derive(Clone)]
 pub struct Bar {
     bar: ProgressBar,
-    progress: Arc<RwLock<Option<Progress>>>,
+    progress_bars: Arc<RwLock<Option<ProgressBars>>>,
 }
 
 impl Bar {
@@ -30,28 +30,41 @@ impl Bar {
         self.bar.set_length(length);
     }
 
-    pub fn finish(&self) {
+    pub fn finish(self) {
         self.bar.finish_and_clear();
+
+        let mut progress = self.progress_bars.write().unwrap();
+        let is_empty = if let Some(ref mut progress) = progress.deref_mut() {
+            progress.bars.remove(&self.bar);
+            progress.count -= 1;
+            progress.count == 0
+        } else {
+            false
+        };
+
+        if is_empty {
+            *progress = None;
+        }
     }
 }
 
 #[derive(Clone)]
 pub struct Console {
     term: Term,
-    progress: Arc<RwLock<Option<Progress>>>,
+    progress_bars: Arc<RwLock<Option<ProgressBars>>>,
 }
 
 impl Default for Console {
     fn default() -> Self {
         Self {
             term: Term::stdout(),
-            progress: Arc::new(RwLock::new(None)),
+            progress_bars: Arc::new(RwLock::new(None)),
         }
     }
 }
 
 impl Console {
-    pub fn add_progress(&self, msg: &str) -> Bar {
+    pub fn add_progress_bar(&self, msg: &str) -> Bar {
         let inner_bar = ProgressBar::new(100)
             .with_message(msg.to_owned())
             .with_style(
@@ -61,13 +74,13 @@ impl Console {
                 .unwrap(),
             );
 
-        let mut p_state = self.progress.write().unwrap();
+        let mut p_state = self.progress_bars.write().unwrap();
         let progress = p_state.get_or_insert(Default::default());
-        progress.bars += 1;
+        progress.count += 1;
 
         Bar {
-            bar: progress.progress.add(inner_bar),
-            progress: self.progress.clone(),
+            bar: progress.bars.add(inner_bar),
+            progress_bars: self.progress_bars.clone(),
         }
     }
 
@@ -75,10 +88,10 @@ impl Console {
     where
         F: FnOnce(&Term) -> R,
     {
-        let progress = self.progress.read().unwrap();
+        let progress = self.progress_bars.read().unwrap();
 
         if let Some(bars) = progress.deref() {
-            bars.progress.suspend(|| f(&self.term))
+            bars.bars.suspend(|| f(&self.term))
         } else {
             f(&self.term)
         }
