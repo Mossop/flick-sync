@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+futures = "0.3.28"
 flick-sync = { path = "../flick-sync" }
 clap = { version = "4.1.13", features = ["derive", "env"] }
 flexi_logger = { version = "0.25.3", features = ["colors"] }

@@ -351,6 +351,13 @@ impl DownloadState {
         matches!(self, DownloadState::None)
     }
 
+    pub fn needs_download(&self) -> bool {
+        !matches!(
+            self,
+            DownloadState::Downloaded { path: _ } | DownloadState::Transcoded { path: _ }
+        )
+    }
+
     pub async fn verify(&mut self, server: &Server, root: &Path) {
         let (path, session_id) = match self {
             DownloadState::None => return,
@@ -421,7 +428,7 @@ impl DownloadState {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
-pub struct VideoPart {
+pub struct VideoPartState {
     #[typeshare(serialized_as = "number")]
     pub duration: u64,
     #[serde(default, skip_serializing_if = "DownloadState::is_none")]
@@ -451,7 +458,7 @@ pub struct VideoState {
     #[serde(with = "time::serde::timestamp")]
     #[typeshare(serialized_as = "number")]
     pub last_updated: OffsetDateTime,
-    pub parts: Vec<VideoPart>,
+    pub parts: Vec<VideoPartState>,
 }
 
 derive_list_item!(VideoState);
@@ -480,10 +487,10 @@ impl VideoState {
         };
 
         let media = &item.media()[0];
-        let parts: Vec<VideoPart> = media
+        let parts: Vec<VideoPartState> = media
             .parts()
             .iter()
-            .map(|p| VideoPart {
+            .map(|p| VideoPartState {
                 duration: p.metadata().duration.unwrap(),
                 download: Default::default(),
             })

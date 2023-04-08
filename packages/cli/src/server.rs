@@ -227,7 +227,7 @@ pub struct List {
 
 #[async_trait]
 impl Runnable for List {
-    async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
+    async fn run(self, flick_sync: FlickSync, _console: Console) -> Result {
         let servers = select_servers(&flick_sync, &self.ids).await?;
 
         for server in servers {

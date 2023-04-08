@@ -7,10 +7,32 @@ use std::{
 use console::{pad_str, Alignment, Style, Term};
 use dialoguer::{Input, Password, Select};
 use flexi_logger::{writers::LogWriter, DeferredNow, Level, Record};
-use indicatif::MultiProgress;
+use indicatif::{MultiProgress, ProgressBar};
 
+#[derive(Default)]
 struct Progress {
     progress: MultiProgress,
+    bars: usize,
+}
+
+#[derive(Clone)]
+pub struct Bar {
+    bar: ProgressBar,
+    progress: Arc<RwLock<Option<Progress>>>,
+}
+
+impl Bar {
+    pub fn set_position(&self, position: u64) {
+        self.bar.set_position(position);
+    }
+
+    pub fn set_length(&self, length: u64) {
+        self.bar.set_length(length);
+    }
+
+    pub fn finish(&self) {
+        self.bar.finish_and_clear();
+    }
 }
 
 #[derive(Clone)]
@@ -29,6 +51,19 @@ impl Default for Console {
 }
 
 impl Console {
+    pub fn add_progress(&self) -> Bar {
+        let inner_bar = ProgressBar::new(100);
+
+        let mut p_state = self.progress.write().unwrap();
+        let progress = p_state.get_or_insert(Default::default());
+        progress.bars += 1;
+
+        Bar {
+            bar: progress.progress.add(inner_bar),
+            progress: self.progress.clone(),
+        }
+    }
+
     fn with_term<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&Term) -> R,

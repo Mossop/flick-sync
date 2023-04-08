@@ -16,3 +16,5 @@ time = { version = "0.3.20", features = ["serde", "serde-well-known"] }
 async-trait = "0.1.68"
 async-std = "1.12.0"
 typeshare = "1.0.1"
+futures = "0.3.28"
+pin-project = "1.0.12"

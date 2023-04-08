@@ -11,7 +11,7 @@ use plex_api::{
 use crate::{
     state::{
         CollectionState, LibraryState, LibraryType, PlaylistState, SeasonState, ServerState,
-        ShowState, VideoState,
+        ShowState, VideoDetail, VideoState,
     },
     wrappers, Error, Inner, Library, Result, ServerConnection,
 };
@@ -26,6 +26,29 @@ impl Server {
     /// The FlickSync identifier for this server.
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    pub async fn videos(&self) -> Vec<wrappers::Video> {
+        let state = self.inner.state.read().await;
+        state
+            .servers
+            .get(&self.id)
+            .unwrap()
+            .videos
+            .iter()
+            .map(|(id, vs)| match vs.detail {
+                VideoDetail::Movie(_) => wrappers::Video::Movie(wrappers::Movie {
+                    server: self.id.clone(),
+                    id: *id,
+                    inner: self.inner.clone(),
+                }),
+                VideoDetail::Episode(_) => wrappers::Video::Episode(wrappers::Episode {
+                    server: self.id.clone(),
+                    id: *id,
+                    inner: self.inner.clone(),
+                }),
+            })
+            .collect()
     }
 
     pub async fn libraries(&self) -> Vec<wrappers::Library> {

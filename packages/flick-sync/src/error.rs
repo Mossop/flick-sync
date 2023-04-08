@@ -29,6 +29,8 @@ pub enum Error {
     ItemNotSupported(u32),
     #[error("Plex returned incomplete information for item {0}: {1}")]
     ItemIncomplete(u32, String),
+    #[error("The item appears to be missing on the server")]
+    MissingItem,
     #[error("Unknown error")]
     Unknown(String),
 }

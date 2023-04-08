@@ -1,15 +1,25 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    io::{ErrorKind, IoSlice},
+    path::PathBuf,
+    pin::Pin,
+    result,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
-use async_std::fs::{create_dir_all, File};
+use async_std::fs::{create_dir_all, File, OpenOptions};
 use async_trait::async_trait;
-use plex_api::library::MetadataItem;
+use futures::AsyncWrite;
+use pin_project::pin_project;
+use plex_api::library::{MediaItem, MetadataItem};
+use tokio::fs::{metadata, remove_file};
 
 use crate::{
     state::{
         CollectionState, LibraryState, PlaylistState, SeasonState, ServerState, ShowState,
-        ThumbnailState, VideoDetail, VideoState,
+        ThumbnailState, VideoDetail, VideoPartState, VideoState,
     },
-    Inner, Result, Server,
+    DownloadState, Error, Inner, Result, Server,
 };
 
 fn safe<S: AsRef<str>>(str: S) -> String {
@@ -25,7 +35,7 @@ fn safe<S: AsRef<str>>(str: S) -> String {
 
 #[derive(Debug, Clone, Copy)]
 enum FileType {
-    Video,
+    Video(usize),
     Thumbnail,
 }
 
@@ -187,7 +197,7 @@ impl Show {
             let state = ss.shows.get(&self.id).unwrap();
 
             let name = match file_type {
-                FileType::Video => panic!("Unexpected"),
+                FileType::Video(_) => panic!("Unexpected"),
                 FileType::Thumbnail => format!(".thumb.{extension}"),
             };
 
@@ -237,6 +247,265 @@ impl Season {
     }
 }
 
+pub trait Progress {
+    fn progress(&mut self, position: u64, size: u64);
+}
+
+#[pin_project]
+struct WriterProgress<'a, W, P> {
+    offset: u64,
+    size: u64,
+    #[pin]
+    writer: W,
+    progress: &'a mut P,
+}
+
+impl<'a, W, P> AsyncWrite for WriterProgress<'a, W, P>
+where
+    W: AsyncWrite + Unpin,
+    P: Progress + Unpin,
+{
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<result::Result<usize, futures::io::Error>> {
+        let this = self.project();
+        let result = this.writer.poll_write(cx, buf);
+
+        if let Poll::Ready(Ok(count)) = result {
+            *this.offset += count as u64;
+            this.progress.progress(*this.offset, *this.size);
+        }
+
+        result
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[IoSlice<'_>],
+    ) -> Poll<result::Result<usize, futures::io::Error>> {
+        let this = self.project();
+        let result = this.writer.poll_write_vectored(cx, bufs);
+
+        if let Poll::Ready(Ok(count)) = result {
+            *this.offset += count as u64;
+            this.progress.progress(*this.offset, *this.size);
+        }
+
+        result
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<result::Result<(), futures::io::Error>> {
+        let writer = Pin::new(&mut self.get_mut().writer);
+        writer.poll_flush(cx)
+    }
+
+    fn poll_close(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<result::Result<(), futures::io::Error>> {
+        let writer = Pin::new(&mut self.get_mut().writer);
+        writer.poll_close(cx)
+    }
+}
+
+#[derive(Clone)]
+pub struct VideoPart {
+    pub(crate) server: String,
+    pub(crate) id: u32,
+    pub(crate) index: usize,
+    pub(crate) inner: Arc<Inner>,
+}
+
+impl VideoPart {
+    pub async fn video(&self) -> Video {
+        self.with_server_state(|server_state| {
+            let video_state = server_state.videos.get(&self.id).unwrap();
+
+            match video_state.detail {
+                VideoDetail::Movie(_) => Video::Movie(Movie {
+                    server: self.server.clone(),
+                    id: self.id,
+                    inner: self.inner.clone(),
+                }),
+                VideoDetail::Episode(_) => Video::Episode(Episode {
+                    server: self.server.clone(),
+                    id: self.id,
+                    inner: self.inner.clone(),
+                }),
+            }
+        })
+        .await
+    }
+
+    async fn file_path(&self, extension: &str) -> PathBuf {
+        let video = self.video().await;
+        video
+            .file_path(FileType::Video(self.index), extension)
+            .await
+    }
+
+    pub async fn is_downloaded(&self) -> bool {
+        let download_state = self.download_state().await;
+        !download_state.needs_download()
+    }
+
+    pub async fn wait_for_download(&self) -> Result {
+        let download_state = self.download_state().await;
+        match download_state {
+            DownloadState::None => {
+                let path = self.file_path("mkv").await;
+
+                let target = { self.inner.path.read().await.join(&path) };
+                if let Err(e) = remove_file(target).await {
+                    if e.kind() != ErrorKind::NotFound {
+                        return Err(Error::from(e));
+                    }
+                }
+
+                self.update_state(|state| state.download = DownloadState::Downloading { path })
+                    .await?;
+            }
+            DownloadState::Downloading { path: _ } => (),
+            DownloadState::Transcoding {
+                session_id: _,
+                path: _,
+            } => panic!("Unexpected"),
+            DownloadState::Downloaded { path: _ } | DownloadState::Transcoded { path: _ } => (),
+        };
+
+        Ok(())
+    }
+
+    pub async fn download<P: Progress + Unpin>(&self, mut progress: P) -> Result {
+        let download_state = self.download_state().await;
+        let path = match download_state {
+            DownloadState::None => panic!("Unexpected"),
+            DownloadState::Downloading { path } => path,
+            DownloadState::Transcoding {
+                session_id: _,
+                path: _,
+            } => panic!("Unexpected"),
+            DownloadState::Downloaded { path: _ } | DownloadState::Transcoded { path: _ } => {
+                return Ok(());
+            }
+        };
+
+        let target = { self.inner.path.read().await.join(&path) };
+        let offset = match metadata(&target).await {
+            Ok(stats) => stats.len(),
+            Err(e) => {
+                if e.kind() == ErrorKind::NotFound {
+                    0
+                } else {
+                    return Err(Error::from(e));
+                }
+            }
+        };
+
+        let server = self.connect().await?;
+        let item = server.item_by_id(self.id).await?;
+
+        let media_id = self
+            .with_server_state(|ss| {
+                let video_state = ss.videos.get(&self.id).unwrap();
+                video_state.media_id
+            })
+            .await;
+
+        let media = item
+            .media()
+            .into_iter()
+            .find(|m| m.metadata().id == media_id)
+            .ok_or_else(|| Error::MissingItem)?;
+        let parts = media.parts();
+        let part = parts.get(self.index).ok_or_else(|| Error::MissingItem)?;
+
+        let file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&target)
+            .await?;
+        let writer = WriterProgress {
+            offset,
+            size: part.metadata().size.unwrap(),
+            writer: file,
+            progress: &mut progress,
+        };
+        log::debug!("Downloading {} from offset {offset}", path.display());
+
+        part.download(writer, offset..).await?;
+        log::info!("Download of {} complete", path.display());
+
+        self.update_state(|state| state.download = DownloadState::Downloaded { path })
+            .await?;
+
+        Ok(())
+    }
+
+    async fn download_state(&self) -> DownloadState {
+        self.with_state(|part_state| part_state.download.clone())
+            .await
+    }
+}
+
+#[async_trait]
+impl StateWrapper<VideoPartState> for VideoPart {
+    async fn connect(&self) -> Result<plex_api::Server> {
+        let server = Server {
+            id: self.server.clone(),
+            inner: self.inner.clone(),
+        };
+
+        server.connect().await
+    }
+
+    async fn with_server_state<F, R>(&self, cb: F) -> R
+    where
+        F: Send + FnOnce(&ServerState) -> R,
+    {
+        let state = self.inner.state.read().await;
+        cb(state.servers.get(&self.server).unwrap())
+    }
+
+    async fn with_state<F, R>(&self, cb: F) -> R
+    where
+        F: Send + FnOnce(&VideoPartState) -> R,
+    {
+        self.with_server_state(|ss| {
+            cb(ss
+                .videos
+                .get(&self.id)
+                .unwrap()
+                .parts
+                .get(self.index)
+                .unwrap())
+        })
+        .await
+    }
+
+    async fn update_state<F>(&self, cb: F) -> Result
+    where
+        F: Send + FnOnce(&mut VideoPartState),
+    {
+        let mut state = self.inner.state.write().await;
+        let server_state = state.servers.get_mut(&self.server).unwrap();
+        cb(server_state
+            .videos
+            .get_mut(&self.id)
+            .unwrap()
+            .parts
+            .get_mut(self.index)
+            .unwrap());
+        self.inner.persist_state(&state).await
+    }
+}
+
 #[derive(Clone)]
 pub struct Episode {
     pub(crate) server: String,
@@ -258,6 +527,22 @@ impl Episode {
         self.show().await.library().await
     }
 
+    pub async fn parts(&self) -> Vec<VideoPart> {
+        self.with_state(|vs| {
+            vs.parts
+                .iter()
+                .enumerate()
+                .map(|(index, _)| VideoPart {
+                    server: self.server.clone(),
+                    id: self.id,
+                    index,
+                    inner: self.inner.clone(),
+                })
+                .collect()
+        })
+        .await
+    }
+
     async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.videos.get(&self.id).unwrap();
@@ -267,10 +552,18 @@ impl Episode {
             let library_title = &ss.libraries.get(&show.library).unwrap().title;
 
             let name = match file_type {
-                FileType::Video => format!(
-                    "S{:02}E{:02} - {}.{extension}",
-                    season.index, ep_state.index, state.title
-                ),
+                FileType::Video(index) => {
+                    let part_name = if state.parts.len() == 1 {
+                        "".to_string()
+                    } else {
+                        format!(" - pt{}", index + 1)
+                    };
+
+                    format!(
+                        "S{:02}E{:02} - {}{part_name}.{extension}",
+                        season.index, ep_state.index, state.title
+                    )
+                }
                 FileType::Thumbnail => format!(
                     ".S{:02}E{:02}.thumb.{extension}",
                     season.index, ep_state.index
@@ -298,6 +591,22 @@ impl Movie {
     thumbnail_methods!();
     parent!(library, MovieLibrary, movie_state().library);
 
+    pub async fn parts(&self) -> Vec<VideoPart> {
+        self.with_state(|vs| {
+            vs.parts
+                .iter()
+                .enumerate()
+                .map(|(index, _)| VideoPart {
+                    server: self.server.clone(),
+                    id: self.id,
+                    index,
+                    inner: self.inner.clone(),
+                })
+                .collect()
+        })
+        .await
+    }
+
     async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.videos.get(&self.id).unwrap();
@@ -305,7 +614,15 @@ impl Movie {
             let library_title = &ss.libraries.get(&m_state.library).unwrap().title;
 
             let name = match file_type {
-                FileType::Video => format!("{} ({}).{extension}", state.title, m_state.year),
+                FileType::Video(index) => {
+                    let part_name = if state.parts.len() == 1 {
+                        "".to_string()
+                    } else {
+                        format!(" - pt{}", index + 1)
+                    };
+
+                    format!("{} ({}){part_name}.{extension}", state.title, m_state.year)
+                }
                 FileType::Thumbnail => format!(".thumb.{extension}",),
             };
 
@@ -328,6 +645,20 @@ impl Video {
         match self {
             Self::Movie(v) => Library::Movie(v.library().await),
             Self::Episode(v) => Library::Show(v.library().await),
+        }
+    }
+
+    pub async fn parts(&self) -> Vec<VideoPart> {
+        match self {
+            Self::Movie(v) => v.parts().await,
+            Self::Episode(v) => v.parts().await,
+        }
+    }
+
+    async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
+        match self {
+            Self::Movie(v) => v.file_path(file_type, extension).await,
+            Self::Episode(v) => v.file_path(file_type, extension).await,
         }
     }
 
