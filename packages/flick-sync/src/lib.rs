@@ -1,5 +1,6 @@
 #![deny(unreachable_pub)]
 use std::{
+    collections::HashMap,
     io::ErrorKind,
     ops::Deref,
     path::{Path, PathBuf},
@@ -23,7 +24,7 @@ pub use server::Server;
 use state::{ServerState, State};
 use tokio::{
     fs::{read_to_string, write},
-    sync::{RwLock, RwLockWriteGuard},
+    sync::{Mutex, RwLock, RwLockWriteGuard},
 };
 pub use wrappers::*;
 
@@ -36,6 +37,7 @@ struct Inner {
     config: RwLock<Config>,
     state: RwLock<State>,
     path: RwLock<PathBuf>,
+    servers: Mutex<HashMap<String, plex_api::Server>>,
 }
 
 impl Inner {
@@ -100,6 +102,7 @@ impl FlickSync {
                 config: RwLock::new(config),
                 state: RwLock::new(state),
                 path: RwLock::new(path.to_owned()),
+                servers: Default::default(),
             }),
         })
     }

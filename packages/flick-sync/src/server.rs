@@ -92,6 +92,11 @@ impl Server {
 
     /// Connects to the Plex API for this server.
     pub async fn connect(&self) -> Result<plex_api::Server> {
+        let mut servers = self.inner.servers.lock().await;
+        if let Some(server) = servers.get(&self.id) {
+            return Ok(server.clone());
+        }
+
         let config = self.inner.config.read().await;
         let state = self.inner.state.read().await;
 
@@ -124,6 +129,7 @@ impl Server {
                                     self.id,
                                     server.client().api_url
                                 );
+                                servers.insert(self.id.clone(), server.as_ref().clone());
                                 return Ok(*server);
                             }
                             _ => panic!("Unexpected client connection"),
@@ -147,6 +153,7 @@ impl Server {
                     self.id,
                     server.client().api_url
                 );
+                servers.insert(self.id.clone(), server.clone());
 
                 Ok(server)
             }
