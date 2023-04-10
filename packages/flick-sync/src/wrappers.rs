@@ -24,10 +24,10 @@ use tokio::{
 
 use crate::{
     state::{
-        CollectionState, LibraryState, PlaylistState, SeasonState, ServerState, ShowState,
-        ThumbnailState, VideoDetail, VideoPartState, VideoState,
+        CollectionState, DownloadState, LibraryState, PlaylistState, SeasonState, ServerState,
+        ShowState, ThumbnailState, VideoDetail, VideoPartState, VideoState,
     },
-    DownloadState, Error, Inner, Result, Server,
+    Error, Inner, Result, Server,
 };
 
 fn safe<S: AsRef<str>>(str: S) -> String {
@@ -108,7 +108,7 @@ macro_rules! state_wrapper {
 
 macro_rules! thumbnail_methods {
     () => {
-        pub async fn thumbnail(&self) -> ThumbnailState {
+        pub(crate) async fn thumbnail(&self) -> ThumbnailState {
             self.with_state(|s| s.thumbnail.clone()).await
         }
 
@@ -844,13 +844,6 @@ impl Video {
         }
     }
 
-    pub async fn thumbnail(&self) -> ThumbnailState {
-        match self {
-            Self::Movie(v) => v.thumbnail().await,
-            Self::Episode(v) => v.thumbnail().await,
-        }
-    }
-
     pub async fn update_thumbnail(&self) -> Result {
         match self {
             Self::Movie(v) => v.update_thumbnail().await,
@@ -975,13 +968,6 @@ pub enum Collection {
 }
 
 impl Collection {
-    pub async fn thumbnail(&self) -> ThumbnailState {
-        match self {
-            Self::Movie(c) => c.thumbnail().await,
-            Self::Show(c) => c.thumbnail().await,
-        }
-    }
-
     pub async fn update_thumbnail(&self) -> Result {
         match self {
             Self::Movie(c) => c.update_thumbnail().await,

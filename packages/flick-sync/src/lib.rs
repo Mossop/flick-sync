@@ -1,3 +1,4 @@
+#![deny(unreachable_pub)]
 use std::{
     io::ErrorKind,
     ops::Deref,
@@ -19,7 +20,6 @@ use plex_api::{HttpClient, HttpClientBuilder};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{from_str, to_string_pretty};
 pub use server::Server;
-pub use state::{DownloadState, ThumbnailState};
 use state::{ServerState, State};
 use tokio::{
     fs::{read_to_string, write},
@@ -33,9 +33,9 @@ pub const STATE_FILE: &str = ".flicksync.state.json";
 pub const CONFIG_FILE: &str = "flicksync.json";
 
 struct Inner {
-    pub config: RwLock<Config>,
-    pub state: RwLock<State>,
-    pub path: RwLock<PathBuf>,
+    config: RwLock<Config>,
+    state: RwLock<State>,
+    path: RwLock<PathBuf>,
 }
 
 impl Inner {
@@ -57,7 +57,7 @@ impl Inner {
         Ok(())
     }
 
-    pub async fn client(&self) -> HttpClient {
+    async fn client(&self) -> HttpClient {
         let state = self.state.read().await;
         HttpClientBuilder::generic()
             .set_x_plex_client_identifier(state.client_id.clone())

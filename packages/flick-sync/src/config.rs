@@ -10,14 +10,14 @@ pub enum ServerConnection {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct ServerConfig {
-    pub connection: ServerConnection,
+pub(crate) struct ServerConfig {
+    pub(crate) connection: ServerConnection,
     #[serde(default)]
-    pub syncs: HashSet<u32>,
+    pub(crate) syncs: HashSet<u32>,
 }
 
 #[derive(Deserialize, Serialize, Default, Clone, Debug)]
-pub struct Config {
+pub(crate) struct Config {
     #[serde(default)]
-    pub servers: HashMap<String, ServerConfig>,
+    pub(crate) servers: HashMap<String, ServerConfig>,
 }

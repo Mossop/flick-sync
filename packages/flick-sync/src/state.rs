@@ -32,7 +32,7 @@ macro_rules! derive_list_item {
 
 #[derive(Deserialize, Default, Serialize, Clone, Debug, PartialEq)]
 #[serde(tag = "state", rename_all = "camelCase")]
-pub enum ThumbnailState {
+pub(crate) enum ThumbnailState {
     #[default]
     None,
     #[serde(rename_all = "camelCase")]
@@ -40,11 +40,11 @@ pub enum ThumbnailState {
 }
 
 impl ThumbnailState {
-    pub fn is_none(&self) -> bool {
+    pub(crate) fn is_none(&self) -> bool {
         matches!(self, ThumbnailState::None)
     }
 
-    pub async fn verify(&mut self, root: &Path) {
+    pub(crate) async fn verify(&mut self, root: &Path) {
         if let ThumbnailState::Downloaded { path } = self {
             let file = root.join(&path);
 
@@ -65,7 +65,7 @@ impl ThumbnailState {
         }
     }
 
-    pub async fn delete(&mut self, root: &Path) {
+    pub(crate) async fn delete(&mut self, root: &Path) {
         if let ThumbnailState::Downloaded { path } = self {
             let file = root.join(&path);
             log::trace!("Removing old thumbnail file '{}'", path.display());
@@ -103,24 +103,24 @@ where
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
-pub struct CollectionState {
-    pub id: u32,
-    pub library: u32,
-    pub title: String,
+pub(crate) struct CollectionState {
+    pub(crate) id: u32,
+    pub(crate) library: u32,
+    pub(crate) title: String,
     #[typeshare(serialized_as = "Vec<u32>")]
     #[serde(default, skip_serializing_if = "HashSet::is_empty")]
-    pub items: HashSet<u32>,
+    pub(crate) items: HashSet<u32>,
     #[serde(with = "time::serde::timestamp")]
     #[typeshare(serialized_as = "number")]
-    pub last_updated: OffsetDateTime,
+    pub(crate) last_updated: OffsetDateTime,
     #[serde(default, skip_serializing_if = "ThumbnailState::is_none")]
-    pub thumbnail: ThumbnailState,
+    pub(crate) thumbnail: ThumbnailState,
 }
 
 derive_list_item!(CollectionState);
 
 impl CollectionState {
-    pub fn from<T>(collection: &Collection<T>) -> Self {
+    pub(crate) fn from<T>(collection: &Collection<T>) -> Self {
         Self {
             id: collection.rating_key(),
             library: collection.metadata().library_section_id.unwrap(),
@@ -131,7 +131,7 @@ impl CollectionState {
         }
     }
 
-    pub async fn update<T>(&mut self, collection: &Collection<T>, root: &Path) {
+    pub(crate) async fn update<T>(&mut self, collection: &Collection<T>, root: &Path) {
         self.title = collection.title().to_owned();
 
         self.thumbnail.verify(root).await;
@@ -143,7 +143,7 @@ impl CollectionState {
         }
     }
 
-    pub async fn delete(&mut self, root: &Path) {
+    pub(crate) async fn delete(&mut self, root: &Path) {
         self.thumbnail.verify(root).await;
 
         if self.thumbnail != ThumbnailState::None {
@@ -155,17 +155,17 @@ impl CollectionState {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
-pub struct PlaylistState {
-    pub id: u32,
-    pub title: String,
+pub(crate) struct PlaylistState {
+    pub(crate) id: u32,
+    pub(crate) title: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub videos: Vec<u32>,
+    pub(crate) videos: Vec<u32>,
 }
 
 derive_list_item!(PlaylistState);
 
 impl PlaylistState {
-    pub fn from<T>(playlist: &Playlist<T>) -> Self {
+    pub(crate) fn from<T>(playlist: &Playlist<T>) -> Self {
         Self {
             id: playlist.rating_key(),
             title: playlist.title().to_owned(),
@@ -173,14 +173,14 @@ impl PlaylistState {
         }
     }
 
-    pub fn update<T>(&mut self, playlist: &Playlist<T>) {
+    pub(crate) fn update<T>(&mut self, playlist: &Playlist<T>) {
         self.title = playlist.title().to_owned();
     }
 }
 
 #[derive(Deserialize, Serialize, Clone, Copy, Debug)]
 #[serde(rename_all = "lowercase")]
-pub enum LibraryType {
+pub(crate) enum LibraryType {
     Movie,
     Show,
 }
@@ -188,11 +188,11 @@ pub enum LibraryType {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
-pub struct LibraryState {
-    pub id: u32,
-    pub title: String,
+pub(crate) struct LibraryState {
+    pub(crate) id: u32,
+    pub(crate) title: String,
     #[serde(rename = "type")]
-    pub library_type: LibraryType,
+    pub(crate) library_type: LibraryType,
 }
 
 derive_list_item!(LibraryState);
@@ -200,17 +200,17 @@ derive_list_item!(LibraryState);
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
-pub struct SeasonState {
-    pub id: u32,
-    pub show: u32,
-    pub index: u32,
-    pub title: String,
+pub(crate) struct SeasonState {
+    pub(crate) id: u32,
+    pub(crate) show: u32,
+    pub(crate) index: u32,
+    pub(crate) title: String,
 }
 
 derive_list_item!(SeasonState);
 
 impl SeasonState {
-    pub fn from(season: &Season) -> Self {
+    pub(crate) fn from(season: &Season) -> Self {
         let metadata = season.metadata();
 
         Self {
@@ -221,7 +221,7 @@ impl SeasonState {
         }
     }
 
-    pub fn update(&mut self, season: &Season) {
+    pub(crate) fn update(&mut self, season: &Season) {
         let metadata = season.metadata();
 
         self.index = metadata.index.unwrap();
@@ -233,22 +233,22 @@ impl SeasonState {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
-pub struct ShowState {
-    pub id: u32,
-    pub library: u32,
-    pub title: String,
-    pub year: u32,
+pub(crate) struct ShowState {
+    pub(crate) id: u32,
+    pub(crate) library: u32,
+    pub(crate) title: String,
+    pub(crate) year: u32,
     #[serde(with = "time::serde::timestamp")]
     #[typeshare(serialized_as = "number")]
-    pub last_updated: OffsetDateTime,
+    pub(crate) last_updated: OffsetDateTime,
     #[serde(default, skip_serializing_if = "ThumbnailState::is_none")]
-    pub thumbnail: ThumbnailState,
+    pub(crate) thumbnail: ThumbnailState,
 }
 
 derive_list_item!(ShowState);
 
 impl ShowState {
-    pub fn from(show: &Show) -> Self {
+    pub(crate) fn from(show: &Show) -> Self {
         let metadata = show.metadata();
 
         let year = metadata.year.unwrap();
@@ -264,7 +264,7 @@ impl ShowState {
         }
     }
 
-    pub async fn update(&mut self, show: &Show, root: &Path) {
+    pub(crate) async fn update(&mut self, show: &Show, root: &Path) {
         let metadata = show.metadata();
 
         self.year = metadata.year.unwrap();
@@ -279,7 +279,7 @@ impl ShowState {
         }
     }
 
-    pub async fn delete(&mut self, root: &Path) {
+    pub(crate) async fn delete(&mut self, root: &Path) {
         self.thumbnail.verify(root).await;
 
         if self.thumbnail != ThumbnailState::None {
@@ -291,20 +291,20 @@ impl ShowState {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
-pub struct MovieState {
-    pub library: u32,
-    pub year: u32,
+pub(crate) struct MovieState {
+    pub(crate) library: u32,
+    pub(crate) year: u32,
 }
 
 impl MovieState {
-    pub fn from(metadata: &Metadata) -> Self {
+    pub(crate) fn from(metadata: &Metadata) -> Self {
         MovieState {
             library: metadata.library_section_id.unwrap(),
             year: metadata.year.unwrap(),
         }
     }
 
-    pub fn update(&mut self, metadata: &Metadata) {
+    pub(crate) fn update(&mut self, metadata: &Metadata) {
         self.year = metadata.year.unwrap();
     }
 }
@@ -312,20 +312,20 @@ impl MovieState {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
-pub struct EpisodeState {
-    pub season: u32,
-    pub index: u32,
+pub(crate) struct EpisodeState {
+    pub(crate) season: u32,
+    pub(crate) index: u32,
 }
 
 impl EpisodeState {
-    pub fn from(metadata: &Metadata) -> Self {
+    pub(crate) fn from(metadata: &Metadata) -> Self {
         EpisodeState {
             season: metadata.parent.parent_rating_key.unwrap(),
             index: metadata.index.unwrap(),
         }
     }
 
-    pub fn update(&mut self, metadata: &Metadata) {
+    pub(crate) fn update(&mut self, metadata: &Metadata) {
         self.season = metadata.parent.parent_rating_key.unwrap();
         self.index = metadata.index.unwrap();
     }
@@ -333,7 +333,7 @@ impl EpisodeState {
 
 #[derive(Deserialize, Default, Serialize, Clone, Debug, PartialEq)]
 #[serde(tag = "state", rename_all = "camelCase")]
-pub enum DownloadState {
+pub(crate) enum DownloadState {
     #[default]
     None,
     #[serde(rename_all = "camelCase")]
@@ -351,14 +351,14 @@ impl DownloadState {
         matches!(self, DownloadState::None)
     }
 
-    pub fn needs_download(&self) -> bool {
+    pub(crate) fn needs_download(&self) -> bool {
         !matches!(
             self,
             DownloadState::Downloaded { path: _ } | DownloadState::Transcoded { path: _ }
         )
     }
 
-    pub async fn verify(&mut self, server: &Server, root: &Path) {
+    pub(crate) async fn verify(&mut self, server: &Server, root: &Path) {
         let (path, session_id) = match self {
             DownloadState::None => return,
             DownloadState::Downloading { path } => (path, None),
@@ -396,7 +396,7 @@ impl DownloadState {
         *self = DownloadState::None;
     }
 
-    pub async fn delete(&mut self, server: &Server, root: &Path) {
+    pub(crate) async fn delete(&mut self, server: &Server, root: &Path) {
         let (path, session_id) = match self {
             DownloadState::None => return,
             DownloadState::Downloading { path } => (path, None),
@@ -428,16 +428,16 @@ impl DownloadState {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
-pub struct VideoPartState {
+pub(crate) struct VideoPartState {
     #[typeshare(serialized_as = "number")]
-    pub duration: u64,
+    pub(crate) duration: u64,
     #[serde(default, skip_serializing_if = "DownloadState::is_none")]
-    pub download: DownloadState,
+    pub(crate) download: DownloadState,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(untagged)]
-pub enum VideoDetail {
+pub(crate) enum VideoDetail {
     Movie(MovieState),
     Episode(EpisodeState),
 }
@@ -445,40 +445,40 @@ pub enum VideoDetail {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
-pub struct VideoState {
-    pub id: u32,
-    pub title: String,
-    pub detail: VideoDetail,
+pub(crate) struct VideoState {
+    pub(crate) id: u32,
+    pub(crate) title: String,
+    pub(crate) detail: VideoDetail,
     #[typeshare(serialized_as = "string")]
-    pub air_date: Date,
+    pub(crate) air_date: Date,
     #[serde(default, skip_serializing_if = "ThumbnailState::is_none")]
-    pub thumbnail: ThumbnailState,
+    pub(crate) thumbnail: ThumbnailState,
     #[typeshare(serialized_as = "number")]
-    pub media_id: u64,
+    pub(crate) media_id: u64,
     #[serde(with = "time::serde::timestamp")]
     #[typeshare(serialized_as = "number")]
-    pub last_updated: OffsetDateTime,
-    pub parts: Vec<VideoPartState>,
+    pub(crate) last_updated: OffsetDateTime,
+    pub(crate) parts: Vec<VideoPartState>,
 }
 
 derive_list_item!(VideoState);
 
 impl VideoState {
-    pub fn movie_state(&self) -> &MovieState {
+    pub(crate) fn movie_state(&self) -> &MovieState {
         match self.detail {
             VideoDetail::Movie(ref m) => m,
             VideoDetail::Episode(_) => panic!("Unexpected type"),
         }
     }
 
-    pub fn episode_state(&self) -> &EpisodeState {
+    pub(crate) fn episode_state(&self) -> &EpisodeState {
         match self.detail {
             VideoDetail::Movie(_) => panic!("Unexpected type"),
             VideoDetail::Episode(ref e) => e,
         }
     }
 
-    pub fn from<M: MediaItem>(item: &M) -> Self {
+    pub(crate) fn from<M: MediaItem>(item: &M) -> Self {
         let metadata = item.metadata();
         let detail = match metadata.metadata_type {
             Some(MetadataType::Movie) => VideoDetail::Movie(MovieState::from(metadata)),
@@ -508,7 +508,7 @@ impl VideoState {
         }
     }
 
-    pub async fn update<M: MetadataItem>(&mut self, item: &M, server: &Server, root: &Path) {
+    pub(crate) async fn update<M: MetadataItem>(&mut self, item: &M, server: &Server, root: &Path) {
         let metadata = item.metadata();
         self.title = item.title().to_owned();
 
@@ -534,7 +534,7 @@ impl VideoState {
         }
     }
 
-    pub async fn delete(&mut self, server: &Server, root: &Path) {
+    pub(crate) async fn delete(&mut self, server: &Server, root: &Path) {
         self.thumbnail.verify(root).await;
         if self.thumbnail != ThumbnailState::None {
             self.thumbnail.delete(root).await;
@@ -552,10 +552,10 @@ impl VideoState {
 #[derive(Deserialize, Default, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
-pub struct ServerState {
+pub(crate) struct ServerState {
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub token: String,
-    pub name: String,
+    pub(crate) token: String,
+    pub(crate) name: String,
     #[serde(
         default,
         skip_serializing_if = "HashMap::is_empty",
@@ -563,7 +563,7 @@ pub struct ServerState {
         deserialize_with = "from_list"
     )]
     #[typeshare(serialized_as = "Vec<PlaylistState>")]
-    pub playlists: HashMap<u32, PlaylistState>,
+    pub(crate) playlists: HashMap<u32, PlaylistState>,
     #[serde(
         default,
         skip_serializing_if = "HashMap::is_empty",
@@ -571,7 +571,7 @@ pub struct ServerState {
         deserialize_with = "from_list"
     )]
     #[typeshare(serialized_as = "Vec<CollectionState>")]
-    pub collections: HashMap<u32, CollectionState>,
+    pub(crate) collections: HashMap<u32, CollectionState>,
     #[serde(
         default,
         skip_serializing_if = "HashMap::is_empty",
@@ -579,7 +579,7 @@ pub struct ServerState {
         deserialize_with = "from_list"
     )]
     #[typeshare(serialized_as = "Vec<LibraryState>")]
-    pub libraries: HashMap<u32, LibraryState>,
+    pub(crate) libraries: HashMap<u32, LibraryState>,
     #[serde(
         default,
         skip_serializing_if = "HashMap::is_empty",
@@ -587,7 +587,7 @@ pub struct ServerState {
         deserialize_with = "from_list"
     )]
     #[typeshare(serialized_as = "Vec<ShowState>")]
-    pub shows: HashMap<u32, ShowState>,
+    pub(crate) shows: HashMap<u32, ShowState>,
     #[serde(
         default,
         skip_serializing_if = "HashMap::is_empty",
@@ -595,7 +595,7 @@ pub struct ServerState {
         deserialize_with = "from_list"
     )]
     #[typeshare(serialized_as = "Vec<SeasonState>")]
-    pub seasons: HashMap<u32, SeasonState>,
+    pub(crate) seasons: HashMap<u32, SeasonState>,
     #[serde(
         default,
         skip_serializing_if = "HashMap::is_empty",
@@ -603,16 +603,16 @@ pub struct ServerState {
         deserialize_with = "from_list"
     )]
     #[typeshare(serialized_as = "Vec<VideoState>")]
-    pub videos: HashMap<u32, VideoState>,
+    pub(crate) videos: HashMap<u32, VideoState>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
-pub struct State {
-    pub client_id: String,
+pub(crate) struct State {
+    pub(crate) client_id: String,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub servers: HashMap<String, ServerState>,
+    pub(crate) servers: HashMap<String, ServerState>,
 }
 
 impl Default for State {
