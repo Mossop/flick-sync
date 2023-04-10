@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-plex-api = "0.0.9"
+plex-api = { path="../../../plex-api/crates/plex-api" }
 thiserror = "1.0.40"
 log = "0.4.17"
 serde = { version = "1.0.158", features = ["derive"] }

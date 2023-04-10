@@ -1,18 +1,26 @@
 use std::{
+    cmp::max,
     io::{ErrorKind, IoSlice},
-    path::PathBuf,
+    path::{Path, PathBuf},
     pin::Pin,
     result,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use async_std::fs::{create_dir_all, File, OpenOptions};
 use async_trait::async_trait;
 use futures::AsyncWrite;
 use pin_project::pin_project;
-use plex_api::library::{MediaItem, MetadataItem};
-use tokio::fs::{metadata, remove_file};
+use plex_api::{
+    library::{self, Item, MediaItem, MetadataItem},
+    transcode::{TranscodeSession, TranscodeStatus, VideoTranscodeOptions},
+};
+use tokio::{
+    fs::{metadata, remove_file},
+    time::sleep,
+};
 
 use crate::{
     state::{
@@ -355,48 +363,140 @@ impl VideoPart {
         !download_state.needs_download()
     }
 
+    async fn start_transcode(&self) -> Result<TranscodeSession> {
+        let server = self.connect().await?;
+        let item = server.item_by_id(self.id).await?;
+
+        let video = match item {
+            Item::Movie(m) => library::Video::Movie(m),
+            Item::Episode(e) => library::Video::Episode(e),
+            _ => panic!("Unexpected item type"),
+        };
+
+        let media_id = self
+            .with_server_state(|ss| {
+                let video_state = ss.videos.get(&self.id).unwrap();
+                video_state.media_id
+            })
+            .await;
+
+        let media = video
+            .media()
+            .into_iter()
+            .find(|m| m.metadata().id == media_id)
+            .ok_or_else(|| Error::MissingItem)?;
+        let parts = media.parts();
+        let part = parts.get(self.index).ok_or_else(|| Error::MissingItem)?;
+
+        log::info!("Starting transcode for {}", video.title());
+
+        let session = part
+            .create_download_session(VideoTranscodeOptions::default())
+            .await?;
+
+        let path = self.file_path(&session.container().to_string()).await;
+
+        self.update_state(|state| {
+            state.download = DownloadState::Transcoding {
+                session_id: session.session_id().to_string(),
+                path,
+            }
+        })
+        .await?;
+
+        Ok(session)
+    }
+
+    async fn start_download(&self) -> Result {
+        let server = self.connect().await?;
+        let item = server.item_by_id(self.id).await?;
+
+        let media_id = self
+            .with_server_state(|ss| {
+                let video_state = ss.videos.get(&self.id).unwrap();
+                video_state.media_id
+            })
+            .await;
+
+        let media = item
+            .media()
+            .into_iter()
+            .find(|m| m.metadata().id == media_id)
+            .ok_or_else(|| Error::MissingItem)?;
+        let parts = media.parts();
+        let part = parts.get(self.index).ok_or_else(|| Error::MissingItem)?;
+
+        let path = self
+            .file_path(&part.metadata().container.unwrap().to_string())
+            .await;
+
+        let target = { self.inner.path.read().await.join(&path) };
+        if let Err(e) = remove_file(target).await {
+            if e.kind() != ErrorKind::NotFound {
+                return Err(Error::from(e));
+            }
+        }
+
+        self.update_state(|state| state.download = DownloadState::Downloading { path })
+            .await?;
+
+        Ok(())
+    }
+
+    async fn wait_for_transcode(&self, session: TranscodeSession) -> Result {
+        loop {
+            let status = session.status().await?;
+            match status {
+                TranscodeStatus::Complete => break,
+                TranscodeStatus::Error => return Err(Error::TranscodeFailed),
+                TranscodeStatus::Transcoding {
+                    remaining,
+                    progress: _,
+                } => {
+                    let delay = match remaining {
+                        Some(secs) => {
+                            let delay = max(5, secs / 2);
+                            log::trace!("Item due in {secs}s, delaying for {delay}s");
+                            delay
+                        }
+                        None => 5,
+                    };
+
+                    sleep(Duration::from_secs(delay as u64)).await;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn wait_for_download(&self) -> Result {
         let download_state = self.download_state().await;
         match download_state {
-            DownloadState::None => {
-                let path = self.file_path("mkv").await;
-
-                let target = { self.inner.path.read().await.join(&path) };
-                if let Err(e) = remove_file(target).await {
-                    if e.kind() != ErrorKind::NotFound {
-                        return Err(Error::from(e));
-                    }
+            DownloadState::None => match self.start_transcode().await {
+                Ok(session) => self.wait_for_transcode(session).await?,
+                Err(e) => {
+                    log::warn!("Transcode attempt failed: {e}");
+                    self.start_download().await?;
                 }
-
-                self.update_state(|state| state.download = DownloadState::Downloading { path })
-                    .await?;
-            }
+            },
             DownloadState::Downloading { path: _ } => (),
             DownloadState::Transcoding {
-                session_id: _,
+                session_id,
                 path: _,
-            } => panic!("Unexpected"),
+            } => {
+                let server = self.connect().await?;
+                let session = server.transcode_session(&session_id).await?;
+                self.wait_for_transcode(session).await?;
+            }
             DownloadState::Downloaded { path: _ } | DownloadState::Transcoded { path: _ } => (),
         };
 
         Ok(())
     }
 
-    pub async fn download<P: Progress + Unpin>(&self, mut progress: P) -> Result {
-        let download_state = self.download_state().await;
-        let path = match download_state {
-            DownloadState::None => panic!("Unexpected"),
-            DownloadState::Downloading { path } => path,
-            DownloadState::Transcoding {
-                session_id: _,
-                path: _,
-            } => panic!("Unexpected"),
-            DownloadState::Downloaded { path: _ } | DownloadState::Transcoded { path: _ } => {
-                return Ok(());
-            }
-        };
-
-        let target = { self.inner.path.read().await.join(&path) };
+    async fn download_direct<P: Progress + Unpin>(&self, path: &Path, mut progress: P) -> Result {
+        let target = { self.inner.path.read().await.join(path) };
         let offset = match metadata(&target).await {
             Ok(stats) => stats.len(),
             Err(e) => {
@@ -431,6 +531,7 @@ impl VideoPart {
             .create(true)
             .open(&target)
             .await?;
+
         let writer = WriterProgress {
             offset,
             size: part.metadata().size.unwrap(),
@@ -442,10 +543,76 @@ impl VideoPart {
         part.download(writer, offset..).await?;
         log::info!("Download of {} complete", path.display());
 
-        self.update_state(|state| state.download = DownloadState::Downloaded { path })
-            .await?;
+        self.update_state(|state| {
+            state.download = DownloadState::Downloaded {
+                path: path.to_owned(),
+            }
+        })
+        .await?;
 
         Ok(())
+    }
+
+    async fn download_transcode<P: Progress + Unpin>(
+        &self,
+        session_id: &str,
+        path: &Path,
+        mut progress: P,
+    ) -> Result {
+        let server = self.connect().await?;
+        let session = server.transcode_session(session_id).await?;
+        let status = session.status().await?;
+        let stats = session.stats().await?;
+
+        if !matches!(status, TranscodeStatus::Complete) {
+            return Err(Error::DownloadUnavailable);
+        }
+
+        let target = { self.inner.path.read().await.join(path) };
+        let file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&target)
+            .await?;
+
+        let writer = WriterProgress {
+            offset: 0,
+            size: stats.size as u64,
+            writer: file,
+            progress: &mut progress,
+        };
+        log::debug!("Downloading transcoded {}", path.display());
+
+        session.download(writer).await?;
+        log::info!("Download of {} complete", path.display());
+
+        self.update_state(|state| {
+            state.download = DownloadState::Transcoded {
+                path: path.to_owned(),
+            }
+        })
+        .await?;
+
+        if let Err(e) = session.cancel().await {
+            log::warn!(
+                "Transcode session for {} failed to cancel: {e}",
+                path.display()
+            );
+        }
+
+        Ok(())
+    }
+
+    pub async fn download<P: Progress + Unpin>(&self, progress: P) -> Result {
+        let download_state = self.download_state().await;
+        match download_state {
+            DownloadState::None => Err(Error::DownloadUnavailable),
+            DownloadState::Downloading { path } => self.download_direct(&path, progress).await,
+            DownloadState::Transcoding { session_id, path } => {
+                self.download_transcode(&session_id, &path, progress).await
+            }
+            DownloadState::Downloaded { path: _ } | DownloadState::Transcoded { path: _ } => Ok(()),
+        }
     }
 
     async fn download_state(&self) -> DownloadState {

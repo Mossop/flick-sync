@@ -31,6 +31,10 @@ pub enum Error {
     ItemIncomplete(u32, String),
     #[error("The item appears to be missing on the server")]
     MissingItem,
+    #[error("Cannot download an item until the item is available (call wait_for_download)")]
+    DownloadUnavailable,
+    #[error("Server transcode failed")]
+    TranscodeFailed,
     #[error("Unknown error")]
     Unknown(String),
 }
