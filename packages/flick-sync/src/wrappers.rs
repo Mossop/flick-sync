@@ -217,7 +217,8 @@ impl Show {
             };
 
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
-            PathBuf::from(safe(library_title))
+            PathBuf::from(safe(&self.server))
+                .join(safe(library_title))
                 .join(safe(format!("{} ({})", state.title, state.year)))
                 .join(safe(name))
         })
@@ -759,7 +760,8 @@ impl Episode {
                 ),
             };
 
-            PathBuf::from(safe(library_title))
+            PathBuf::from(safe(&self.server))
+                .join(safe(library_title))
                 .join(safe(format!("{} ({})", show.title, show.year)))
                 .join(safe(name))
         })
@@ -819,7 +821,8 @@ impl Movie {
                 FileType::Thumbnail => format!(".thumb.{extension}",),
             };
 
-            PathBuf::from(safe(library_title))
+            PathBuf::from(safe(&self.server))
+                .join(safe(library_title))
                 .join(safe(format!("{} ({})", state.title, m_state.year)))
                 .join(safe(name))
         })
@@ -935,7 +938,9 @@ impl MovieCollection {
             let state = ss.collections.get(&self.id).unwrap();
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
 
-            PathBuf::from(safe(library_title)).join(safe(format!(".{}.{extension}", state.id)))
+            PathBuf::from(safe(&self.server))
+                .join(safe(library_title))
+                .join(safe(format!(".{}.{extension}", state.id)))
         })
         .await
     }
@@ -973,7 +978,9 @@ impl ShowCollection {
             let state = ss.collections.get(&self.id).unwrap();
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
 
-            PathBuf::from(safe(library_title)).join(safe(format!(".{}.{extension}", state.id)))
+            PathBuf::from(safe(&self.server))
+                .join(safe(library_title))
+                .join(safe(format!(".{}.{extension}", state.id)))
         })
         .await
     }
