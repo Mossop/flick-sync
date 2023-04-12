@@ -335,6 +335,20 @@ impl DownloadState {
 
         let file = root.join(&path);
 
+        if let Some(session_id) = session_id {
+            if let Err(plex_api::Error::ItemNotFound) = server.transcode_session(session_id).await {
+                if let Err(e) = fs::remove_file(&file).await {
+                    if e.kind() != ErrorKind::NotFound {
+                        log::warn!("Failed to remove old download: {e}");
+                    }
+                }
+
+                *self = DownloadState::None;
+            }
+
+            return;
+        }
+
         match fs::metadata(&file).await {
             Ok(stats) => {
                 if !stats.is_file() {
@@ -347,14 +361,6 @@ impl DownloadState {
                 if e.kind() != ErrorKind::NotFound {
                     log::error!("Error accessing file '{}': {e}", path.display());
                     return;
-                }
-            }
-        }
-
-        if let Some(session_id) = session_id {
-            if let Ok(session) = server.transcode_session(session_id).await {
-                if let Err(e) = session.cancel().await {
-                    log::warn!("Failed to cancel stale transcode session: {e}");
                 }
             }
         }

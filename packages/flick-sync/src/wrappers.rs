@@ -500,7 +500,16 @@ impl VideoPart {
             DownloadState::None => match self.start_transcode().await {
                 Ok(session) => self.wait_for_transcode(session).await?,
                 Err(e) => {
-                    log::warn!("Transcode attempt failed: {e}");
+                    if !matches!(
+                        e,
+                        Error::PlexError {
+                            source: plex_api::Error::TranscodeRefused
+                        }
+                    ) {
+                        log::warn!("Transcode attempt failed: {e}");
+                    } else {
+                        log::trace!("Transcode attempt refused");
+                    }
                     self.start_download().await?;
                 }
             },
