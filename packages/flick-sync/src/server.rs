@@ -208,7 +208,8 @@ impl Server {
             self.inner.persist_state(&state).await?;
         }
 
-        self.update_thumbnails().await
+        self.update_thumbnails().await?;
+        self.verify_downloads().await
     }
 
     /// Updates thumbnails for synced items.
@@ -240,6 +241,40 @@ impl Server {
                             for video in season.episodes().await {
                                 if let Err(e) = video.update_thumbnail().await {
                                     log::warn!("{e}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Verifies the presence of downloads for synced items.
+    pub async fn verify_downloads(&self) -> Result {
+        log::info!("Verifying downloads");
+
+        for library in self.libraries().await {
+            match library {
+                Library::Movie(l) => {
+                    for video in l.movies().await {
+                        for part in video.parts().await {
+                            if let Err(e) = part.verify_download().await {
+                                log::warn!("{e}");
+                            }
+                        }
+                    }
+                }
+                Library::Show(l) => {
+                    for show in l.shows().await {
+                        for season in show.seasons().await {
+                            for video in season.episodes().await {
+                                for part in video.parts().await {
+                                    if let Err(e) = part.verify_download().await {
+                                        log::warn!("{e}");
+                                    }
                                 }
                             }
                         }

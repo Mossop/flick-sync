@@ -71,7 +71,9 @@ impl ThumbnailState {
             log::trace!("Removing old thumbnail file '{}'", path.display());
 
             if let Err(e) = fs::remove_file(&file).await {
-                log::warn!("Failed to remove file {}: {e}", file.display());
+                if e.kind() != ErrorKind::NotFound {
+                    log::warn!("Failed to remove file {}: {e}", file.display());
+                }
             }
 
             *self = ThumbnailState::None;
@@ -134,12 +136,11 @@ impl CollectionState {
     pub(crate) async fn update<T>(&mut self, collection: &Collection<T>, root: &Path) {
         self.title = collection.title().to_owned();
 
-        self.thumbnail.verify(root).await;
-
-        if self.thumbnail != ThumbnailState::None
-            && collection.metadata().updated_at.unwrap() > self.last_updated
-        {
-            self.thumbnail.delete(root).await;
+        if let Some(updated) = collection.metadata().updated_at {
+            if updated > self.last_updated {
+                self.thumbnail.delete(root).await;
+            }
+            self.last_updated = updated;
         }
     }
 
@@ -270,12 +271,11 @@ impl ShowState {
         self.year = metadata.year.unwrap();
         self.title = show.title().to_owned();
 
-        self.thumbnail.verify(root).await;
-
-        if self.thumbnail != ThumbnailState::None
-            && metadata.updated_at.unwrap() > self.last_updated
-        {
-            self.thumbnail.delete(root).await;
+        if let Some(updated) = show.metadata().updated_at {
+            if updated > self.last_updated {
+                self.thumbnail.delete(root).await;
+            }
+            self.last_updated = updated;
         }
     }
 
@@ -410,7 +410,9 @@ impl DownloadState {
         log::trace!("Removing old video file '{}'", path.display());
 
         if let Err(e) = fs::remove_file(&file).await {
-            log::warn!("Failed to remove file {}: {e}", file.display());
+            if e.kind() != ErrorKind::NotFound {
+                log::warn!("Failed to remove file {}: {e}", file.display());
+            }
         }
 
         if let Some(session_id) = session_id {
@@ -517,31 +519,23 @@ impl VideoState {
             VideoDetail::Episode(ref mut e) => e.update(metadata),
         }
 
-        self.thumbnail.verify(root).await;
-        for part in self.parts.iter_mut() {
-            part.download.verify(server, root).await;
-        }
-
-        if metadata.updated_at.unwrap() > self.last_updated {
-            if self.thumbnail != ThumbnailState::None {
+        if let Some(updated) = metadata.updated_at {
+            if updated > self.last_updated {
                 self.thumbnail.delete(root).await;
-            }
-            for part in self.parts.iter_mut() {
-                if part.download != DownloadState::None {
-                    part.download.verify(server, root).await;
+                for part in self.parts.iter_mut() {
+                    part.download.delete(server, root).await;
                 }
             }
+            self.last_updated = updated;
         }
     }
 
     pub(crate) async fn delete(&mut self, server: &Server, root: &Path) {
-        self.thumbnail.verify(root).await;
         if self.thumbnail != ThumbnailState::None {
             self.thumbnail.delete(root).await;
         }
 
         for part in self.parts.iter_mut() {
-            part.download.verify(server, root).await;
             if part.download != DownloadState::None {
                 part.download.delete(server, root).await;
             }

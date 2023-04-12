@@ -113,7 +113,15 @@ macro_rules! thumbnail_methods {
         }
 
         pub async fn update_thumbnail(&self) -> Result {
-            if self.thumbnail().await.is_none() {
+            let root = self.inner.path.read().await.to_owned();
+
+            let mut thumbnail = self.thumbnail().await;
+            thumbnail.verify(&root).await;
+
+            self.update_state(|s| s.thumbnail = thumbnail.clone())
+                .await?;
+
+            if thumbnail.is_none() {
                 let server = self.connect().await?;
                 let item = server.item_by_id(self.id).await?;
                 log::debug!("Updating thumbnail for {}", item.title());
@@ -125,7 +133,6 @@ macro_rules! thumbnail_methods {
                     return Ok(());
                 };
 
-                let root = self.inner.path.read().await;
                 let path = self.file_path(FileType::Thumbnail, "jpg").await;
                 let target = root.join(&path);
 
@@ -331,6 +338,17 @@ pub struct VideoPart {
 }
 
 impl VideoPart {
+    pub async fn verify_download(&self) -> Result {
+        let server = self.connect().await?;
+        let mut download_state = self.download_state().await;
+        let root = self.inner.path.read().await.clone();
+
+        download_state.verify(&server, &root).await;
+
+        self.update_state(|state| state.download = download_state)
+            .await
+    }
+
     pub async fn video(&self) -> Video {
         self.with_server_state(|server_state| {
             let video_state = server_state.videos.get(&self.id).unwrap();

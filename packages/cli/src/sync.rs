@@ -43,6 +43,10 @@ async fn download_part(
     part: VideoPart,
     console: Console,
 ) {
+    if let Err(e) = part.verify_download().await {
+        log::warn!("{e}");
+    }
+
     if part.is_downloaded().await {
         return;
     }
