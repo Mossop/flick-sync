@@ -589,6 +589,7 @@ dependencies = [
  "async-std",
  "async-trait",
  "futures",
+ "lazy_static",
  "log",
  "pin-project",
  "plex-api",

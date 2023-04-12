@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use plex_api::transcode::VideoTranscodeOptions;
 use serde::{Deserialize, Serialize};
 
 use crate::util::{derive_list_item, from_list, into_list, ListItem};
@@ -33,7 +34,29 @@ pub(crate) struct ServerConfig {
 }
 
 #[derive(Deserialize, Serialize, Default, Clone, Debug)]
-pub(crate) struct TranscodeProfile {}
+pub(crate) struct TranscodeProfile {
+    /// Maximum bitrate in kbps.
+    pub(crate) bitrate: Option<u32>,
+    /// width, height.
+    pub(crate) dimensions: Option<(u32, u32)>,
+}
+
+impl TranscodeProfile {
+    pub(crate) fn options(&self) -> VideoTranscodeOptions {
+        let mut options = VideoTranscodeOptions::default();
+
+        if let Some(br) = self.bitrate {
+            options.bitrate = br;
+        }
+
+        if let Some(dim) = self.dimensions {
+            options.width = dim.0;
+            options.height = dim.1;
+        }
+
+        options
+    }
+}
 
 #[derive(Deserialize, Serialize, Default, Clone, Debug)]
 pub(crate) struct Config {

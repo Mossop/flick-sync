@@ -15,7 +15,7 @@ use futures::AsyncWrite;
 use pin_project::pin_project;
 use plex_api::{
     library::{self, Item, MediaItem, MetadataItem},
-    transcode::{TranscodeSession, TranscodeStatus, VideoTranscodeOptions},
+    transcode::{TranscodeSession, TranscodeStatus},
 };
 use tokio::{
     fs::{metadata, remove_file},
@@ -339,6 +339,14 @@ pub struct VideoPart {
 }
 
 impl VideoPart {
+    async fn with_video_state<F, R>(&self, cb: F) -> R
+    where
+        F: Send + FnOnce(&VideoState) -> R,
+    {
+        self.with_server_state(|ss| cb(ss.videos.get(&self.id).unwrap()))
+            .await
+    }
+
     pub async fn verify_download(&self) -> Result {
         let server = self.connect().await?;
         let mut download_state = self.download_state().await;
@@ -392,11 +400,8 @@ impl VideoPart {
             _ => panic!("Unexpected item type"),
         };
 
-        let media_id = self
-            .with_server_state(|ss| {
-                let video_state = ss.videos.get(&self.id).unwrap();
-                video_state.media_id
-            })
+        let (media_id, profile) = self
+            .with_video_state(|vs| (vs.media_id, vs.transcode_profile.clone()))
             .await;
 
         let media = video
@@ -407,11 +412,11 @@ impl VideoPart {
         let parts = media.parts();
         let part = parts.get(self.index).ok_or_else(|| Error::MissingItem)?;
 
+        let options = self.inner.transcode_options(profile).await;
+
         log::info!("Starting transcode for {}", video.title());
 
-        let session = part
-            .create_download_session(VideoTranscodeOptions::default())
-            .await?;
+        let session = part.create_download_session(options).await?;
 
         let path = self.file_path(&session.container().to_string()).await;
 
@@ -663,16 +668,8 @@ impl StateWrapper<VideoPartState> for VideoPart {
     where
         F: Send + FnOnce(&VideoPartState) -> R,
     {
-        self.with_server_state(|ss| {
-            cb(ss
-                .videos
-                .get(&self.id)
-                .unwrap()
-                .parts
-                .get(self.index)
-                .unwrap())
-        })
-        .await
+        self.with_video_state(|vs| cb(vs.parts.get(self.index).unwrap()))
+            .await
     }
 
     async fn update_state<F>(&self, cb: F) -> Result

@@ -15,10 +15,11 @@ mod util;
 mod wrappers;
 
 pub use config::ServerConnection;
-use config::{Config, ServerConfig};
+use config::{Config, ServerConfig, TranscodeProfile};
 pub use error::Error;
+use lazy_static::lazy_static;
 pub use plex_api;
-use plex_api::{HttpClient, HttpClientBuilder};
+use plex_api::{transcode::VideoTranscodeOptions, HttpClient, HttpClientBuilder};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{from_str, to_string_pretty};
 pub use server::Server;
@@ -34,6 +35,27 @@ pub type Result<T = ()> = std::result::Result<T, Error>;
 pub const STATE_FILE: &str = ".flicksync.state.json";
 pub const CONFIG_FILE: &str = "flicksync.json";
 
+lazy_static! {
+    static ref DEFAULT_PROFILES: HashMap<String, TranscodeProfile> = {
+        let mut map = HashMap::new();
+        map.insert(
+            "720p".to_string(),
+            TranscodeProfile {
+                bitrate: Some(2000),
+                dimensions: Some((1280, 720)),
+            },
+        );
+        map.insert(
+            "1080p".to_string(),
+            TranscodeProfile {
+                bitrate: Some(8000),
+                dimensions: Some((1920, 720)),
+            },
+        );
+        map
+    };
+}
+
 struct Inner {
     config: RwLock<Config>,
     state: RwLock<State>,
@@ -42,6 +64,23 @@ struct Inner {
 }
 
 impl Inner {
+    async fn transcode_options(&self, profile: Option<String>) -> VideoTranscodeOptions {
+        if let Some(ref profile) = profile {
+            let config = self.config.read().await;
+            if let Some(profile) = config.profiles.get(profile) {
+                return profile.options();
+            }
+
+            if let Some(profile) = DEFAULT_PROFILES.get(profile) {
+                return profile.options();
+            }
+
+            log::warn!("Unknown transcode profile {profile}, falling back to defaults.");
+        }
+
+        Default::default()
+    }
+
     async fn persist_config(&self, config: &RwLockWriteGuard<'_, Config>) -> Result {
         let path = self.path.read().await;
 
