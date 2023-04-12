@@ -61,8 +61,10 @@ impl Inner {
 
     async fn client(&self) -> HttpClient {
         let state = self.state.read().await;
-        HttpClientBuilder::generic()
+        HttpClientBuilder::default()
+            .set_x_plex_platform("Generic")
             .set_x_plex_client_identifier(state.client_id.clone())
+            .set_x_plex_product("FlickSync")
             .build()
             .unwrap()
     }
@@ -133,6 +135,7 @@ impl FlickSync {
         config.servers.insert(
             id.to_owned(),
             ServerConfig {
+                device: None,
                 connection,
                 syncs: Default::default(),
             },

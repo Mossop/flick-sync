@@ -5,7 +5,7 @@ use plex_api::{
     device::DeviceConnection,
     library::{Collection, Episode, Item, MetadataItem, Movie, Playlist, Season, Show, Video},
     media_container::server::library::MetadataType,
-    MyPlexBuilder,
+    HttpClientBuilder, MyPlexBuilder,
 };
 
 use crate::{
@@ -102,7 +102,12 @@ impl Server {
 
         let server_config = config.servers.get(&self.id).unwrap();
 
-        let mut client = self.inner.client().await;
+        let mut builder = HttpClientBuilder::from(self.inner.client().await);
+        if let Some(ref device) = server_config.device {
+            builder = builder.set_x_plex_platform(device);
+        }
+
+        let mut client = builder.build().unwrap();
 
         match &server_config.connection {
             ServerConnection::MyPlex { username: _, id } => {

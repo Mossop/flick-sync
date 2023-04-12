@@ -11,6 +11,7 @@ pub enum ServerConnection {
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub(crate) struct ServerConfig {
+    pub(crate) device: Option<String>,
     pub(crate) connection: ServerConnection,
     #[serde(default)]
     pub(crate) syncs: HashSet<u32>,
