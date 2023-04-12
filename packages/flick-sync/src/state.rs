@@ -1,8 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::result;
 
 use plex_api::library::MediaItem;
 use plex_api::{
@@ -10,25 +8,14 @@ use plex_api::{
     media_container::server::library::{Metadata, MetadataType},
     Server,
 };
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use time::{Date, OffsetDateTime};
 use tokio::fs;
 use typeshare::typeshare;
 use uuid::Uuid;
 
-trait ListItem<T> {
-    fn id(&self) -> T;
-}
-
-macro_rules! derive_list_item {
-    ($typ:ident) => {
-        impl ListItem<u32> for $typ {
-            fn id(&self) -> u32 {
-                self.id
-            }
-        }
-    };
-}
+use crate::config::SyncItem;
+use crate::util::{derive_list_item, from_list, into_list, ListItem};
 
 #[derive(Deserialize, Default, Serialize, Clone, Debug, PartialEq)]
 #[serde(tag = "state", rename_all = "camelCase")]
@@ -79,27 +66,6 @@ impl ThumbnailState {
             *self = ThumbnailState::None;
         }
     }
-}
-
-fn from_list<'de, D, K, V>(deserializer: D) -> result::Result<HashMap<K, V>, D::Error>
-where
-    D: Deserializer<'de>,
-    K: Hash + Eq,
-    V: ListItem<K> + Deserialize<'de>,
-{
-    Ok(Vec::<V>::deserialize(deserializer)?
-        .into_iter()
-        .map(|v| (v.id(), v))
-        .collect())
-}
-
-fn into_list<S, K, V>(map: &HashMap<K, V>, serializer: S) -> result::Result<S::Ok, S::Error>
-where
-    S: Serializer,
-    V: Serialize,
-{
-    let list: Vec<&V> = map.values().collect();
-    list.serialize(serializer)
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -461,6 +427,8 @@ pub(crate) struct VideoState {
     #[typeshare(serialized_as = "number")]
     pub(crate) last_updated: OffsetDateTime,
     pub(crate) parts: Vec<VideoPartState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) transcode_profile: Option<String>,
 }
 
 derive_list_item!(VideoState);
@@ -480,7 +448,7 @@ impl VideoState {
         }
     }
 
-    pub(crate) fn from<M: MediaItem>(item: &M) -> Self {
+    pub(crate) fn from<M: MediaItem>(sync: &SyncItem, item: &M) -> Self {
         let metadata = item.metadata();
         let detail = match metadata.metadata_type {
             Some(MetadataType::Movie) => VideoDetail::Movie(MovieState::from(metadata)),
@@ -507,12 +475,20 @@ impl VideoState {
             media_id: media.metadata().id,
             last_updated: metadata.updated_at.unwrap(),
             parts,
+            transcode_profile: sync.transcode_profile.clone(),
         }
     }
 
-    pub(crate) async fn update<M: MetadataItem>(&mut self, item: &M, server: &Server, root: &Path) {
+    pub(crate) async fn update<M: MetadataItem>(
+        &mut self,
+        sync: &SyncItem,
+        item: &M,
+        server: &Server,
+        root: &Path,
+    ) {
         let metadata = item.metadata();
         self.title = item.title().to_owned();
+        self.transcode_profile = sync.transcode_profile.clone();
 
         match self.detail {
             VideoDetail::Movie(ref mut m) => m.update(metadata),

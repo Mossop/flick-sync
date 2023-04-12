@@ -35,6 +35,8 @@ pub enum Error {
     DownloadUnavailable,
     #[error("Server transcode failed")]
     TranscodeFailed,
+    #[error("Unknown transcode profile {0}")]
+    UnknownProfile(String),
     #[error("Unknown error")]
     Unknown(String),
 }

@@ -142,6 +142,8 @@ impl Runnable for Login {
 pub struct Add {
     /// The web url of the item to add to the list to sync.
     url: String,
+    /// The transcode profile to use for this item.
+    profile: Option<String>,
 }
 
 #[async_trait]
@@ -209,7 +211,7 @@ impl Runnable for Add {
                 server.id(),
             ));
 
-            server.add_sync(rating_key).await?;
+            server.add_sync(rating_key, self.profile).await?;
 
             return Ok(());
         }

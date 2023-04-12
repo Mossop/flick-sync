@@ -11,6 +11,7 @@ mod config;
 mod error;
 mod server;
 mod state;
+mod util;
 mod wrappers;
 
 pub use config::ServerConnection;
@@ -60,9 +61,15 @@ impl Inner {
     }
 
     async fn client(&self) -> HttpClient {
+        let config = self.config.read().await;
         let state = self.state.read().await;
         HttpClientBuilder::default()
-            .set_x_plex_platform("Generic")
+            .set_x_plex_platform(
+                config
+                    .device
+                    .clone()
+                    .unwrap_or_else(|| "Generic".to_string()),
+            )
             .set_x_plex_client_identifier(state.client_id.clone())
             .set_x_plex_product("FlickSync")
             .build()
@@ -135,7 +142,6 @@ impl FlickSync {
         config.servers.insert(
             id.to_owned(),
             ServerConfig {
-                device: None,
                 connection,
                 syncs: Default::default(),
             },

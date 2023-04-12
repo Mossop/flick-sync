@@ -5,10 +5,11 @@ use plex_api::{
     device::DeviceConnection,
     library::{Collection, Episode, Item, MetadataItem, Movie, Playlist, Season, Show, Video},
     media_container::server::library::MetadataType,
-    HttpClientBuilder, MyPlexBuilder,
+    MyPlexBuilder,
 };
 
 use crate::{
+    config::SyncItem,
     state::{
         CollectionState, LibraryState, LibraryType, PlaylistState, SeasonState, ServerState,
         ShowState, VideoDetail, VideoState,
@@ -102,12 +103,7 @@ impl Server {
 
         let server_config = config.servers.get(&self.id).unwrap();
 
-        let mut builder = HttpClientBuilder::from(self.inner.client().await);
-        if let Some(ref device) = server_config.device {
-            builder = builder.set_x_plex_platform(device);
-        }
-
-        let mut client = builder.build().unwrap();
+        let mut client = self.inner.client().await;
 
         match &server_config.connection {
             ServerConnection::MyPlex { username: _, id } => {
@@ -166,11 +162,23 @@ impl Server {
     }
 
     /// Adds an item to sync based on its rating key.
-    pub async fn add_sync(&self, rating_key: u32) -> Result {
+    pub async fn add_sync(&self, rating_key: u32, transcode_profile: Option<String>) -> Result {
         let mut config = self.inner.config.write().await;
 
+        if let Some(ref profile) = transcode_profile {
+            if !config.profiles.contains_key(profile) {
+                return Err(Error::UnknownProfile(profile.to_owned()));
+            }
+        }
+
         let server_config = config.servers.get_mut(&self.id).unwrap();
-        server_config.syncs.insert(rating_key);
+        server_config.syncs.insert(
+            rating_key,
+            SyncItem {
+                id: rating_key,
+                transcode_profile,
+            },
+        );
 
         self.inner.persist_config(&config).await
     }
@@ -201,8 +209,8 @@ impl Server {
                     seen_libraries: Default::default(),
                 };
 
-                for key in &server_config.syncs {
-                    if let Err(e) = state_sync.add_item_by_key(*key).await {
+                for item in server_config.syncs.values() {
+                    if let Err(e) = state_sync.add_item_by_key(item, item.id).await {
                         log::warn!("Failed to update item: {e}");
                     }
                 }
@@ -311,32 +319,32 @@ macro_rules! return_if_seen {
 }
 
 impl<'a> StateSync<'a> {
-    async fn add_movie(&mut self, movie: &Movie) -> Result {
+    async fn add_movie(&mut self, sync: &SyncItem, movie: &Movie) -> Result {
         return_if_seen!(self, movie);
 
         let video = self
             .server_state
             .videos
             .entry(movie.rating_key())
-            .or_insert_with(|| VideoState::from(movie));
+            .or_insert_with(|| VideoState::from(sync, movie));
 
-        video.update(movie, &self.server, self.root).await;
+        video.update(sync, movie, &self.server, self.root).await;
 
         self.add_library(movie)?;
 
         Ok(())
     }
 
-    async fn add_episode(&mut self, episode: &Episode) -> Result {
+    async fn add_episode(&mut self, sync: &SyncItem, episode: &Episode) -> Result {
         return_if_seen!(self, episode);
 
         let video = self
             .server_state
             .videos
             .entry(episode.rating_key())
-            .or_insert_with(|| VideoState::from(episode));
+            .or_insert_with(|| VideoState::from(sync, episode));
 
-        video.update(episode, &self.server, self.root).await;
+        video.update(sync, episode, &self.server, self.root).await;
 
         Ok(())
     }
@@ -500,21 +508,21 @@ impl<'a> StateSync<'a> {
         Ok(())
     }
 
-    async fn add_item_by_key(&mut self, key: u32) -> Result {
+    async fn add_item_by_key(&mut self, sync: &SyncItem, key: u32) -> Result {
         match self.server.item_by_id(key).await {
-            Ok(i) => self.add_item(i).await,
+            Ok(i) => self.add_item(sync, i).await,
             Err(plex_api::Error::ItemNotFound) => Err(Error::ItemNotFound(key)),
             Err(e) => Err(e.into()),
         }
     }
 
     #[async_recursion]
-    async fn add_item(&mut self, item: Item) -> Result {
+    async fn add_item(&mut self, sync: &SyncItem, item: Item) -> Result {
         match item {
             Item::Movie(movie) => {
                 log::debug!("Syncing movie '{}' metadata", movie.title());
 
-                self.add_movie(&movie).await
+                self.add_movie(sync, &movie).await
             }
 
             Item::Show(show) => {
@@ -526,7 +534,7 @@ impl<'a> StateSync<'a> {
                     self.add_season(&season)?;
 
                     for episode in season.episodes().await? {
-                        self.add_episode(&episode).await?;
+                        self.add_episode(sync, &episode).await?;
                     }
                 }
 
@@ -548,7 +556,7 @@ impl<'a> StateSync<'a> {
                 self.add_season(&season)?;
 
                 for episode in season.episodes().await? {
-                    self.add_episode(&episode).await?;
+                    self.add_episode(sync, &episode).await?;
                 }
 
                 Ok(())
@@ -583,7 +591,7 @@ impl<'a> StateSync<'a> {
                     self.add_season(&season)?;
                 }
 
-                self.add_episode(&episode).await
+                self.add_episode(sync, &episode).await
             }
 
             Item::MovieCollection(collection) => {
@@ -593,7 +601,7 @@ impl<'a> StateSync<'a> {
                 let movies = collection.children().await?;
                 for movie in movies {
                     let key = movie.rating_key();
-                    match self.add_item(Item::Movie(movie)).await {
+                    match self.add_item(sync, Item::Movie(movie)).await {
                         Ok(()) => {
                             items.insert(key);
                         }
@@ -610,7 +618,7 @@ impl<'a> StateSync<'a> {
                 let shows = collection.children().await?;
                 for show in shows {
                     let key = show.rating_key();
-                    match self.add_item(Item::Show(show)).await {
+                    match self.add_item(sync, Item::Show(show)).await {
                         Ok(()) => {
                             items.insert(key);
                         }
@@ -628,8 +636,10 @@ impl<'a> StateSync<'a> {
                 for video in videos {
                     let key = video.rating_key();
                     let result = match video {
-                        Video::Episode(episode) => self.add_item(Item::Episode(episode)).await,
-                        Video::Movie(movie) => self.add_item(Item::Movie(movie)).await,
+                        Video::Episode(episode) => {
+                            self.add_item(sync, Item::Episode(episode)).await
+                        }
+                        Video::Movie(movie) => self.add_item(sync, Item::Movie(movie)).await,
                     };
 
                     match result {
