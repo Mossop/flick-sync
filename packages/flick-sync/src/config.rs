@@ -13,6 +13,7 @@ pub enum ServerConnection {
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct SyncItem {
     pub(crate) id: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
