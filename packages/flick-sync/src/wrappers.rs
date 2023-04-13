@@ -416,7 +416,46 @@ impl VideoPart {
 
         log::info!("Starting transcode for {}", video.title());
 
-        let session = part.create_download_session(options).await?;
+        let session = match part.create_download_session(options).await {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!(
+                    "Failed to create transcode session for {}: {e}",
+                    video.title()
+                );
+                return Err(e.into());
+            }
+        };
+
+        // Wait until the transcode session has started.
+        let mut count = 0;
+        loop {
+            sleep(Duration::from_millis(100)).await;
+
+            match session.stats().await {
+                Ok(stats) => {
+                    log::trace!("{stats:#?}");
+                    break;
+                }
+                Err(plex_api::Error::UnexpectedApiResponse {
+                    status_code: 404,
+                    content: _,
+                }) => {
+                    count += 1;
+                    if count > 20 {
+                        log::error!("Transcode session {} failed to start", session.session_id());
+                        return Err(Error::TranscodeFailed);
+                    }
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        log::debug!(
+            "Started transcode session {} for {}",
+            session.session_id(),
+            video.title()
+        );
 
         let path = self.file_path(&session.container().to_string()).await;
 
@@ -469,14 +508,13 @@ impl VideoPart {
 
     async fn wait_for_transcode(&self, session: TranscodeSession) -> Result {
         loop {
-            let status = session.status().await?;
-            match status {
-                TranscodeStatus::Complete => break,
-                TranscodeStatus::Error => return Err(Error::TranscodeFailed),
-                TranscodeStatus::Transcoding {
+            match session.status().await {
+                Ok(TranscodeStatus::Complete) => break,
+                Ok(TranscodeStatus::Error) => return Err(Error::TranscodeFailed),
+                Ok(TranscodeStatus::Transcoding {
                     remaining,
                     progress: _,
-                } => {
+                }) => {
                     let delay = match remaining {
                         Some(secs) => {
                             let delay = max(5, secs / 2);
@@ -488,6 +526,36 @@ impl VideoPart {
 
                     sleep(Duration::from_secs(delay as u64)).await;
                 }
+                Err(e) => {
+                    log::error!(
+                        "Error getting transcode status for session {}",
+                        session.session_id()
+                    );
+                    return Err(e.into());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn prepare_download(&self) -> Result {
+        let download_state = self.download_state().await;
+
+        if matches!(download_state, DownloadState::None) {
+            if let Err(e) = self.start_transcode().await {
+                if !matches!(
+                    e,
+                    Error::PlexError {
+                        source: plex_api::Error::TranscodeRefused
+                    }
+                ) {
+                    log::warn!("Transcode attempt failed: {e}");
+                } else {
+                    log::trace!("Transcode attempt refused");
+                }
+
+                self.start_download().await?;
             }
         }
 
@@ -495,35 +563,18 @@ impl VideoPart {
     }
 
     pub async fn wait_for_download(&self) -> Result {
+        self.prepare_download().await?;
+
         let download_state = self.download_state().await;
-        match download_state {
-            DownloadState::None => match self.start_transcode().await {
-                Ok(session) => self.wait_for_transcode(session).await?,
-                Err(e) => {
-                    if !matches!(
-                        e,
-                        Error::PlexError {
-                            source: plex_api::Error::TranscodeRefused
-                        }
-                    ) {
-                        log::warn!("Transcode attempt failed: {e}");
-                    } else {
-                        log::trace!("Transcode attempt refused");
-                    }
-                    self.start_download().await?;
-                }
-            },
-            DownloadState::Downloading { path: _ } => (),
-            DownloadState::Transcoding {
-                session_id,
-                path: _,
-            } => {
-                let server = self.connect().await?;
-                let session = server.transcode_session(&session_id).await?;
-                self.wait_for_transcode(session).await?;
-            }
-            DownloadState::Downloaded { path: _ } | DownloadState::Transcoded { path: _ } => (),
-        };
+        if let DownloadState::Transcoding {
+            session_id,
+            path: _,
+        } = download_state
+        {
+            let server = self.connect().await?;
+            let session = server.transcode_session(&session_id).await?;
+            self.wait_for_transcode(session).await?;
+        }
 
         Ok(())
     }

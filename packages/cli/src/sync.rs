@@ -37,20 +37,26 @@ impl Progress for DownloadProgress {
     }
 }
 
+async fn prepare_download_part(part: &VideoPart) -> Result {
+    if let Err(e) = part.verify_download().await {
+        log::warn!("{e}");
+    }
+
+    if part.is_downloaded().await {
+        return Ok(());
+    }
+
+    part.prepare_download().await?;
+
+    Ok(())
+}
+
 async fn download_part(
     title: String,
     sync_state: SyncState<'_>,
     part: VideoPart,
     console: Console,
 ) {
-    if let Err(e) = part.verify_download().await {
-        log::warn!("{e}");
-    }
-
-    if part.is_downloaded().await {
-        return;
-    }
-
     if let Err(e) = part.wait_for_download().await {
         log::error!("{e}");
         return;
@@ -89,6 +95,11 @@ impl Runnable for Sync {
             for video in server.videos().await {
                 let title = video.title().await;
                 for part in video.parts().await {
+                    if let Err(e) = prepare_download_part(&part).await {
+                        log::error!("{e}");
+                        continue;
+                    }
+
                     jobs.push(download_part(
                         title.clone(),
                         state.clone(),
