@@ -1,24 +1,17 @@
 use std::{
     io,
-    ops::{Deref, DerefMut},
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex},
 };
 
-use console::{pad_str, Alignment, Style, Term};
+use console::Term;
 use dialoguer::{Input, Password, Select};
-use flexi_logger::{writers::LogWriter, DeferredNow, Level, Record};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-
-#[derive(Default)]
-struct ProgressBars {
-    bars: MultiProgress,
-    count: usize,
-}
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use tracing_subscriber::fmt::MakeWriter;
 
 #[derive(Clone)]
 pub struct Bar {
     bar: ProgressBar,
-    progress_bars: Arc<RwLock<Option<ProgressBars>>>,
+    console: Console,
 }
 
 impl Bar {
@@ -33,37 +26,107 @@ impl Bar {
     pub fn finish(self) {
         self.bar.finish_and_clear();
 
-        let mut progress = self.progress_bars.write().unwrap();
-        let is_empty = if let Some(ref mut progress) = progress.deref_mut() {
-            progress.bars.remove(&self.bar);
-            progress.count -= 1;
-            progress.count == 0
-        } else {
-            false
-        };
+        self.console.progress_bars.remove(&self.bar);
+        let mut state = self.console.state.lock().unwrap();
+        state.progress_bar_count -= 1;
 
-        if is_empty {
-            *progress = None;
+        self.console.update_draw_target(&state);
+    }
+}
+
+pub struct ConsoleWriter {
+    console: Console,
+    _guard: BarHideGuard,
+}
+
+impl ConsoleWriter {
+    fn new(console: &Console) -> Self {
+        Self {
+            console: console.clone(),
+            _guard: BarHideGuard::new(console),
         }
+    }
+}
+
+impl io::Write for ConsoleWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.console.term.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.console.term.flush()
+    }
+}
+
+#[derive(Default)]
+struct ConsoleState {
+    progress_bar_count: usize,
+    hide_count: usize,
+}
+
+struct BarHideGuard {
+    console: Console,
+}
+
+impl BarHideGuard {
+    fn new(console: &Console) -> Self {
+        let mut state = console.state.lock().unwrap();
+        state.hide_count += 1;
+
+        console.update_draw_target(&state);
+
+        Self {
+            console: console.clone(),
+        }
+    }
+}
+
+impl Drop for BarHideGuard {
+    fn drop(&mut self) {
+        let mut state = self.console.state.lock().unwrap();
+        state.hide_count -= 1;
+
+        self.console.update_draw_target(&state);
     }
 }
 
 #[derive(Clone)]
 pub struct Console {
     term: Term,
-    progress_bars: Arc<RwLock<Option<ProgressBars>>>,
+    progress_bars: MultiProgress,
+    state: Arc<Mutex<ConsoleState>>,
 }
 
 impl Default for Console {
     fn default() -> Self {
+        let term = Term::stdout();
         Self {
-            term: Term::stdout(),
-            progress_bars: Arc::new(RwLock::new(None)),
+            progress_bars: MultiProgress::with_draw_target(ProgressDrawTarget::hidden()),
+            term,
+            state: Default::default(),
         }
     }
 }
 
 impl Console {
+    fn update_draw_target(&self, state: &ConsoleState) {
+        let should_be_hidden = state.progress_bar_count == 0 || state.hide_count > 0;
+
+        if should_be_hidden != self.progress_bars.is_hidden() {
+            if should_be_hidden {
+                #[allow(unused_must_use)]
+                {
+                    self.progress_bars.clear();
+                }
+                self.progress_bars
+                    .set_draw_target(ProgressDrawTarget::hidden());
+            } else {
+                self.progress_bars
+                    .set_draw_target(ProgressDrawTarget::term(self.term.clone(), 10))
+            }
+        }
+    }
+
     pub fn add_progress_bar(&self, msg: &str) -> Bar {
         let inner_bar = ProgressBar::new(100)
             .with_message(msg.to_owned())
@@ -74,13 +137,13 @@ impl Console {
                 .unwrap(),
             );
 
-        let mut p_state = self.progress_bars.write().unwrap();
-        let progress = p_state.get_or_insert(Default::default());
-        progress.count += 1;
+        let mut state = self.state.lock().unwrap();
+        state.progress_bar_count += 1;
+        self.update_draw_target(&state);
 
         Bar {
-            bar: progress.bars.add(inner_bar),
-            progress_bars: self.progress_bars.clone(),
+            bar: self.progress_bars.add(inner_bar),
+            console: self.clone(),
         }
     }
 
@@ -88,13 +151,9 @@ impl Console {
     where
         F: FnOnce(&Term) -> R,
     {
-        let progress = self.progress_bars.read().unwrap();
+        let _guard = BarHideGuard::new(self);
 
-        if let Some(bars) = progress.deref() {
-            bars.bars.suspend(|| f(&self.term))
-        } else {
-            f(&self.term)
-        }
+        f(&self.term)
     }
 
     fn inner_println<S: AsRef<str>>(&self, msg: S) -> io::Result<()> {
@@ -135,25 +194,10 @@ impl Console {
     }
 }
 
-impl LogWriter for Console {
-    fn write(&self, _now: &mut DeferredNow, record: &Record) -> std::io::Result<()> {
-        let style = match record.level() {
-            Level::Error => Style::new().red(),
-            Level::Warn => Style::new().yellow(),
-            Level::Info => Style::new(),
-            Level::Debug => Style::new().blue().bright(),
-            Level::Trace => Style::new().black().bright(),
-        };
+impl<'a> MakeWriter<'a> for Console {
+    type Writer = ConsoleWriter;
 
-        self.inner_println(format!(
-            "{} {} {}",
-            style.apply_to(pad_str(record.level().as_str(), 5, Alignment::Right, None)),
-            pad_str(&format!("[{}]", record.target()), 20, Alignment::Left, None),
-            style.apply_to(format!("{}", record.args())),
-        ))
-    }
-
-    fn flush(&self) -> std::io::Result<()> {
-        self.term.flush()
+    fn make_writer(&'a self) -> Self::Writer {
+        ConsoleWriter::new(self)
     }
 }

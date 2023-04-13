@@ -1,12 +1,15 @@
-use std::{env::current_dir, path::PathBuf};
+use std::{
+    env::{self, current_dir},
+    path::PathBuf,
+};
 
 use async_trait::async_trait;
 use clap::{Parser, Subcommand};
 use error::{err, Error};
-use flexi_logger::Logger;
 use flick_sync::{FlickSync, Server, CONFIG_FILE, STATE_FILE};
 use sync::{Prune, Sync};
 use tokio::fs::{metadata, read_dir};
+use tracing::{error, trace};
 
 mod console;
 mod error;
@@ -84,7 +87,7 @@ struct Args {
 async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf> {
     let path = store.unwrap_or_else(|| current_dir().unwrap());
 
-    log::trace!("Checking for store directory at {}", path.display());
+    trace!("Checking for store directory at {}", path.display());
     match metadata(&path).await {
         Ok(stats) => {
             if !stats.is_dir() {
@@ -99,21 +102,21 @@ async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf> {
     let state = path.join(STATE_FILE);
     if let Ok(stats) = metadata(&state).await {
         if stats.is_file() {
-            log::trace!("Store contained state file");
+            trace!("Store contained state file");
             return Ok(path);
         } else {
             return err("Store contained a non-file where a state file was expected");
         }
     }
 
-    log::trace!("No state file, checking for non-config files in a new store");
+    trace!("No state file, checking for non-config files in a new store");
     let mut reader = read_dir(&path).await?;
     while let Some(entry) = reader.next_entry().await? {
         let file_name = entry.file_name();
         let name = match file_name.to_str() {
             Some(s) => s,
             None => {
-                log::error!("Store contained an entry with a non-UTF8 invalid name");
+                error!("Store contained an entry with a non-UTF8 invalid name");
                 return err("New store is not empty");
             }
         };
@@ -121,11 +124,11 @@ async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf> {
         let typ = entry.file_type().await?;
         if typ.is_file() {
             if name != CONFIG_FILE {
-                log::error!("{} exists in a potential new store", name);
+                error!("{} exists in a potential new store", name);
                 return err("New store is not empty");
             }
         } else {
-            log::error!("{} exists in a potential new store", name);
+            error!("{} exists in a potential new store", name);
             return err("New store is not empty");
         }
     }
@@ -146,14 +149,20 @@ async fn main() -> Result {
 
     let console = Console::default();
 
-    if let Err(e) = Logger::try_with_env_or_str("flick_sync=trace,warn")
-        .and_then(|logger| logger.log_to_writer(Box::new(console.clone())).start())
-    {
-        console.println(format!("Warning, failed to start logging: {}", e));
+    let log_filter = env::var("RUST_LOG").unwrap_or_else(|_| "flick_sync=trace,warn".to_string());
+
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(&log_filter)
+        .with_ansi(true)
+        .without_time()
+        .with_writer(console.clone())
+        .finish();
+    if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
+        eprintln!("Unable to set global default subscriber: {e}");
     }
 
     wrapped_main(args, console).await.map_err(|e| {
-        log::error!("{}", e);
+        error!("{}", e);
         e
     })
 }

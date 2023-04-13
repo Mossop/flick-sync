@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
@@ -11,13 +12,14 @@ use plex_api::{
 use serde::{Deserialize, Serialize};
 use time::{Date, OffsetDateTime};
 use tokio::fs;
+use tracing::{error, instrument, trace, warn};
 use typeshare::typeshare;
 use uuid::Uuid;
 
 use crate::config::SyncItem;
 use crate::util::{derive_list_item, from_list, into_list, ListItem};
 
-#[derive(Deserialize, Default, Serialize, Clone, Debug, PartialEq)]
+#[derive(Deserialize, Default, Serialize, Clone, PartialEq)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub(crate) enum ThumbnailState {
     #[default]
@@ -31,6 +33,7 @@ impl ThumbnailState {
         matches!(self, ThumbnailState::None)
     }
 
+    #[instrument(level = "trace", skip(root))]
     pub(crate) async fn verify(&mut self, root: &Path) {
         if let ThumbnailState::Downloaded { path } = self {
             let file = root.join(&path);
@@ -38,32 +41,42 @@ impl ThumbnailState {
             match fs::metadata(&file).await {
                 Ok(stats) => {
                     if !stats.is_file() {
-                        log::error!("'{}' was expected to be a file", path.display());
+                        error!("'{}' was expected to be a file", path.display());
                     }
                 }
                 Err(e) => {
                     if e.kind() == ErrorKind::NotFound {
                         *self = ThumbnailState::None;
                     } else {
-                        log::error!("Error accessing thumbnail '{}': {e}", path.display());
+                        error!("Error accessing thumbnail '{}': {e}", path.display());
                     }
                 }
             }
         }
     }
 
+    #[instrument(level = "trace", skip(root))]
     pub(crate) async fn delete(&mut self, root: &Path) {
         if let ThumbnailState::Downloaded { path } = self {
             let file = root.join(&path);
-            log::trace!("Removing old thumbnail file '{}'", path.display());
+            trace!("Removing old thumbnail file '{}'", path.display());
 
             if let Err(e) = fs::remove_file(&file).await {
                 if e.kind() != ErrorKind::NotFound {
-                    log::warn!("Failed to remove file {}: {e}", file.display());
+                    warn!("Failed to remove file {}: {e}", file.display());
                 }
             }
 
             *self = ThumbnailState::None;
+        }
+    }
+}
+
+impl fmt::Debug for ThumbnailState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => write!(f, "None"),
+            Self::Downloaded { path: _ } => write!(f, "Downloaded"),
         }
     }
 }
@@ -297,7 +310,7 @@ impl EpisodeState {
     }
 }
 
-#[derive(Deserialize, Default, Serialize, Clone, Debug, PartialEq)]
+#[derive(Deserialize, Default, Serialize, Clone, PartialEq)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub(crate) enum DownloadState {
     #[default]
@@ -324,6 +337,7 @@ impl DownloadState {
         )
     }
 
+    #[instrument(level = "trace", skip(root, server))]
     pub(crate) async fn verify(&mut self, server: &Server, root: &Path) {
         let (path, session_id) = match self {
             DownloadState::None => return,
@@ -339,7 +353,7 @@ impl DownloadState {
             if let Err(plex_api::Error::ItemNotFound) = server.transcode_session(session_id).await {
                 if let Err(e) = fs::remove_file(&file).await {
                     if e.kind() != ErrorKind::NotFound {
-                        log::warn!("Failed to remove old download: {e}");
+                        warn!("Failed to remove old download: {e}");
                     }
                 }
 
@@ -352,14 +366,14 @@ impl DownloadState {
         match fs::metadata(&file).await {
             Ok(stats) => {
                 if !stats.is_file() {
-                    log::error!("'{}' was expected to be a file", path.display());
+                    error!("'{}' was expected to be a file", path.display());
                 }
 
                 return;
             }
             Err(e) => {
                 if e.kind() != ErrorKind::NotFound {
-                    log::error!("Error accessing file '{}': {e}", path.display());
+                    error!("Error accessing file '{}': {e}", path.display());
                     return;
                 }
             }
@@ -368,6 +382,7 @@ impl DownloadState {
         *self = DownloadState::None;
     }
 
+    #[instrument(level = "trace", skip(root, server))]
     pub(crate) async fn delete(&mut self, server: &Server, root: &Path) {
         let (path, session_id) = match self {
             DownloadState::None => return,
@@ -379,23 +394,38 @@ impl DownloadState {
 
         let file = root.join(&path);
 
-        log::trace!("Removing old video file '{}'", path.display());
+        trace!("Removing old video file '{}'", path.display());
 
         if let Err(e) = fs::remove_file(&file).await {
             if e.kind() != ErrorKind::NotFound {
-                log::warn!("Failed to remove file {}: {e}", file.display());
+                warn!("Failed to remove file {}: {e}", file.display());
             }
         }
 
         if let Some(session_id) = session_id {
             if let Ok(session) = server.transcode_session(session_id).await {
                 if let Err(e) = session.cancel().await {
-                    log::warn!("Failed to cancel stale transcode session: {e}");
+                    warn!("Failed to cancel stale transcode session: {e}");
                 }
             }
         }
 
         *self = DownloadState::None;
+    }
+}
+
+impl fmt::Debug for DownloadState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => write!(f, "None"),
+            Self::Downloading { path: _ } => write!(f, "Downloading"),
+            Self::Transcoding {
+                session_id,
+                path: _,
+            } => write!(f, "Transcoding({session_id})"),
+            Self::Downloaded { path: _ } => write!(f, "Downloaded"),
+            Self::Transcoded { path: _ } => write!(f, "Transcoded"),
+        }
     }
 }
 

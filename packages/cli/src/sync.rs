@@ -3,6 +3,7 @@ use clap::Args;
 use flick_sync::{FlickSync, Progress, VideoPart};
 use futures::future::join_all;
 use tokio::sync::Semaphore;
+use tracing::{error, warn};
 
 use crate::{console::Bar, select_servers, Console, Result, Runnable};
 
@@ -39,7 +40,7 @@ impl Progress for DownloadProgress {
 
 async fn prepare_download_part(part: &VideoPart) -> Result {
     if let Err(e) = part.verify_download().await {
-        log::warn!("{e}");
+        warn!("{e}");
     }
 
     if part.is_downloaded().await {
@@ -58,7 +59,7 @@ async fn download_part(
     console: Console,
 ) {
     if let Err(e) = part.wait_for_download().await {
-        log::error!("{e}");
+        error!("{e}");
         return;
     }
 
@@ -66,7 +67,7 @@ async fn download_part(
 
     let bar = console.add_progress_bar(&title);
     if let Err(e) = part.download(DownloadProgress { bar: bar.clone() }).await {
-        log::error!("{e}");
+        error!("{e}");
     }
 
     bar.finish();
@@ -96,7 +97,7 @@ impl Runnable for Sync {
                 let title = video.title().await;
                 for part in video.parts().await {
                     if let Err(e) = prepare_download_part(&part).await {
-                        log::error!("{e}");
+                        error!("{e}");
                         continue;
                     }
 

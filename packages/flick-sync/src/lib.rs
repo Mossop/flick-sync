@@ -28,6 +28,8 @@ use tokio::{
     fs::{read_to_string, write},
     sync::{Mutex, RwLock, RwLockWriteGuard},
 };
+use tracing::warn;
+
 pub use wrappers::*;
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
@@ -75,7 +77,7 @@ impl Inner {
                 return profile.options();
             }
 
-            log::warn!("Unknown transcode profile {profile}, falling back to defaults.");
+            warn!("Unknown transcode profile {profile}, falling back to defaults.");
         }
 
         Default::default()

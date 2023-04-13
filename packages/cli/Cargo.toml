@@ -7,12 +7,12 @@ edition = "2021"
 futures = "0.3.28"
 flick-sync = { path = "../flick-sync" }
 clap = { version = "4.1.13", features = ["derive", "env"] }
-flexi_logger = { version = "0.25.3", features = ["colors"] }
 tokio = { version = "1.26.0", features = ["full"] }
 console = "0.15.5"
 dialoguer = "0.10.3"
 indicatif = "0.17.3"
-log = "0.4.17"
+tracing = { version = "^0.1.37", features = ["attributes"] }
 async-trait = "0.1.68"
 thiserror = "1.0.40"
 url = "2.3.1"
+tracing-subscriber = {version = "0.3.16", features = ["env-filter"] }

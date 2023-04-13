@@ -1,5 +1,6 @@
 use std::{
     cmp::max,
+    fmt,
     io::{ErrorKind, IoSlice},
     path::{Path, PathBuf},
     pin::Pin,
@@ -21,6 +22,7 @@ use tokio::{
     fs::{metadata, remove_file},
     time::sleep,
 };
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
     state::{
@@ -112,6 +114,7 @@ macro_rules! thumbnail_methods {
             self.with_state(|s| s.thumbnail.clone()).await
         }
 
+        #[instrument(level = "trace")]
         pub async fn update_thumbnail(&self) -> Result {
             let root = self.inner.path.read().await.to_owned();
 
@@ -124,12 +127,12 @@ macro_rules! thumbnail_methods {
             if thumbnail.is_none() {
                 let server = self.connect().await?;
                 let item = server.item_by_id(self.id).await?;
-                log::debug!("Updating thumbnail for {}", item.title());
+                debug!("Updating thumbnail for {}", item.title());
 
                 let image = if let Some(ref thumb) = item.metadata().thumb {
                     thumb.clone()
                 } else {
-                    log::warn!("No thumbnail found for {}", item.title());
+                    warn!("No thumbnail found for {}", item.title());
                     return Ok(());
                 };
 
@@ -148,7 +151,7 @@ macro_rules! thumbnail_methods {
                 let state = ThumbnailState::Downloaded { path };
 
                 self.update_state(|s| s.thumbnail = state).await?;
-                log::trace!("Thumbnail for {} successfully updated", item.title());
+                trace!("Thumbnail for {} successfully updated", item.title());
             }
 
             Ok(())
@@ -200,6 +203,15 @@ pub struct Show {
     pub(crate) inner: Arc<Inner>,
 }
 
+impl fmt::Debug for Show {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Show")
+            .field("server", &self.server)
+            .field("id", &self.id)
+            .finish()
+    }
+}
+
 state_wrapper!(Show, ShowState, shows);
 
 impl Show {
@@ -231,6 +243,15 @@ pub struct Season {
     pub(crate) server: String,
     pub(crate) id: u32,
     pub(crate) inner: Arc<Inner>,
+}
+
+impl fmt::Debug for Season {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Season")
+            .field("server", &self.server)
+            .field("id", &self.id)
+            .finish()
+    }
 }
 
 state_wrapper!(Season, SeasonState, seasons);
@@ -338,6 +359,16 @@ pub struct VideoPart {
     pub(crate) inner: Arc<Inner>,
 }
 
+impl fmt::Debug for VideoPart {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VideoPart")
+            .field("server", &self.server)
+            .field("id", &self.id)
+            .field("index", &self.index)
+            .finish()
+    }
+}
+
 impl VideoPart {
     async fn with_video_state<F, R>(&self, cb: F) -> R
     where
@@ -390,6 +421,7 @@ impl VideoPart {
         !download_state.needs_download()
     }
 
+    #[instrument(level = "trace")]
     async fn start_transcode(&self) -> Result<TranscodeSession> {
         let server = self.connect().await?;
         let item = server.item_by_id(self.id).await?;
@@ -414,12 +446,12 @@ impl VideoPart {
 
         let options = self.inner.transcode_options(profile).await;
 
-        log::info!("Starting transcode for {}", video.title());
+        info!("Starting transcode for {}", video.title());
 
         let session = match part.create_download_session(options).await {
             Ok(s) => s,
             Err(e) => {
-                log::error!(
+                error!(
                     "Failed to create transcode session for {}: {e}",
                     video.title()
                 );
@@ -434,7 +466,7 @@ impl VideoPart {
 
             match session.stats().await {
                 Ok(stats) => {
-                    log::trace!("{stats:#?}");
+                    trace!("{stats:#?}");
                     break;
                 }
                 Err(plex_api::Error::UnexpectedApiResponse {
@@ -443,7 +475,7 @@ impl VideoPart {
                 }) => {
                     count += 1;
                     if count > 20 {
-                        log::error!("Transcode session {} failed to start", session.session_id());
+                        error!("Transcode session {} failed to start", session.session_id());
                         return Err(Error::TranscodeFailed);
                     }
                 }
@@ -451,7 +483,7 @@ impl VideoPart {
             }
         }
 
-        log::debug!(
+        debug!(
             "Started transcode session {} for {}",
             session.session_id(),
             video.title()
@@ -470,6 +502,7 @@ impl VideoPart {
         Ok(session)
     }
 
+    #[instrument(level = "trace")]
     async fn start_download(&self) -> Result {
         let server = self.connect().await?;
         let item = server.item_by_id(self.id).await?;
@@ -506,6 +539,7 @@ impl VideoPart {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(session), fields(session_id=session.session_id()))]
     async fn wait_for_transcode(&self, session: TranscodeSession) -> Result {
         loop {
             match session.status().await {
@@ -518,7 +552,7 @@ impl VideoPart {
                     let delay = match remaining {
                         Some(secs) => {
                             let delay = max(5, secs / 2);
-                            log::trace!("Item due in {secs}s, delaying for {delay}s");
+                            trace!("Item due in {secs}s, delaying for {delay}s");
                             delay
                         }
                         None => 5,
@@ -527,7 +561,7 @@ impl VideoPart {
                     sleep(Duration::from_secs(delay as u64)).await;
                 }
                 Err(e) => {
-                    log::error!(
+                    error!(
                         "Error getting transcode status for session {}",
                         session.session_id()
                     );
@@ -539,6 +573,7 @@ impl VideoPart {
         Ok(())
     }
 
+    #[instrument(level = "trace")]
     pub async fn prepare_download(&self) -> Result {
         let download_state = self.download_state().await;
 
@@ -550,9 +585,9 @@ impl VideoPart {
                         source: plex_api::Error::TranscodeRefused
                     }
                 ) {
-                    log::warn!("Transcode attempt failed: {e}");
+                    warn!("Transcode attempt failed: {e}");
                 } else {
-                    log::trace!("Transcode attempt refused");
+                    trace!("Transcode attempt refused");
                 }
 
                 self.start_download().await?;
@@ -562,6 +597,7 @@ impl VideoPart {
         Ok(())
     }
 
+    #[instrument(level = "trace")]
     pub async fn wait_for_download(&self) -> Result {
         self.prepare_download().await?;
 
@@ -579,6 +615,7 @@ impl VideoPart {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(progress))]
     async fn download_direct<P: Progress + Unpin>(&self, path: &Path, mut progress: P) -> Result {
         let target = { self.inner.path.read().await.join(path) };
         let offset = match metadata(&target).await {
@@ -622,10 +659,10 @@ impl VideoPart {
             writer: file,
             progress: &mut progress,
         };
-        log::debug!("Downloading {} from offset {offset}", path.display());
+        debug!("Downloading {} from offset {offset}", path.display());
 
         part.download(writer, offset..).await?;
-        log::info!("Download of {} complete", path.display());
+        info!("Download of {} complete", path.display());
 
         self.update_state(|state| {
             state.download = DownloadState::Downloaded {
@@ -637,6 +674,7 @@ impl VideoPart {
         Ok(())
     }
 
+    #[instrument(level = "trace", skip(progress))]
     async fn download_transcode<P: Progress + Unpin>(
         &self,
         session_id: &str,
@@ -665,10 +703,10 @@ impl VideoPart {
             writer: file,
             progress: &mut progress,
         };
-        log::debug!("Downloading transcoded {}", path.display());
+        debug!("Downloading transcoded {}", path.display());
 
         session.download(writer).await?;
-        log::info!("Download of {} complete", path.display());
+        info!("Download of {} complete", path.display());
 
         self.update_state(|state| {
             state.download = DownloadState::Transcoded {
@@ -678,7 +716,7 @@ impl VideoPart {
         .await?;
 
         if let Err(e) = session.cancel().await {
-            log::warn!(
+            warn!(
                 "Transcode session for {} failed to cancel: {e}",
                 path.display()
             );
@@ -756,6 +794,15 @@ pub struct Episode {
     pub(crate) inner: Arc<Inner>,
 }
 
+impl fmt::Debug for Episode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Episode")
+            .field("server", &self.server)
+            .field("id", &self.id)
+            .finish()
+    }
+}
+
 state_wrapper!(Episode, VideoState, videos);
 
 impl Episode {
@@ -831,6 +878,15 @@ pub struct Movie {
     pub(crate) server: String,
     pub(crate) id: u32,
     pub(crate) inner: Arc<Inner>,
+}
+
+impl fmt::Debug for Movie {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Movie")
+            .field("server", &self.server)
+            .field("id", &self.id)
+            .finish()
+    }
 }
 
 state_wrapper!(Movie, VideoState, videos);
@@ -937,6 +993,15 @@ pub struct Playlist {
     pub(crate) inner: Arc<Inner>,
 }
 
+impl fmt::Debug for Playlist {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Playlist")
+            .field("server", &self.server)
+            .field("id", &self.id)
+            .finish()
+    }
+}
+
 state_wrapper!(Playlist, PlaylistState, playlists);
 
 impl Playlist {
@@ -968,6 +1033,15 @@ pub struct MovieCollection {
     pub(crate) server: String,
     pub(crate) id: u32,
     pub(crate) inner: Arc<Inner>,
+}
+
+impl fmt::Debug for MovieCollection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MovieCollection")
+            .field("server", &self.server)
+            .field("id", &self.id)
+            .finish()
+    }
 }
 
 state_wrapper!(MovieCollection, CollectionState, collections);
@@ -1008,6 +1082,15 @@ pub struct ShowCollection {
     pub(crate) server: String,
     pub(crate) id: u32,
     pub(crate) inner: Arc<Inner>,
+}
+
+impl fmt::Debug for ShowCollection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShowCollection")
+            .field("server", &self.server)
+            .field("id", &self.id)
+            .finish()
+    }
 }
 
 state_wrapper!(ShowCollection, CollectionState, collections);
@@ -1065,6 +1148,15 @@ pub struct MovieLibrary {
     pub(crate) inner: Arc<Inner>,
 }
 
+impl fmt::Debug for MovieLibrary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MovieLibrary")
+            .field("server", &self.server)
+            .field("id", &self.id)
+            .finish()
+    }
+}
+
 state_wrapper!(MovieLibrary, LibraryState, libraries);
 
 impl MovieLibrary {
@@ -1100,6 +1192,15 @@ pub struct ShowLibrary {
     pub(crate) server: String,
     pub(crate) id: u32,
     pub(crate) inner: Arc<Inner>,
+}
+
+impl fmt::Debug for ShowLibrary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShowLibrary")
+            .field("server", &self.server)
+            .field("id", &self.id)
+            .finish()
+    }
 }
 
 state_wrapper!(ShowLibrary, LibraryState, libraries);
