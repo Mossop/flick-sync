@@ -421,7 +421,7 @@ impl VideoPart {
         !download_state.needs_download()
     }
 
-    #[instrument(level = "trace")]
+    #[instrument(level = "trace", fields(session_id))]
     async fn start_transcode(&self) -> Result<TranscodeSession> {
         let server = self.connect().await?;
         let item = server.item_by_id(self.id).await?;
@@ -446,18 +446,11 @@ impl VideoPart {
 
         let options = self.inner.transcode_options(profile).await;
 
-        info!("Starting transcode for {}", video.title());
+        info!("Starting transcode");
 
-        let session = match part.create_download_session(options).await {
-            Ok(s) => s,
-            Err(e) => {
-                error!(
-                    "Failed to create transcode session for {}: {e}",
-                    video.title()
-                );
-                return Err(e.into());
-            }
-        };
+        let session = part.create_download_session(options).await?;
+
+        tracing::Span::current().record("session_id", session.session_id());
 
         // Wait until the transcode session has started.
         let mut count = 0;
@@ -465,8 +458,7 @@ impl VideoPart {
             sleep(Duration::from_millis(100)).await;
 
             match session.stats().await {
-                Ok(stats) => {
-                    trace!("{stats:#?}");
+                Ok(_) => {
                     break;
                 }
                 Err(plex_api::Error::UnexpectedApiResponse {
@@ -475,7 +467,7 @@ impl VideoPart {
                 }) => {
                     count += 1;
                     if count > 20 {
-                        error!("Transcode session {} failed to start", session.session_id());
+                        error!("Transcode session failed to start");
                         return Err(Error::TranscodeFailed);
                     }
                 }
@@ -483,11 +475,7 @@ impl VideoPart {
             }
         }
 
-        debug!(
-            "Started transcode session {} for {}",
-            session.session_id(),
-            video.title()
-        );
+        debug!("Started transcode session");
 
         let path = self.file_path(&session.container().to_string()).await;
 
@@ -561,10 +549,7 @@ impl VideoPart {
                     sleep(Duration::from_secs(delay as u64)).await;
                 }
                 Err(e) => {
-                    error!(
-                        "Error getting transcode status for session {}",
-                        session.session_id()
-                    );
+                    error!("Error getting transcode status",);
                     return Err(e.into());
                 }
             }
@@ -585,7 +570,7 @@ impl VideoPart {
                         source: plex_api::Error::TranscodeRefused
                     }
                 ) {
-                    warn!("Transcode attempt failed: {e}");
+                    warn!(error=?e, "Transcode attempt failed");
                 } else {
                     trace!("Transcode attempt refused");
                 }
@@ -659,10 +644,10 @@ impl VideoPart {
             writer: file,
             progress: &mut progress,
         };
-        debug!("Downloading {} from offset {offset}", path.display());
+        debug!(offset, "Downloading");
 
         part.download(writer, offset..).await?;
-        info!("Download of {} complete", path.display());
+        info!("Download complete");
 
         self.update_state(|state| {
             state.download = DownloadState::Downloaded {
@@ -703,10 +688,10 @@ impl VideoPart {
             writer: file,
             progress: &mut progress,
         };
-        debug!("Downloading transcoded {}", path.display());
+        debug!("Downloading transcoded video");
 
         session.download(writer).await?;
-        info!("Download of {} complete", path.display());
+        info!("Download complete");
 
         self.update_state(|state| {
             state.download = DownloadState::Transcoded {
@@ -717,8 +702,8 @@ impl VideoPart {
 
         if let Err(e) = session.cancel().await {
             warn!(
-                "Transcode session for {} failed to cancel: {e}",
-                path.display()
+                error=?e,
+                "Transcode session failed to cancel"
             );
         }
 

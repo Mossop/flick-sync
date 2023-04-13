@@ -183,7 +183,7 @@ impl Runnable for Add {
             let plex_server = match server.connect().await {
                 Ok(s) => s,
                 Err(e) => {
-                    error!("Unable to connect to server {}: {}", server.id(), e);
+                    error!(server=server.id(), error=?e, "Unable to connect to server");
                     continue;
                 }
             };
@@ -235,7 +235,7 @@ impl Runnable for List {
 
         for server in servers {
             if let Err(e) = server.update_state().await {
-                error!("Failed to update server {}: {e}", server.id());
+                error!(server=server.id(), error=?e, "Failed to update server");
             }
         }
 

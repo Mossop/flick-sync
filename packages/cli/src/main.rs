@@ -87,7 +87,7 @@ struct Args {
 async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf> {
     let path = store.unwrap_or_else(|| current_dir().unwrap());
 
-    trace!("Checking for store directory at {}", path.display());
+    trace!(?path, "Checking for store directory");
     match metadata(&path).await {
         Ok(stats) => {
             if !stats.is_dir() {

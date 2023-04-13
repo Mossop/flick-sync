@@ -59,7 +59,7 @@ async fn download_part(
     console: Console,
 ) {
     if let Err(e) = part.wait_for_download().await {
-        error!("{e}");
+        error!(error=?e);
         return;
     }
 
@@ -67,7 +67,7 @@ async fn download_part(
 
     let bar = console.add_progress_bar(&title);
     if let Err(e) = part.download(DownloadProgress { bar: bar.clone() }).await {
-        error!("{e}");
+        error!(error=?e);
     }
 
     bar.finish();
@@ -97,7 +97,7 @@ impl Runnable for Sync {
                 let title = video.title().await;
                 for part in video.parts().await {
                     if let Err(e) = prepare_download_part(&part).await {
-                        error!("{e}");
+                        error!(error=?e);
                         continue;
                     }
 

@@ -41,14 +41,14 @@ impl ThumbnailState {
             match fs::metadata(&file).await {
                 Ok(stats) => {
                     if !stats.is_file() {
-                        error!("'{}' was expected to be a file", path.display());
+                        error!(?path, "Expected a file");
                     }
                 }
                 Err(e) => {
                     if e.kind() == ErrorKind::NotFound {
                         *self = ThumbnailState::None;
                     } else {
-                        error!("Error accessing thumbnail '{}': {e}", path.display());
+                        error!(?path, error=?e, "Error accessing thumbnail");
                     }
                 }
             }
@@ -59,11 +59,11 @@ impl ThumbnailState {
     pub(crate) async fn delete(&mut self, root: &Path) {
         if let ThumbnailState::Downloaded { path } = self {
             let file = root.join(&path);
-            trace!("Removing old thumbnail file '{}'", path.display());
+            trace!(?path, "Removing old thumbnail file");
 
             if let Err(e) = fs::remove_file(&file).await {
                 if e.kind() != ErrorKind::NotFound {
-                    warn!("Failed to remove file {}: {e}", file.display());
+                    warn!(?path, error=?e, "Failed to remove file");
                 }
             }
 
@@ -353,7 +353,7 @@ impl DownloadState {
             if let Err(plex_api::Error::ItemNotFound) = server.transcode_session(session_id).await {
                 if let Err(e) = fs::remove_file(&file).await {
                     if e.kind() != ErrorKind::NotFound {
-                        warn!("Failed to remove old download: {e}");
+                        warn!(?path, error=?e, "Failed to remove old download");
                     }
                 }
 
@@ -366,14 +366,14 @@ impl DownloadState {
         match fs::metadata(&file).await {
             Ok(stats) => {
                 if !stats.is_file() {
-                    error!("'{}' was expected to be a file", path.display());
+                    error!(?path, "Expected a file");
                 }
 
                 return;
             }
             Err(e) => {
                 if e.kind() != ErrorKind::NotFound {
-                    error!("Error accessing file '{}': {e}", path.display());
+                    error!(?path, error=?e, "Error accessing file");
                     return;
                 }
             }
@@ -394,18 +394,18 @@ impl DownloadState {
 
         let file = root.join(&path);
 
-        trace!("Removing old video file '{}'", path.display());
+        trace!(?path, "Removing old video file");
 
         if let Err(e) = fs::remove_file(&file).await {
             if e.kind() != ErrorKind::NotFound {
-                warn!("Failed to remove file {}: {e}", file.display());
+                warn!(?path, error=?e, "Failed to remove file");
             }
         }
 
         if let Some(session_id) = session_id {
             if let Ok(session) = server.transcode_session(session_id).await {
                 if let Err(e) = session.cancel().await {
-                    warn!("Failed to cancel stale transcode session: {e}");
+                    warn!(error=?e, "Failed to cancel stale transcode session");
                 }
             }
         }

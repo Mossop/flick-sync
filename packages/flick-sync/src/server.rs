@@ -7,7 +7,7 @@ use plex_api::{
     media_container::server::library::MetadataType,
     MyPlexBuilder,
 };
-use tracing::{debug, info, instrument, trace, warn};
+use tracing::{info, instrument, trace, warn};
 
 use crate::{
     config::SyncItem,
@@ -133,10 +133,8 @@ impl Server {
                     if device.identifier() == id {
                         match device.connect().await? {
                             DeviceConnection::Server(server) => {
-                                trace!(
-                                    "Connected to server {} via {}",
-                                    self.id,
-                                    server.client().api_url
+                                trace!(url=%server.client().api_url,
+                                    "Connected to server"
                                 );
                                 servers.insert(self.id.clone(), server.as_ref().clone());
                                 return Ok(*server);
@@ -157,10 +155,8 @@ impl Server {
                 client = client.set_x_plex_token(token);
 
                 let server = plex_api::Server::new(url, client).await?;
-                trace!(
-                    "Connected to server {} via {}",
-                    self.id,
-                    server.client().api_url
+                trace!(url=%server.client().api_url,
+                    "Connected to server",
                 );
                 servers.insert(self.id.clone(), server.clone());
 
@@ -220,7 +216,7 @@ impl Server {
 
                 for item in server_config.syncs.values() {
                     if let Err(e) = state_sync.add_item_by_key(item, item.id).await {
-                        warn!("Failed to update item: {e}");
+                        warn!(error=?e, "Failed to update item");
                     }
                 }
 
@@ -242,7 +238,7 @@ impl Server {
         for library in self.libraries().await {
             for collection in library.collections().await {
                 if let Err(e) = collection.update_thumbnail().await {
-                    warn!("{e}");
+                    warn!(error=?e);
                 }
             }
 
@@ -250,20 +246,20 @@ impl Server {
                 Library::Movie(l) => {
                     for video in l.movies().await {
                         if let Err(e) = video.update_thumbnail().await {
-                            warn!("{e}");
+                            warn!(error=?e);
                         }
                     }
                 }
                 Library::Show(l) => {
                     for show in l.shows().await {
                         if let Err(e) = show.update_thumbnail().await {
-                            warn!("{e}");
+                            warn!(error=?e);
                         }
 
                         for season in show.seasons().await {
                             for video in season.episodes().await {
                                 if let Err(e) = video.update_thumbnail().await {
-                                    warn!("{e}");
+                                    warn!(error=?e);
                                 }
                             }
                         }
@@ -286,7 +282,7 @@ impl Server {
                     for video in l.movies().await {
                         for part in video.parts().await {
                             if let Err(e) = part.verify_download().await {
-                                warn!("{e}");
+                                warn!(error=?e);
                             }
                         }
                     }
@@ -297,7 +293,7 @@ impl Server {
                             for video in season.episodes().await {
                                 for part in video.parts().await {
                                     if let Err(e) = part.verify_download().await {
-                                        warn!("{e}");
+                                        warn!(error=?e);
                                     }
                                 }
                             }
@@ -531,15 +527,9 @@ impl<'a> StateSync<'a> {
     #[instrument(level = "trace", skip(self, sync, item), fields(item = item.rating_key()))]
     async fn add_item(&mut self, sync: &SyncItem, item: Item) -> Result {
         match item {
-            Item::Movie(movie) => {
-                debug!("Syncing movie '{}' metadata", movie.title());
-
-                self.add_movie(sync, &movie).await
-            }
+            Item::Movie(movie) => self.add_movie(sync, &movie).await,
 
             Item::Show(show) => {
-                debug!("Syncing show '{}' metadata", show.title());
-
                 self.add_show(&show).await?;
 
                 for season in show.seasons().await? {
@@ -553,8 +543,6 @@ impl<'a> StateSync<'a> {
                 Ok(())
             }
             Item::Season(season) => {
-                debug!("Syncing season '{}' metadata", season.title());
-
                 if !self
                     .seen_items
                     .contains(&season.metadata().parent.parent_rating_key.unwrap())
@@ -574,8 +562,6 @@ impl<'a> StateSync<'a> {
                 Ok(())
             }
             Item::Episode(episode) => {
-                debug!("Syncing episode '{}' metadata", episode.title());
-
                 if !self
                     .seen_items
                     .contains(&episode.metadata().parent.parent_rating_key.unwrap())
@@ -607,8 +593,6 @@ impl<'a> StateSync<'a> {
             }
 
             Item::MovieCollection(collection) => {
-                debug!("Syncing collection '{}' metadata", collection.title());
-
                 let mut items = HashSet::new();
                 let movies = collection.children().await?;
                 for movie in movies {
@@ -617,15 +601,13 @@ impl<'a> StateSync<'a> {
                         Ok(()) => {
                             items.insert(key);
                         }
-                        Err(e) => warn!("Failed to update item: {e}"),
+                        Err(e) => warn!(error=?e, "Failed to update item"),
                     }
                 }
 
                 self.add_collection(&collection, items).await
             }
             Item::ShowCollection(collection) => {
-                debug!("Syncing collection '{}' metadata", collection.title());
-
                 let mut items = HashSet::new();
                 let shows = collection.children().await?;
                 for show in shows {
@@ -634,15 +616,13 @@ impl<'a> StateSync<'a> {
                         Ok(()) => {
                             items.insert(key);
                         }
-                        Err(e) => warn!("Failed to update item: {e}"),
+                        Err(e) => warn!(error=?e, "Failed to update item"),
                     }
                 }
 
                 self.add_collection(&collection, items).await
             }
             Item::VideoPlaylist(playlist) => {
-                debug!("Syncing playlist '{}' metadata", playlist.title());
-
                 let mut items = Vec::new();
                 let videos = playlist.children().await?;
                 for video in videos {
@@ -658,7 +638,7 @@ impl<'a> StateSync<'a> {
                         Ok(()) => {
                             items.push(key);
                         }
-                        Err(e) => warn!("Failed to update item: {e}"),
+                        Err(e) => warn!(error=?e, "Failed to update item"),
                     }
                 }
 
