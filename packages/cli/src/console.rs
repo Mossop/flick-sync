@@ -8,7 +8,6 @@ use dialoguer::{Input, Password, Select};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tracing_subscriber::fmt::MakeWriter;
 
-#[derive(Clone)]
 pub struct Bar {
     bar: ProgressBar,
     console: Console,
@@ -22,8 +21,10 @@ impl Bar {
     pub fn set_length(&self, length: u64) {
         self.bar.set_length(length);
     }
+}
 
-    pub fn finish(self) {
+impl Drop for Bar {
+    fn drop(&mut self) {
         self.bar.finish_and_clear();
 
         self.console.progress_bars.remove(&self.bar);

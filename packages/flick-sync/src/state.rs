@@ -46,6 +46,7 @@ impl ThumbnailState {
                 }
                 Err(e) => {
                     if e.kind() == ErrorKind::NotFound {
+                        warn!(?path, "Thumbnail no longer present");
                         *self = ThumbnailState::None;
                     } else {
                         error!(?path, error=?e, "Error accessing thumbnail");
@@ -339,37 +340,40 @@ impl DownloadState {
 
     #[instrument(level = "trace", skip(root, server))]
     pub(crate) async fn verify(&mut self, server: &Server, root: &Path) {
-        let (path, session_id) = match self {
+        let path = match self {
             DownloadState::None => return,
-            DownloadState::Downloading { path } => (path, None),
-            DownloadState::Transcoding { session_id, path } => (path, Some(session_id)),
-            DownloadState::Downloaded { path } => (path, None),
-            DownloadState::Transcoded { path } => (path, None),
+            DownloadState::Downloading { path: _ } => {
+                return;
+            }
+            DownloadState::Transcoding { session_id, path } => {
+                let file = root.join(&path);
+
+                if let Err(plex_api::Error::ItemNotFound) =
+                    server.transcode_session(session_id).await
+                {
+                    warn!(?path, "Transcode session is no longer present");
+                    if let Err(e) = fs::remove_file(&file).await {
+                        if e.kind() != ErrorKind::NotFound {
+                            warn!(?path, error=?e, "Failed to remove partial download");
+                        }
+                    }
+
+                    *self = DownloadState::None;
+                }
+
+                return;
+            }
+            DownloadState::Downloaded { path } => path,
+            DownloadState::Transcoded { path } => path,
         };
 
         let file = root.join(&path);
 
-        if let Some(session_id) = session_id {
-            if let Err(plex_api::Error::ItemNotFound) = server.transcode_session(session_id).await {
-                if let Err(e) = fs::remove_file(&file).await {
-                    if e.kind() != ErrorKind::NotFound {
-                        warn!(?path, error=?e, "Failed to remove old download");
-                    }
-                }
-
-                *self = DownloadState::None;
-            }
-
-            return;
-        }
-
         match fs::metadata(&file).await {
             Ok(stats) => {
-                if !stats.is_file() {
-                    error!(?path, "Expected a file");
+                if stats.is_file() {
+                    return;
                 }
-
-                return;
             }
             Err(e) => {
                 if e.kind() != ErrorKind::NotFound {
@@ -379,6 +383,7 @@ impl DownloadState {
             }
         }
 
+        error!(?path, "Download is no longer present");
         *self = DownloadState::None;
     }
 

@@ -32,6 +32,8 @@ pub(crate) struct ServerConfig {
         deserialize_with = "from_list"
     )]
     pub(crate) syncs: HashMap<u32, SyncItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) max_transcodes: Option<usize>,
 }
 
 #[derive(Deserialize, Serialize, Default, Clone, Debug)]
@@ -61,6 +63,8 @@ impl TranscodeProfile {
 
 #[derive(Deserialize, Serialize, Default, Clone, Debug)]
 pub(crate) struct Config {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) max_downloads: Option<usize>,
     #[serde(default)]
     pub(crate) servers: HashMap<String, ServerConfig>,
     pub(crate) device: Option<String>,

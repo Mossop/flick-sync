@@ -351,6 +351,14 @@ where
     }
 }
 
+#[derive(Clone, PartialEq)]
+pub enum TransferState {
+    Waiting,
+    Transcoding,
+    Downloading,
+    Downloaded,
+}
+
 #[derive(Clone)]
 pub struct VideoPart {
     pub(crate) server: String,
@@ -370,12 +378,30 @@ impl fmt::Debug for VideoPart {
 }
 
 impl VideoPart {
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+
     async fn with_video_state<F, R>(&self, cb: F) -> R
     where
         F: Send + FnOnce(&VideoState) -> R,
     {
         self.with_server_state(|ss| cb(ss.videos.get(&self.id).unwrap()))
             .await
+    }
+
+    pub async fn transfer_state(&self) -> TransferState {
+        let download_state = self.download_state().await;
+
+        match download_state {
+            DownloadState::None => TransferState::Waiting,
+            DownloadState::Downloading { path: _ } => TransferState::Downloading,
+            DownloadState::Transcoding {
+                session_id: _,
+                path: _,
+            } => TransferState::Transcoding,
+            _ => TransferState::Downloaded,
+        }
     }
 
     pub async fn verify_download(&self) -> Result {

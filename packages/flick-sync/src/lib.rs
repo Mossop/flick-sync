@@ -143,6 +143,11 @@ where
 }
 
 impl FlickSync {
+    pub async fn max_downloads(&self) -> usize {
+        let config = self.inner.config.read().await;
+        config.max_downloads.unwrap_or(4)
+    }
+
     pub async fn new(path: &Path) -> Result<Self> {
         let config: Config = read_or_default(&path.join(CONFIG_FILE)).await?;
         let state: State = read_or_default(&path.join(STATE_FILE)).await?;
@@ -185,6 +190,7 @@ impl FlickSync {
             ServerConfig {
                 connection,
                 syncs: Default::default(),
+                max_transcodes: None,
             },
         );
 

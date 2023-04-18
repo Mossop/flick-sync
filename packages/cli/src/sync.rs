@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use clap::Args;
-use flick_sync::{FlickSync, Progress, VideoPart};
+use flick_sync::{FlickSync, Progress, TransferState, VideoPart};
 use futures::future::join_all;
-use tokio::sync::Semaphore;
-use tracing::{error, warn};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tracing::{error, instrument};
 
 use crate::{console::Bar, select_servers, Console, Result, Runnable};
 
@@ -22,11 +24,6 @@ impl Runnable for Prune {
     }
 }
 
-#[derive(Clone)]
-struct SyncState<'a> {
-    download_permits: &'a Semaphore,
-}
-
 struct DownloadProgress {
     bar: Bar,
 }
@@ -38,39 +35,94 @@ impl Progress for DownloadProgress {
     }
 }
 
-async fn prepare_download_part(part: &VideoPart) -> Result {
-    if let Err(e) = part.verify_download().await {
-        warn!("{e}");
-    }
+struct PartTransferState {
+    transcode_permits: Arc<Semaphore>,
+    download_permits: Arc<Semaphore>,
+    title: String,
+    part: VideoPart,
+    console: Console,
+    transcode_permit: Option<PermitHolder>,
+}
 
-    if part.is_downloaded().await {
-        return Ok(());
-    }
+struct PermitHolder {
+    permit: Option<OwnedSemaphorePermit>,
+    forget: bool,
+}
 
-    part.prepare_download().await?;
+impl PermitHolder {
+    fn forgettable(permit: OwnedSemaphorePermit) -> Self {
+        Self {
+            permit: Some(permit),
+            forget: true,
+        }
+    }
+}
+
+impl From<OwnedSemaphorePermit> for PermitHolder {
+    fn from(permit: OwnedSemaphorePermit) -> Self {
+        Self {
+            permit: Some(permit),
+            forget: false,
+        }
+    }
+}
+
+impl Drop for PermitHolder {
+    fn drop(&mut self) {
+        if self.forget {
+            if let Some(permit) = self.permit.take() {
+                permit.forget();
+            }
+        }
+    }
+}
+
+async fn complete_transcode(state: &PartTransferState) -> Result {
+    state.part.wait_for_download().await?;
+
+    complete_download(state).await
+}
+
+async fn complete_download(state: &PartTransferState) -> Result {
+    let _permit = state.download_permits.acquire().await.unwrap();
+
+    let bar = state.console.add_progress_bar(&state.title);
+    state.part.download(DownloadProgress { bar }).await?;
 
     Ok(())
 }
 
-async fn download_part(
-    title: String,
-    sync_state: SyncState<'_>,
-    part: VideoPart,
-    console: Console,
-) {
-    if let Err(e) = part.wait_for_download().await {
-        error!(error=?e);
-        return;
+#[instrument(level = "trace", skip(state), fields(part=state.part.id()))]
+async fn download_part(mut state: PartTransferState) {
+    if state.part.transfer_state().await != TransferState::Downloading {
+        let _permit = if let Some(permit) = state.transcode_permit.take() {
+            permit
+        } else {
+            state
+                .transcode_permits
+                .clone()
+                .acquire_owned()
+                .await
+                .unwrap()
+                .into()
+        };
+
+        if let Err(e) = state.part.prepare_download().await {
+            error!(error=?e);
+            return;
+        }
+
+        if state.part.transfer_state().await == TransferState::Transcoding {
+            if let Err(e) = complete_transcode(&state).await {
+                error!(error=?e);
+            }
+            return;
+        }
     }
 
-    let _permit = sync_state.download_permits.acquire().await.unwrap();
-
-    let bar = console.add_progress_bar(&title);
-    if let Err(e) = part.download(DownloadProgress { bar: bar.clone() }).await {
+    if let Err(e) = complete_download(&state).await {
         error!(error=?e);
     }
-
-    bar.finish();
 }
 
 #[derive(Args)]
@@ -85,29 +137,47 @@ impl Runnable for Sync {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let servers = select_servers(&flick_sync, &self.ids).await?;
 
-        let download_permits = Semaphore::new(5);
-        let state = SyncState {
-            download_permits: &download_permits,
-        };
-
+        let download_permits = Arc::new(Semaphore::new(flick_sync.max_downloads().await));
         let mut jobs = Vec::new();
 
         for server in servers {
+            let mut transfers = Vec::new();
+            let transcode_permits = Arc::new(Semaphore::new(server.max_transcodes().await));
+
             for video in server.videos().await {
                 let title = video.title().await;
                 for part in video.parts().await {
-                    if let Err(e) = prepare_download_part(&part).await {
-                        error!(error=?e);
+                    if part.verify_download().await.is_err() {
                         continue;
                     }
 
-                    jobs.push(download_part(
-                        title.clone(),
-                        state.clone(),
+                    let transcode_permit = match part.transfer_state().await {
+                        TransferState::Waiting => None,
+                        TransferState::Transcoding => {
+                            if transcode_permits.available_permits() == 0 {
+                                transcode_permits.add_permits(1);
+                            }
+                            Some(PermitHolder::forgettable(
+                                transcode_permits.clone().acquire_owned().await.unwrap(),
+                            ))
+                        }
+                        TransferState::Downloading => None,
+                        TransferState::Downloaded => continue,
+                    };
+
+                    transfers.push(PartTransferState {
+                        download_permits: download_permits.clone(),
+                        transcode_permits: transcode_permits.clone(),
                         part,
-                        console.clone(),
-                    ));
+                        title: title.clone(),
+                        console: console.clone(),
+                        transcode_permit,
+                    });
                 }
+            }
+
+            for transfer in transfers {
+                jobs.push(download_part(transfer));
             }
         }
 
