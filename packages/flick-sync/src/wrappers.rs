@@ -427,7 +427,7 @@ impl VideoPart {
     }
 
     #[instrument(level = "trace", skip(self), fields(session_id))]
-    async fn start_transcode(&self) -> Result<TranscodeSession> {
+    async fn start_transcode(&self) -> Result {
         let _permit = self.server.transcode_permit().await;
 
         let server = self.server.connect().await?;
@@ -453,7 +453,7 @@ impl VideoPart {
 
         let options = self.inner.transcode_options(profile).await;
 
-        info!("Starting transcode");
+        debug!("Attempting transcode");
 
         let session = part.create_download_session(options).await?;
 
@@ -491,7 +491,7 @@ impl VideoPart {
         })
         .await?;
 
-        Ok(session)
+        Ok(())
     }
 
     #[instrument(level = "trace", skip(self))]
@@ -574,20 +574,17 @@ impl VideoPart {
         let download_state = self.download_state().await;
 
         if matches!(download_state, DownloadState::None) {
-            if let Err(e) = self.start_transcode().await {
-                if !matches!(
-                    e,
-                    Error::PlexError {
-                        source: plex_api::Error::TranscodeRefused
-                    }
-                ) {
-                    warn!(error=?e, "Transcode attempt failed");
-                } else {
-                    trace!("Transcode attempt refused");
+            match self.start_transcode().await {
+                Err(Error::PlexError {
+                    source: plex_api::Error::TranscodeRefused,
+                }) => debug!("Transcode attempt refused"),
+                Err(e) => warn!(error=?e, "Transcode attempt failed"),
+                Ok(_) => {
+                    return Ok(());
                 }
-
-                self.start_download().await?;
             }
+
+            self.start_download().await?;
         }
 
         Ok(())
@@ -660,10 +657,10 @@ impl VideoPart {
             writer: file,
             progress: &mut progress,
         };
-        debug!(offset, "Downloading");
+        info!(path=?path, offset, "Downloading source file");
 
         part.download(writer, offset..).await?;
-        info!("Download complete");
+        info!(path=?path, "Download complete");
 
         self.update_state(|state| {
             state.download = DownloadState::Downloaded {
@@ -704,10 +701,10 @@ impl VideoPart {
             writer: file,
             progress: &mut progress,
         };
-        debug!("Downloading transcoded video");
+        info!(path=?path, "Downloading transcoded video");
 
         session.download(writer).await?;
-        info!("Download complete");
+        info!(path=?path, "Download complete");
 
         self.update_state(|state| {
             state.download = DownloadState::Transcoded {

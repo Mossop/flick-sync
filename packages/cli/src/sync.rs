@@ -50,7 +50,7 @@ struct PermitHolder {
 }
 
 impl PermitHolder {
-    fn forgettable(permit: OwnedSemaphorePermit) -> Self {
+    fn forget(permit: OwnedSemaphorePermit) -> Self {
         Self {
             permit: Some(permit),
             forget: true,
@@ -69,8 +69,8 @@ impl From<OwnedSemaphorePermit> for PermitHolder {
 
 impl Drop for PermitHolder {
     fn drop(&mut self) {
-        if self.forget {
-            if let Some(permit) = self.permit.take() {
+        if let Some(permit) = self.permit.take() {
+            if self.forget {
                 permit.forget();
             }
         }
@@ -158,7 +158,7 @@ impl Runnable for Sync {
                             // point.
                             if transcode_permits.available_permits() == 0 {
                                 transcode_permits.add_permits(1);
-                                Some(PermitHolder::forgettable(
+                                Some(PermitHolder::forget(
                                     transcode_permits.clone().acquire_owned().await.unwrap(),
                                 ))
                             } else {
