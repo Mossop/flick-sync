@@ -1,12 +1,14 @@
 use std::{collections::HashSet, fmt, path::Path, sync::Arc};
 
 use async_recursion::async_recursion;
+use core::ops::Deref;
 use plex_api::{
     device::DeviceConnection,
     library::{Collection, Episode, Item, MetadataItem, Movie, Playlist, Season, Show, Video},
     media_container::server::library::MetadataType,
     MyPlexBuilder,
 };
+use tokio::sync::{Mutex, Semaphore, SemaphorePermit};
 use tracing::{info, instrument, trace, warn};
 
 use crate::{
@@ -22,6 +24,8 @@ use crate::{
 pub struct Server {
     pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
+    connection: Arc<Mutex<Option<plex_api::Server>>>,
+    transcode_requests: Arc<Semaphore>,
 }
 
 impl fmt::Debug for Server {
@@ -31,9 +35,22 @@ impl fmt::Debug for Server {
 }
 
 impl Server {
+    pub(crate) fn new(id: &str, inner: &Arc<Inner>) -> Self {
+        Self {
+            id: id.to_owned(),
+            inner: inner.clone(),
+            connection: Arc::new(Mutex::new(None)),
+            transcode_requests: Arc::new(Semaphore::new(1)),
+        }
+    }
+
     /// The FlickSync identifier for this server.
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    pub(crate) async fn transcode_permit(&self) -> SemaphorePermit {
+        self.transcode_requests.acquire().await.unwrap()
     }
 
     pub async fn max_transcodes(&self) -> usize {
@@ -52,12 +69,12 @@ impl Server {
             .iter()
             .map(|(id, vs)| match vs.detail {
                 VideoDetail::Movie(_) => wrappers::Video::Movie(wrappers::Movie {
-                    server: self.id.clone(),
+                    server: self.clone(),
                     id: id.clone(),
                     inner: self.inner.clone(),
                 }),
                 VideoDetail::Episode(_) => wrappers::Video::Episode(wrappers::Episode {
-                    server: self.id.clone(),
+                    server: self.clone(),
                     id: id.clone(),
                     inner: self.inner.clone(),
                 }),
@@ -75,12 +92,12 @@ impl Server {
             .iter()
             .map(|(id, ls)| match ls.library_type {
                 LibraryType::Movie => wrappers::Library::Movie(wrappers::MovieLibrary {
-                    server: self.id.clone(),
+                    server: self.clone(),
                     id: *id,
                     inner: self.inner.clone(),
                 }),
                 LibraryType::Show => wrappers::Library::Show(wrappers::ShowLibrary {
-                    server: self.id.clone(),
+                    server: self.clone(),
                     id: *id,
                     inner: self.inner.clone(),
                 }),
@@ -97,7 +114,7 @@ impl Server {
             .playlists
             .keys()
             .map(|id| wrappers::Playlist {
-                server: self.id.clone(),
+                server: self.clone(),
                 id: id.clone(),
                 inner: self.inner.clone(),
             })
@@ -107,9 +124,10 @@ impl Server {
     /// Connects to the Plex API for this server.
     #[instrument(level = "trace", skip(self), fields(server = self.id))]
     pub async fn connect(&self) -> Result<plex_api::Server> {
-        let mut servers = self.inner.servers.lock().await;
-        if let Some(server) = servers.get(&self.id) {
-            return Ok(server.clone());
+        let mut connection = self.connection.lock().await;
+
+        if let Some(api) = connection.deref() {
+            return Ok(api.clone());
         }
 
         let config = self.inner.config.read().await;
@@ -142,7 +160,7 @@ impl Server {
                                 trace!(url=%server.client().api_url,
                                     "Connected to server"
                                 );
-                                servers.insert(self.id.clone(), server.as_ref().clone());
+                                *connection = Some(server.as_ref().clone());
                                 return Ok(*server);
                             }
                             _ => panic!("Unexpected client connection"),
@@ -164,7 +182,7 @@ impl Server {
                 trace!(url=%server.client().api_url,
                     "Connected to server",
                 );
-                servers.insert(self.id.clone(), server.clone());
+                *connection = Some(server.clone());
 
                 Ok(server)
             }

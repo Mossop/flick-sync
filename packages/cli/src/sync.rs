@@ -154,12 +154,18 @@ impl Runnable for Sync {
                     let transcode_permit = match part.transfer_state().await {
                         TransferState::Waiting => None,
                         TransferState::Transcoding => {
+                            // This is only safe because there are no other tasks running at this
+                            // point.
                             if transcode_permits.available_permits() == 0 {
                                 transcode_permits.add_permits(1);
+                                Some(PermitHolder::forgettable(
+                                    transcode_permits.clone().acquire_owned().await.unwrap(),
+                                ))
+                            } else {
+                                Some(PermitHolder::from(
+                                    transcode_permits.clone().acquire_owned().await.unwrap(),
+                                ))
                             }
-                            Some(PermitHolder::forgettable(
-                                transcode_permits.clone().acquire_owned().await.unwrap(),
-                            ))
                         }
                         TransferState::Downloading => None,
                         TransferState::Downloaded => continue,

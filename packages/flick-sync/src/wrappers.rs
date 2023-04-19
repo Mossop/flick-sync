@@ -51,8 +51,6 @@ enum FileType {
 
 #[async_trait]
 trait StateWrapper<S> {
-    async fn connect(&self) -> Result<plex_api::Server>;
-
     async fn with_server_state<F, R>(&self, cb: F) -> R
     where
         F: Send + FnOnce(&ServerState) -> R;
@@ -70,21 +68,12 @@ macro_rules! state_wrapper {
     ($typ:ident, $st_typ:ident, $prop:ident) => {
         #[async_trait]
         impl StateWrapper<$st_typ> for $typ {
-            async fn connect(&self) -> Result<plex_api::Server> {
-                let server = Server {
-                    id: self.server.clone(),
-                    inner: self.inner.clone(),
-                };
-
-                server.connect().await
-            }
-
             async fn with_server_state<F, R>(&self, cb: F) -> R
             where
                 F: Send + FnOnce(&ServerState) -> R,
             {
                 let state = self.inner.state.read().await;
-                cb(&state.servers.get(&self.server).unwrap())
+                cb(&state.servers.get(&self.server.id).unwrap())
             }
 
             async fn with_state<F, R>(&self, cb: F) -> R
@@ -100,7 +89,7 @@ macro_rules! state_wrapper {
                 F: Send + FnOnce(&mut $st_typ),
             {
                 let mut state = self.inner.state.write().await;
-                let server_state = state.servers.get_mut(&self.server).unwrap();
+                let server_state = state.servers.get_mut(&self.server.id).unwrap();
                 cb(server_state.$prop.get_mut(&self.id).unwrap());
                 self.inner.persist_state(&state).await
             }
@@ -125,7 +114,7 @@ macro_rules! thumbnail_methods {
                 .await?;
 
             if thumbnail.is_none() {
-                let server = self.connect().await?;
+                let server = self.server.connect().await?;
                 let item = server.item_by_id(&self.id).await?;
                 debug!("Updating thumbnail for {}", item.title());
 
@@ -198,7 +187,7 @@ macro_rules! children {
 
 #[derive(Clone)]
 pub struct Show {
-    pub(crate) server: String,
+    pub(crate) server: Server,
     pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
@@ -226,7 +215,7 @@ impl Show {
             };
 
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
-            PathBuf::from(safe(&self.server))
+            PathBuf::from(safe(&self.server.id))
                 .join(safe(library_title))
                 .join(safe(format!("{} ({})", state.title, state.year)))
                 .join(safe(name))
@@ -237,7 +226,7 @@ impl Show {
 
 #[derive(Clone)]
 pub struct Season {
-    pub(crate) server: String,
+    pub(crate) server: Server,
     pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
@@ -355,7 +344,7 @@ pub enum TransferState {
 
 #[derive(Clone)]
 pub struct VideoPart {
-    pub(crate) server: String,
+    pub(crate) server: Server,
     pub(crate) id: String,
     pub(crate) index: usize,
     pub(crate) inner: Arc<Inner>,
@@ -395,7 +384,7 @@ impl VideoPart {
     }
 
     pub async fn verify_download(&self) -> Result {
-        let server = self.connect().await?;
+        let server = self.server.connect().await?;
         let mut download_state = self.download_state().await;
         let root = self.inner.path.read().await.clone();
 
@@ -439,7 +428,9 @@ impl VideoPart {
 
     #[instrument(level = "trace", skip(self), fields(session_id))]
     async fn start_transcode(&self) -> Result<TranscodeSession> {
-        let server = self.connect().await?;
+        let _permit = self.server.transcode_permit().await;
+
+        let server = self.server.connect().await?;
         let item = server.item_by_id(&self.id).await?;
 
         let video = match item {
@@ -508,7 +499,7 @@ impl VideoPart {
 
     #[instrument(level = "trace", skip(self))]
     async fn start_download(&self) -> Result {
-        let server = self.connect().await?;
+        let server = self.server.connect().await?;
         let item = server.item_by_id(&self.id).await?;
 
         let media_id = self
@@ -608,7 +599,7 @@ impl VideoPart {
             path: _,
         } = download_state
         {
-            let server = self.connect().await?;
+            let server = self.server.connect().await?;
             let session = server.transcode_session(&session_id).await?;
             self.wait_for_transcode(session).await?;
         }
@@ -630,7 +621,7 @@ impl VideoPart {
             }
         };
 
-        let server = self.connect().await?;
+        let server = self.server.connect().await?;
         let item = server.item_by_id(&self.id).await?;
 
         let media_id = self
@@ -682,7 +673,7 @@ impl VideoPart {
         path: &Path,
         mut progress: P,
     ) -> Result {
-        let server = self.connect().await?;
+        let server = self.server.connect().await?;
         let session = server.transcode_session(session_id).await?;
         let status = session.status().await?;
         let stats = session.stats().await?;
@@ -746,21 +737,12 @@ impl VideoPart {
 
 #[async_trait]
 impl StateWrapper<VideoPartState> for VideoPart {
-    async fn connect(&self) -> Result<plex_api::Server> {
-        let server = Server {
-            id: self.server.clone(),
-            inner: self.inner.clone(),
-        };
-
-        server.connect().await
-    }
-
     async fn with_server_state<F, R>(&self, cb: F) -> R
     where
         F: Send + FnOnce(&ServerState) -> R,
     {
         let state = self.inner.state.read().await;
-        cb(state.servers.get(&self.server).unwrap())
+        cb(state.servers.get(&self.server.id).unwrap())
     }
 
     async fn with_state<F, R>(&self, cb: F) -> R
@@ -776,7 +758,7 @@ impl StateWrapper<VideoPartState> for VideoPart {
         F: Send + FnOnce(&mut VideoPartState),
     {
         let mut state = self.inner.state.write().await;
-        let server_state = state.servers.get_mut(&self.server).unwrap();
+        let server_state = state.servers.get_mut(&self.server.id).unwrap();
         cb(server_state
             .videos
             .get_mut(&self.id)
@@ -790,7 +772,7 @@ impl StateWrapper<VideoPartState> for VideoPart {
 
 #[derive(Clone)]
 pub struct Episode {
-    pub(crate) server: String,
+    pub(crate) server: Server,
     pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
@@ -862,7 +844,7 @@ impl Episode {
                 ),
             };
 
-            PathBuf::from(safe(&self.server))
+            PathBuf::from(safe(&self.server.id))
                 .join(safe(library_title))
                 .join(safe(format!("{} ({})", show.title, show.year)))
                 .join(safe(name))
@@ -873,7 +855,7 @@ impl Episode {
 
 #[derive(Clone)]
 pub struct Movie {
-    pub(crate) server: String,
+    pub(crate) server: Server,
     pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
@@ -929,7 +911,7 @@ impl Movie {
                 FileType::Thumbnail => format!(".thumb.{extension}",),
             };
 
-            PathBuf::from(safe(&self.server))
+            PathBuf::from(safe(&self.server.id))
                 .join(safe(library_title))
                 .join(safe(format!("{} ({})", state.title, m_state.year)))
                 .join(safe(name))
@@ -983,7 +965,7 @@ impl Video {
 
 #[derive(Clone)]
 pub struct Playlist {
-    pub(crate) server: String,
+    pub(crate) server: Server,
     pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
@@ -1022,7 +1004,7 @@ impl Playlist {
 
 #[derive(Clone)]
 pub struct MovieCollection {
-    pub(crate) server: String,
+    pub(crate) server: Server,
     pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
@@ -1058,7 +1040,7 @@ impl MovieCollection {
             let state = ss.collections.get(&self.id).unwrap();
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
 
-            PathBuf::from(safe(&self.server))
+            PathBuf::from(safe(&self.server.id))
                 .join(safe(library_title))
                 .join(safe(format!(".{}.{extension}", state.id)))
         })
@@ -1068,7 +1050,7 @@ impl MovieCollection {
 
 #[derive(Clone)]
 pub struct ShowCollection {
-    pub(crate) server: String,
+    pub(crate) server: Server,
     pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
@@ -1104,7 +1086,7 @@ impl ShowCollection {
             let state = ss.collections.get(&self.id).unwrap();
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
 
-            PathBuf::from(safe(&self.server))
+            PathBuf::from(safe(&self.server.id))
                 .join(safe(library_title))
                 .join(safe(format!(".{}.{extension}", state.id)))
         })
@@ -1129,7 +1111,7 @@ impl Collection {
 
 #[derive(Clone)]
 pub struct MovieLibrary {
-    pub(crate) server: String,
+    pub(crate) server: Server,
     pub(crate) id: u32,
     pub(crate) inner: Arc<Inner>,
 }
@@ -1172,7 +1154,7 @@ impl MovieLibrary {
 
 #[derive(Clone)]
 pub struct ShowLibrary {
-    pub(crate) server: String,
+    pub(crate) server: Server,
     pub(crate) id: u32,
     pub(crate) inner: Arc<Inner>,
 }

@@ -62,7 +62,7 @@ struct Inner {
     config: RwLock<Config>,
     state: RwLock<State>,
     path: RwLock<PathBuf>,
-    servers: Mutex<HashMap<String, plex_api::Server>>,
+    servers: Mutex<HashMap<String, Server>>,
 }
 
 impl Inner {
@@ -201,25 +201,35 @@ impl FlickSync {
     }
 
     pub async fn server(&self, id: &str) -> Option<Server> {
+        let mut servers = self.inner.servers.lock().await;
+        if let Some(server) = servers.get(id) {
+            return Some(server.clone());
+        }
+
         let config = self.inner.config.read().await;
         if config.servers.contains_key(id) {
-            Some(Server {
-                id: id.to_owned(),
-                inner: self.inner.clone(),
-            })
+            let server = Server::new(id, &self.inner);
+            servers.insert(id.to_owned(), server.clone());
+
+            Some(server)
         } else {
             None
         }
     }
 
     pub async fn servers(&self) -> Vec<Server> {
+        let mut servers = self.inner.servers.lock().await;
+
         let config = self.inner.config.read().await;
         config
             .servers
             .keys()
-            .map(|id| Server {
-                id: id.to_owned(),
-                inner: self.inner.clone(),
+            .map(|id| {
+                servers.get(id).cloned().unwrap_or_else(|| {
+                    let server = Server::new(id, &self.inner);
+                    servers.insert(id.to_owned(), server.clone());
+                    server
+                })
             })
             .collect()
     }
