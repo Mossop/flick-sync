@@ -205,10 +205,7 @@ pub struct Show {
 
 impl fmt::Debug for Show {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Show")
-            .field("server", &self.server)
-            .field("id", &self.id)
-            .finish()
+        f.pad(&format!("Show({})", self.id))
     }
 }
 
@@ -247,10 +244,7 @@ pub struct Season {
 
 impl fmt::Debug for Season {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Season")
-            .field("server", &self.server)
-            .field("id", &self.id)
-            .finish()
+        f.pad(&format!("Season({})", self.id))
     }
 }
 
@@ -369,11 +363,7 @@ pub struct VideoPart {
 
 impl fmt::Debug for VideoPart {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("VideoPart")
-            .field("server", &self.server)
-            .field("id", &self.id)
-            .field("index", &self.index)
-            .finish()
+        f.pad(&format!("Show({}, {})", self.id, self.index))
     }
 }
 
@@ -447,7 +437,7 @@ impl VideoPart {
         !download_state.needs_download()
     }
 
-    #[instrument(level = "trace", fields(session_id))]
+    #[instrument(level = "trace", skip(self), fields(session_id))]
     async fn start_transcode(&self) -> Result<TranscodeSession> {
         let server = self.connect().await?;
         let item = server.item_by_id(&self.id).await?;
@@ -516,7 +506,7 @@ impl VideoPart {
         Ok(session)
     }
 
-    #[instrument(level = "trace")]
+    #[instrument(level = "trace", skip(self))]
     async fn start_download(&self) -> Result {
         let server = self.connect().await?;
         let item = server.item_by_id(&self.id).await?;
@@ -553,7 +543,7 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(session), fields(session_id=session.session_id()))]
+    #[instrument(level = "trace", skip(self, session), fields(session_id=session.session_id()))]
     async fn wait_for_transcode(&self, session: TranscodeSession) -> Result {
         loop {
             match session.status().await {
@@ -626,7 +616,7 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(progress))]
+    #[instrument(level = "trace", skip(self, path, progress))]
     async fn download_direct<P: Progress + Unpin>(&self, path: &Path, mut progress: P) -> Result {
         let target = { self.inner.path.read().await.join(path) };
         let offset = match metadata(&target).await {
@@ -685,7 +675,7 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(progress))]
+    #[instrument(level = "trace", skip(self, session_id, path, progress))]
     async fn download_transcode<P: Progress + Unpin>(
         &self,
         session_id: &str,
@@ -807,10 +797,7 @@ pub struct Episode {
 
 impl fmt::Debug for Episode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Episode")
-            .field("server", &self.server)
-            .field("id", &self.id)
-            .finish()
+        f.pad(&format!("Episode({})", self.id))
     }
 }
 
@@ -893,10 +880,7 @@ pub struct Movie {
 
 impl fmt::Debug for Movie {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Movie")
-            .field("server", &self.server)
-            .field("id", &self.id)
-            .finish()
+        f.pad(&format!("Movie({})", self.id))
     }
 }
 
@@ -1006,10 +990,7 @@ pub struct Playlist {
 
 impl fmt::Debug for Playlist {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Playlist")
-            .field("server", &self.server)
-            .field("id", &self.id)
-            .finish()
+        f.pad(&format!("Playlist({})", self.id))
     }
 }
 
@@ -1048,10 +1029,7 @@ pub struct MovieCollection {
 
 impl fmt::Debug for MovieCollection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MovieCollection")
-            .field("server", &self.server)
-            .field("id", &self.id)
-            .finish()
+        f.pad(&format!("MovieCollection({})", self.id))
     }
 }
 
@@ -1097,10 +1075,7 @@ pub struct ShowCollection {
 
 impl fmt::Debug for ShowCollection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ShowCollection")
-            .field("server", &self.server)
-            .field("id", &self.id)
-            .finish()
+        f.pad(&format!("ShowCollection({})", self.id))
     }
 }
 
@@ -1161,10 +1136,7 @@ pub struct MovieLibrary {
 
 impl fmt::Debug for MovieLibrary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MovieLibrary")
-            .field("server", &self.server)
-            .field("id", &self.id)
-            .finish()
+        f.pad(&format!("MovieLibrary({})", self.id))
     }
 }
 
@@ -1207,10 +1179,7 @@ pub struct ShowLibrary {
 
 impl fmt::Debug for ShowLibrary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ShowLibrary")
-            .field("server", &self.server)
-            .field("id", &self.id)
-            .finish()
+        f.pad(&format!("ShowLibrary({})", self.id))
     }
 }
 

@@ -154,7 +154,7 @@ async fn main() -> Result {
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(&log_filter)
         .with_ansi(true)
-        .without_time()
+        .pretty()
         .with_writer(console.clone())
         .finish();
     if let Err(e) = tracing::subscriber::set_global_default(subscriber) {
