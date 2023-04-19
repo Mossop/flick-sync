@@ -126,7 +126,7 @@ macro_rules! thumbnail_methods {
 
             if thumbnail.is_none() {
                 let server = self.connect().await?;
-                let item = server.item_by_id(self.id).await?;
+                let item = server.item_by_id(&self.id).await?;
                 debug!("Updating thumbnail for {}", item.title());
 
                 let image = if let Some(ref thumb) = item.metadata().thumb {
@@ -164,7 +164,7 @@ macro_rules! parent {
         pub async fn $meth(&self) -> $typ {
             self.with_state(|ss| $typ {
                 server: self.server.clone(),
-                id: ss.$($pprop)*,
+                id: ss.$($pprop)*.clone(),
                 inner: self.inner.clone(),
             })
             .await
@@ -182,7 +182,7 @@ macro_rules! children {
                         if s.$($pprop)* == self.id {
                             Some($typ {
                                 server: self.server.clone(),
-                                id: *id,
+                                id: id.clone(),
                                 inner: self.inner.clone(),
                             })
                         } else {
@@ -199,7 +199,7 @@ macro_rules! children {
 #[derive(Clone)]
 pub struct Show {
     pub(crate) server: String,
-    pub(crate) id: u32,
+    pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
 
@@ -241,7 +241,7 @@ impl Show {
 #[derive(Clone)]
 pub struct Season {
     pub(crate) server: String,
-    pub(crate) id: u32,
+    pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
 
@@ -268,7 +268,7 @@ impl Season {
                         if detail.season == self.id {
                             Some(Episode {
                                 server: self.server.clone(),
-                                id: *id,
+                                id: id.clone(),
                                 inner: self.inner.clone(),
                             })
                         } else {
@@ -362,7 +362,7 @@ pub enum TransferState {
 #[derive(Clone)]
 pub struct VideoPart {
     pub(crate) server: String,
-    pub(crate) id: u32,
+    pub(crate) id: String,
     pub(crate) index: usize,
     pub(crate) inner: Arc<Inner>,
 }
@@ -378,8 +378,8 @@ impl fmt::Debug for VideoPart {
 }
 
 impl VideoPart {
-    pub fn id(&self) -> u32 {
-        self.id
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     async fn with_video_state<F, R>(&self, cb: F) -> R
@@ -422,12 +422,12 @@ impl VideoPart {
             match video_state.detail {
                 VideoDetail::Movie(_) => Video::Movie(Movie {
                     server: self.server.clone(),
-                    id: self.id,
+                    id: self.id.clone(),
                     inner: self.inner.clone(),
                 }),
                 VideoDetail::Episode(_) => Video::Episode(Episode {
                     server: self.server.clone(),
-                    id: self.id,
+                    id: self.id.clone(),
                     inner: self.inner.clone(),
                 }),
             }
@@ -450,7 +450,7 @@ impl VideoPart {
     #[instrument(level = "trace", fields(session_id))]
     async fn start_transcode(&self) -> Result<TranscodeSession> {
         let server = self.connect().await?;
-        let item = server.item_by_id(self.id).await?;
+        let item = server.item_by_id(&self.id).await?;
 
         let video = match item {
             Item::Movie(m) => library::Video::Movie(m),
@@ -459,13 +459,13 @@ impl VideoPart {
         };
 
         let (media_id, profile) = self
-            .with_video_state(|vs| (vs.media_id, vs.transcode_profile.clone()))
+            .with_video_state(|vs| (vs.media_id.clone(), vs.transcode_profile.clone()))
             .await;
 
         let media = video
             .media()
             .into_iter()
-            .find(|m| m.metadata().id == media_id)
+            .find(|m| m.metadata().id.as_ref() == Some(&media_id))
             .ok_or_else(|| Error::MissingItem)?;
         let parts = media.parts();
         let part = parts.get(self.index).ok_or_else(|| Error::MissingItem)?;
@@ -519,19 +519,19 @@ impl VideoPart {
     #[instrument(level = "trace")]
     async fn start_download(&self) -> Result {
         let server = self.connect().await?;
-        let item = server.item_by_id(self.id).await?;
+        let item = server.item_by_id(&self.id).await?;
 
         let media_id = self
             .with_server_state(|ss| {
                 let video_state = ss.videos.get(&self.id).unwrap();
-                video_state.media_id
+                video_state.media_id.clone()
             })
             .await;
 
         let media = item
             .media()
             .into_iter()
-            .find(|m| m.metadata().id == media_id)
+            .find(|m| m.metadata().id.as_ref() == Some(&media_id))
             .ok_or_else(|| Error::MissingItem)?;
         let parts = media.parts();
         let part = parts.get(self.index).ok_or_else(|| Error::MissingItem)?;
@@ -641,19 +641,19 @@ impl VideoPart {
         };
 
         let server = self.connect().await?;
-        let item = server.item_by_id(self.id).await?;
+        let item = server.item_by_id(&self.id).await?;
 
         let media_id = self
             .with_server_state(|ss| {
                 let video_state = ss.videos.get(&self.id).unwrap();
-                video_state.media_id
+                video_state.media_id.clone()
             })
             .await;
 
         let media = item
             .media()
             .into_iter()
-            .find(|m| m.metadata().id == media_id)
+            .find(|m| m.metadata().id.as_ref() == Some(&media_id))
             .ok_or_else(|| Error::MissingItem)?;
         let parts = media.parts();
         let part = parts.get(self.index).ok_or_else(|| Error::MissingItem)?;
@@ -801,7 +801,7 @@ impl StateWrapper<VideoPartState> for VideoPart {
 #[derive(Clone)]
 pub struct Episode {
     pub(crate) server: String,
-    pub(crate) id: u32,
+    pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
 
@@ -839,7 +839,7 @@ impl Episode {
                 .enumerate()
                 .map(|(index, _)| VideoPart {
                     server: self.server.clone(),
-                    id: self.id,
+                    id: self.id.clone(),
                     index,
                     inner: self.inner.clone(),
                 })
@@ -887,7 +887,7 @@ impl Episode {
 #[derive(Clone)]
 pub struct Movie {
     pub(crate) server: String,
-    pub(crate) id: u32,
+    pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
 
@@ -917,7 +917,7 @@ impl Movie {
                 .enumerate()
                 .map(|(index, _)| VideoPart {
                     server: self.server.clone(),
-                    id: self.id,
+                    id: self.id.clone(),
                     index,
                     inner: self.inner.clone(),
                 })
@@ -1000,7 +1000,7 @@ impl Video {
 #[derive(Clone)]
 pub struct Playlist {
     pub(crate) server: String,
-    pub(crate) id: u32,
+    pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
 
@@ -1024,12 +1024,12 @@ impl Playlist {
                 .map(|id| match ss.videos.get(id).unwrap().detail {
                     VideoDetail::Movie(_) => Video::Movie(Movie {
                         server: self.server.clone(),
-                        id: *id,
+                        id: id.clone(),
                         inner: self.inner.clone(),
                     }),
                     VideoDetail::Episode(_) => Video::Episode(Episode {
                         server: self.server.clone(),
-                        id: *id,
+                        id: id.clone(),
                         inner: self.inner.clone(),
                     }),
                 })
@@ -1042,7 +1042,7 @@ impl Playlist {
 #[derive(Clone)]
 pub struct MovieCollection {
     pub(crate) server: String,
-    pub(crate) id: u32,
+    pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
 
@@ -1067,7 +1067,7 @@ impl MovieCollection {
                 .iter()
                 .map(|id| Movie {
                     server: self.server.clone(),
-                    id: *id,
+                    id: id.clone(),
                     inner: self.inner.clone(),
                 })
                 .collect()
@@ -1091,7 +1091,7 @@ impl MovieCollection {
 #[derive(Clone)]
 pub struct ShowCollection {
     pub(crate) server: String,
-    pub(crate) id: u32,
+    pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
 
@@ -1116,7 +1116,7 @@ impl ShowCollection {
                 .iter()
                 .map(|id| Show {
                     server: self.server.clone(),
-                    id: *id,
+                    id: id.clone(),
                     inner: self.inner.clone(),
                 })
                 .collect()
@@ -1182,7 +1182,7 @@ impl MovieLibrary {
                         if detail.library == self.id {
                             Some(Movie {
                                 server: self.server.clone(),
-                                id: *id,
+                                id: id.clone(),
                                 inner: self.inner.clone(),
                             })
                         } else {

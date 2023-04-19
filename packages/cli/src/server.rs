@@ -175,7 +175,7 @@ impl Runnable for Add {
             .ok_or_else(unexpected)?;
 
         let rating_key = match key.rfind('/') {
-            Some(idx) => key[idx + 1..].parse::<u32>().map_err(|_| unexpected())?,
+            Some(idx) => key[idx + 1..].to_owned(),
             None => return Err(unexpected()),
         };
 
@@ -192,7 +192,7 @@ impl Runnable for Add {
                 continue;
             }
 
-            let item = plex_server.item_by_id(rating_key).await?;
+            let item = plex_server.item_by_id(&rating_key).await?;
             if matches!(
                 item,
                 Item::Photo(_)
@@ -212,7 +212,7 @@ impl Runnable for Add {
                 server.id(),
             ));
 
-            server.add_sync(rating_key, self.profile).await?;
+            server.add_sync(&rating_key, self.profile).await?;
 
             return Ok(());
         }

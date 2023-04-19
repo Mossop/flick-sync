@@ -7,9 +7,9 @@ pub(crate) trait ListItem<T> {
 
 macro_rules! derive_list_item {
     ($typ:ident) => {
-        impl ListItem<u32> for $typ {
-            fn id(&self) -> u32 {
-                self.id
+        impl ListItem<String> for $typ {
+            fn id(&self) -> String {
+                self.id.clone()
             }
         }
     };

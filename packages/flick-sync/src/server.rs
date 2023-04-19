@@ -53,12 +53,12 @@ impl Server {
             .map(|(id, vs)| match vs.detail {
                 VideoDetail::Movie(_) => wrappers::Video::Movie(wrappers::Movie {
                     server: self.id.clone(),
-                    id: *id,
+                    id: id.clone(),
                     inner: self.inner.clone(),
                 }),
                 VideoDetail::Episode(_) => wrappers::Video::Episode(wrappers::Episode {
                     server: self.id.clone(),
-                    id: *id,
+                    id: id.clone(),
                     inner: self.inner.clone(),
                 }),
             })
@@ -98,7 +98,7 @@ impl Server {
             .keys()
             .map(|id| wrappers::Playlist {
                 server: self.id.clone(),
-                id: *id,
+                id: id.clone(),
                 inner: self.inner.clone(),
             })
             .collect()
@@ -172,7 +172,7 @@ impl Server {
     }
 
     /// Adds an item to sync based on its rating key.
-    pub async fn add_sync(&self, rating_key: u32, transcode_profile: Option<String>) -> Result {
+    pub async fn add_sync(&self, rating_key: &str, transcode_profile: Option<String>) -> Result {
         let mut config = self.inner.config.write().await;
 
         if let Some(ref profile) = transcode_profile {
@@ -183,9 +183,9 @@ impl Server {
 
         let server_config = config.servers.get_mut(&self.id).unwrap();
         server_config.syncs.insert(
-            rating_key,
+            rating_key.to_owned(),
             SyncItem {
-                id: rating_key,
+                id: rating_key.to_owned(),
                 transcode_profile,
             },
         );
@@ -221,7 +221,7 @@ impl Server {
                 };
 
                 for item in server_config.syncs.values() {
-                    if let Err(e) = state_sync.add_item_by_key(item, item.id).await {
+                    if let Err(e) = state_sync.add_item_by_key(item, &item.id).await {
                         warn!(error=?e, "Failed to update item");
                     }
                 }
@@ -318,16 +318,16 @@ struct StateSync<'a> {
     server: plex_api::Server,
     root: &'a Path,
 
-    seen_items: HashSet<u32>,
+    seen_items: HashSet<String>,
     seen_libraries: HashSet<u32>,
 }
 
 macro_rules! return_if_seen {
     ($self:expr, $typ:expr) => {
-        if $self.seen_items.contains(&$typ.rating_key()) {
+        if $self.seen_items.contains($typ.rating_key()) {
             return Ok(());
         }
-        $self.seen_items.insert($typ.rating_key());
+        $self.seen_items.insert($typ.rating_key().to_owned());
     };
 }
 
@@ -338,7 +338,7 @@ impl<'a> StateSync<'a> {
         let video = self
             .server_state
             .videos
-            .entry(movie.rating_key())
+            .entry(movie.rating_key().to_owned())
             .or_insert_with(|| VideoState::from(sync, movie));
 
         video.update(sync, movie, &self.server, self.root).await;
@@ -354,7 +354,7 @@ impl<'a> StateSync<'a> {
         let video = self
             .server_state
             .videos
-            .entry(episode.rating_key())
+            .entry(episode.rating_key().to_owned())
             .or_insert_with(|| VideoState::from(sync, episode));
 
         video.update(sync, episode, &self.server, self.root).await;
@@ -367,7 +367,7 @@ impl<'a> StateSync<'a> {
 
         self.server_state
             .seasons
-            .entry(season.rating_key())
+            .entry(season.rating_key().to_owned())
             .and_modify(|ss| ss.update(season))
             .or_insert_with(|| SeasonState::from(season));
 
@@ -380,7 +380,7 @@ impl<'a> StateSync<'a> {
         let show_state = self
             .server_state
             .shows
-            .entry(show.rating_key())
+            .entry(show.rating_key().to_owned())
             .or_insert_with(|| ShowState::from(show));
 
         show_state.update(show, self.root).await;
@@ -398,7 +398,7 @@ impl<'a> StateSync<'a> {
             .metadata()
             .library_section_id
             .ok_or(Error::ItemIncomplete(
-                item.rating_key(),
+                item.rating_key().to_owned(),
                 "library ID was missing".to_string(),
             ))?;
         let library_title =
@@ -406,7 +406,7 @@ impl<'a> StateSync<'a> {
                 .library_section_title
                 .clone()
                 .ok_or(Error::ItemIncomplete(
-                    item.rating_key(),
+                    item.rating_key().to_owned(),
                     "library title was missing".to_string(),
                 ))?;
 
@@ -434,14 +434,14 @@ impl<'a> StateSync<'a> {
     async fn add_collection<T>(
         &mut self,
         collection: &Collection<T>,
-        items: HashSet<u32>,
+        items: HashSet<String>,
     ) -> Result {
         return_if_seen!(self, collection);
 
         let collection_state = self
             .server_state
             .collections
-            .entry(collection.rating_key())
+            .entry(collection.rating_key().to_owned())
             .or_insert_with(|| CollectionState::from(collection));
         collection_state.items = items;
 
@@ -450,13 +450,13 @@ impl<'a> StateSync<'a> {
         Ok(())
     }
 
-    fn add_playlist(&mut self, playlist: &Playlist<Video>, videos: Vec<u32>) -> Result {
+    fn add_playlist(&mut self, playlist: &Playlist<Video>, videos: Vec<String>) -> Result {
         return_if_seen!(self, playlist);
 
         let playlist_state = self
             .server_state
             .playlists
-            .entry(playlist.rating_key())
+            .entry(playlist.rating_key().to_owned())
             .and_modify(|ps| ps.update(playlist))
             .or_insert_with(|| PlaylistState::from(playlist));
         playlist_state.videos = videos;
@@ -521,10 +521,10 @@ impl<'a> StateSync<'a> {
         Ok(())
     }
 
-    async fn add_item_by_key(&mut self, sync: &SyncItem, key: u32) -> Result {
+    async fn add_item_by_key(&mut self, sync: &SyncItem, key: &str) -> Result {
         match self.server.item_by_id(key).await {
             Ok(i) => self.add_item(sync, i).await,
-            Err(plex_api::Error::ItemNotFound) => Err(Error::ItemNotFound(key)),
+            Err(plex_api::Error::ItemNotFound) => Err(Error::ItemNotFound(key.to_owned())),
             Err(e) => Err(e.into()),
         }
     }
@@ -551,10 +551,13 @@ impl<'a> StateSync<'a> {
             Item::Season(season) => {
                 if !self
                     .seen_items
-                    .contains(&season.metadata().parent.parent_rating_key.unwrap())
+                    .contains(season.metadata().parent.parent_rating_key.as_ref().unwrap())
                 {
                     let show = season.show().await?.ok_or_else(|| {
-                        Error::ItemIncomplete(season.rating_key(), "show was missing".to_string())
+                        Error::ItemIncomplete(
+                            season.rating_key().to_owned(),
+                            "show was missing".to_string(),
+                        )
                     })?;
                     self.add_show(&show).await?;
                 }
@@ -568,24 +571,28 @@ impl<'a> StateSync<'a> {
                 Ok(())
             }
             Item::Episode(episode) => {
-                if !self
-                    .seen_items
-                    .contains(&episode.metadata().parent.parent_rating_key.unwrap())
-                {
+                if !self.seen_items.contains(
+                    episode
+                        .metadata()
+                        .parent
+                        .parent_rating_key
+                        .as_ref()
+                        .unwrap(),
+                ) {
                     let season = episode.season().await?.ok_or_else(|| {
                         Error::ItemIncomplete(
-                            episode.rating_key(),
+                            episode.rating_key().to_owned(),
                             "season was missing".to_string(),
                         )
                     })?;
 
                     if !self
                         .seen_items
-                        .contains(&season.metadata().parent.parent_rating_key.unwrap())
+                        .contains(season.metadata().parent.parent_rating_key.as_ref().unwrap())
                     {
                         let show = season.show().await?.ok_or_else(|| {
                             Error::ItemIncomplete(
-                                season.rating_key(),
+                                season.rating_key().to_owned(),
                                 "show was missing".to_string(),
                             )
                         })?;
@@ -602,7 +609,7 @@ impl<'a> StateSync<'a> {
                 let mut items = HashSet::new();
                 let movies = collection.children().await?;
                 for movie in movies {
-                    let key = movie.rating_key();
+                    let key = movie.rating_key().to_owned();
                     match self.add_item(sync, Item::Movie(movie)).await {
                         Ok(()) => {
                             items.insert(key);
@@ -617,7 +624,7 @@ impl<'a> StateSync<'a> {
                 let mut items = HashSet::new();
                 let shows = collection.children().await?;
                 for show in shows {
-                    let key = show.rating_key();
+                    let key = show.rating_key().to_owned();
                     match self.add_item(sync, Item::Show(show)).await {
                         Ok(()) => {
                             items.insert(key);
@@ -632,7 +639,7 @@ impl<'a> StateSync<'a> {
                 let mut items = Vec::new();
                 let videos = playlist.children().await?;
                 for video in videos {
-                    let key = video.rating_key();
+                    let key = video.rating_key().to_owned();
                     let result = match video {
                         Video::Episode(episode) => {
                             self.add_item(sync, Item::Episode(episode)).await
@@ -650,7 +657,7 @@ impl<'a> StateSync<'a> {
 
                 self.add_playlist(&playlist, items)
             }
-            _ => Err(Error::ItemNotSupported(item.rating_key())),
+            _ => Err(Error::ItemNotSupported(item.rating_key().to_owned())),
         }
     }
 }

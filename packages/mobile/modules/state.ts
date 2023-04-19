@@ -35,15 +35,16 @@ function getOrThrow<K, V>(map: Map<K, V>, key: K, error: string): V {
   throw new Error(error);
 }
 
-function mapIndex<V>(
-  map: Map<number, V>,
+function mapIndex<I, V>(
+  decoder: JsonDecoder.Decoder<I>,
+  map: Map<I, V>,
   error: string,
 ): JsonDecoder.Decoder<V> {
-  return JsonDecoder.number.map((id) => getOrThrow(map, id, `${error}: ${id}`));
+  return decoder.map((id) => getOrThrow(map, id, `${error}: ${id}`));
 }
 
-function mapped<T extends { id: number }>(items: T[]): Map<number, T> {
-  return new Map(items.map((item: T): [number, T] => [item.id, item]));
+function mapped<T extends { id: any }>(items: T[]): Map<T["id"], T> {
+  return new Map(items.map((item: T): [T["id"], T] => [item.id, item]));
 }
 
 export type ThumbnailState =
@@ -224,12 +225,12 @@ export type EpisodeDetail = Replace<
   }
 >;
 
-export type VideoPart = Replace<
-  RustState.VideoPart,
+export type VideoPartState = Replace<
+  RustState.VideoPartState,
   { download: DownloadState }
 >;
 
-const VideoPartDecoder = JsonDecoder.object<VideoPart>(
+const VideoPartStateDecoder = JsonDecoder.object<VideoPartState>(
   {
     duration: JsonDecoder.number,
     download: DownloadStateDecoder,
@@ -244,7 +245,7 @@ export type MovieState = Replace<
   {
     detail: MovieDetail;
     thumbnail: ThumbnailState;
-    parts: VideoPart[];
+    parts: VideoPartState[];
   }
 >;
 
@@ -269,12 +270,12 @@ export type ServerState = Replace<
   Omit<RustState.ServerState, "token">,
   {
     id: string;
-    playlists: Map<number, PlaylistState>;
-    collections: Map<number, CollectionState>;
+    playlists: Map<string, PlaylistState>;
+    collections: Map<string, CollectionState>;
     libraries: Map<number, LibraryState>;
-    shows: Map<number, ShowState>;
-    seasons: Map<number, SeasonState>;
-    videos: Map<number, VideoState>;
+    shows: Map<string, ShowState>;
+    seasons: Map<string, SeasonState>;
+    videos: Map<string, VideoState>;
   }
 >;
 
@@ -334,9 +335,13 @@ function decodeServerState(json: any): ServerState {
 
   const ShowStateDecoder = JsonDecoder.object<ShowState>(
     {
-      id: JsonDecoder.number,
+      id: JsonDecoder.string,
       title: JsonDecoder.string,
-      library: mapIndex(serverState.libraries, "Unknown library").map((l) => {
+      library: mapIndex(
+        JsonDecoder.number,
+        serverState.libraries,
+        "Unknown library",
+      ).map((l) => {
         if (isShowLibrary(l)) {
           return l;
         }
@@ -360,9 +365,9 @@ function decodeServerState(json: any): ServerState {
 
   const SeasonStateDecoder = JsonDecoder.object<SeasonState>(
     {
-      id: JsonDecoder.number,
+      id: JsonDecoder.string,
       title: JsonDecoder.string,
-      show: mapIndex(serverState.shows, "Unknown show"),
+      show: mapIndex(JsonDecoder.string, serverState.shows, "Unknown show"),
       index: JsonDecoder.number,
       episodes: JsonDecoder.constant([]),
     },
@@ -380,7 +385,11 @@ function decodeServerState(json: any): ServerState {
 
   const MovieDetailDecoder = JsonDecoder.object<MovieDetail>(
     {
-      library: mapIndex(serverState.libraries, "Unknown library").map((l) => {
+      library: mapIndex(
+        JsonDecoder.number,
+        serverState.libraries,
+        "Unknown library",
+      ).map((l) => {
         if (isMovieLibrary(l)) {
           return l;
         }
@@ -393,7 +402,11 @@ function decodeServerState(json: any): ServerState {
 
   const EpisodeDetailDecoder = JsonDecoder.object<EpisodeDetail>(
     {
-      season: mapIndex(serverState.seasons, `Unknown season`),
+      season: mapIndex(
+        JsonDecoder.string,
+        serverState.seasons,
+        `Unknown season`,
+      ),
       index: JsonDecoder.number,
     },
     "EpisodeState",
@@ -401,24 +414,26 @@ function decodeServerState(json: any): ServerState {
 
   const MovieStateDecoder = JsonDecoder.object<MovieState>(
     {
-      id: JsonDecoder.number,
+      id: JsonDecoder.string,
       title: JsonDecoder.string,
       thumbnail: ThumbnailStateDecoder,
       airDate: JsonDecoder.string,
-      parts: JsonDecoder.array(VideoPartDecoder, "VideoPart[]"),
+      parts: JsonDecoder.array(VideoPartStateDecoder, "VideoPart[]"),
       detail: MovieDetailDecoder,
+      transcodeProfile: JsonDecoder.optional(JsonDecoder.string),
     },
     "MovieState",
   );
 
   const EpisodeStateDecoder = JsonDecoder.object<EpisodeState>(
     {
-      id: JsonDecoder.number,
+      id: JsonDecoder.string,
       title: JsonDecoder.string,
       thumbnail: ThumbnailStateDecoder,
       airDate: JsonDecoder.string,
-      parts: JsonDecoder.array(VideoPartDecoder, "VideoPart[]"),
+      parts: JsonDecoder.array(VideoPartStateDecoder, "VideoPart[]"),
       detail: EpisodeDetailDecoder,
+      transcodeProfile: JsonDecoder.optional(JsonDecoder.string),
     },
     "EpisodeState",
   );
@@ -443,8 +458,12 @@ function decodeServerState(json: any): ServerState {
 
   const MovieCollectionStateDecoder = JsonDecoder.object<MovieCollectionState>(
     {
-      id: JsonDecoder.number,
-      library: mapIndex(serverState.libraries, "Unknown library").map((l) => {
+      id: JsonDecoder.string,
+      library: mapIndex(
+        JsonDecoder.number,
+        serverState.libraries,
+        "Unknown library",
+      ).map((l) => {
         if (isMovieLibrary(l)) {
           return l;
         }
@@ -452,7 +471,7 @@ function decodeServerState(json: any): ServerState {
       }),
       title: JsonDecoder.string,
       items: optionalArray(
-        JsonDecoder.number.map((id) => {
+        JsonDecoder.string.map((id) => {
           let val = serverState.videos.get(id);
           if (val === undefined || isEpisode(val)) {
             throw new Error(`Unknown collection item '${id}'`);
@@ -468,8 +487,12 @@ function decodeServerState(json: any): ServerState {
 
   const ShowCollectionStateDecoder = JsonDecoder.object<ShowCollectionState>(
     {
-      id: JsonDecoder.number,
-      library: mapIndex(serverState.libraries, "Unknown library").map((l) => {
+      id: JsonDecoder.string,
+      library: mapIndex(
+        JsonDecoder.number,
+        serverState.libraries,
+        "Unknown library",
+      ).map((l) => {
         if (isShowLibrary(l)) {
           return l;
         }
@@ -477,7 +500,7 @@ function decodeServerState(json: any): ServerState {
       }),
       title: JsonDecoder.string,
       items: optionalArray(
-        JsonDecoder.number.map((id) => {
+        JsonDecoder.string.map((id) => {
           let val = serverState.shows.get(id);
           if (val === undefined) {
             throw new Error(`Unknown collection item '${id}'`);
@@ -511,10 +534,12 @@ function decodeServerState(json: any): ServerState {
 
   const PlaylistStateDecoder = JsonDecoder.object<PlaylistState>(
     {
-      id: JsonDecoder.number,
+      id: JsonDecoder.string,
       title: JsonDecoder.string,
       server: JsonDecoder.constant(serverState),
-      videos: optionalArray(mapIndex(serverState.videos, "Unknown video")),
+      videos: optionalArray(
+        mapIndex(JsonDecoder.string, serverState.videos, "Unknown video"),
+      ),
     },
     "PlaylistState",
   );

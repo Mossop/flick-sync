@@ -3,18 +3,18 @@
 */
 
 export interface CollectionState {
-	id: number;
+	id: string;
 	library: number;
 	title: string;
-	items?: number[];
+	items?: string[];
 	lastUpdated: number;
 	thumbnail?: ThumbnailState;
 }
 
 export interface PlaylistState {
-	id: number;
+	id: string;
 	title: string;
-	videos?: number[];
+	videos?: string[];
 }
 
 export interface LibraryState {
@@ -24,14 +24,14 @@ export interface LibraryState {
 }
 
 export interface SeasonState {
-	id: number;
-	show: number;
+	id: string;
+	show: string;
 	index: number;
 	title: string;
 }
 
 export interface ShowState {
-	id: number;
+	id: string;
 	library: number;
 	title: string;
 	year: number;
@@ -45,24 +45,25 @@ export interface MovieState {
 }
 
 export interface EpisodeState {
-	season: number;
+	season: string;
 	index: number;
 }
 
-export interface VideoPart {
+export interface VideoPartState {
 	duration: number;
 	download?: DownloadState;
 }
 
 export interface VideoState {
-	id: number;
+	id: string;
 	title: string;
 	detail: VideoDetail;
 	airDate: string;
 	thumbnail?: ThumbnailState;
 	mediaId: number;
 	lastUpdated: number;
-	parts: VideoPart[];
+	parts: VideoPartState[];
+	transcodeProfile?: string;
 }
 
 export interface ServerState {

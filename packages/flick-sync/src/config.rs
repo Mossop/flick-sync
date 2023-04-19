@@ -15,7 +15,7 @@ pub enum ServerConnection {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SyncItem {
-    pub(crate) id: u32,
+    pub(crate) id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) transcode_profile: Option<String>,
 }
@@ -31,7 +31,7 @@ pub(crate) struct ServerConfig {
         serialize_with = "into_list",
         deserialize_with = "from_list"
     )]
-    pub(crate) syncs: HashMap<u32, SyncItem>,
+    pub(crate) syncs: HashMap<String, SyncItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) max_transcodes: Option<usize>,
 }

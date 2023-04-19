@@ -33,17 +33,17 @@ interface LibraryParams {
 
 interface PlaylistParams {
   server: string;
-  playlist: number;
+  playlist: string;
 }
 
 interface CollectionParams {
   server: string;
-  collection: number;
+  collection: string;
 }
 
 interface ShowParams {
   server: string;
-  show: number;
+  show: string;
 }
 
 export interface AppRoutes {

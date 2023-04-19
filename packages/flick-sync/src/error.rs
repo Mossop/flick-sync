@@ -24,11 +24,11 @@ pub enum Error {
     #[error("This server is no longer authenticated correctly. Try logging in again")]
     ServerNotAuthenticated,
     #[error("Item {0} was not found on the server")]
-    ItemNotFound(u32),
+    ItemNotFound(String),
     #[error("Item {0} is not supported.")]
-    ItemNotSupported(u32),
+    ItemNotSupported(String),
     #[error("Plex returned incomplete information for item {0}: {1}")]
-    ItemIncomplete(u32, String),
+    ItemIncomplete(String, String),
     #[error("The item appears to be missing on the server")]
     MissingItem,
     #[error("Cannot download an item until the item is available (call wait_for_download)")]
