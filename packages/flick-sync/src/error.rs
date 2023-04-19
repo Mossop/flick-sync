@@ -33,6 +33,8 @@ pub enum Error {
     MissingItem,
     #[error("Cannot download an item until the item is available (call wait_for_download)")]
     DownloadUnavailable,
+    #[error("Server dropped the transcode session")]
+    TranscodeLost,
     #[error("Server transcode failed")]
     TranscodeFailed,
     #[error("Unknown transcode profile {0}")]

@@ -468,10 +468,7 @@ impl VideoPart {
                 Ok(_) => {
                     break;
                 }
-                Err(plex_api::Error::UnexpectedApiResponse {
-                    status_code: 404,
-                    content: _,
-                }) => {
+                Err(plex_api::Error::ItemNotFound) => {
                     count += 1;
                     if count > 20 {
                         error!("Transcode session failed to start");
@@ -555,8 +552,15 @@ impl VideoPart {
 
                     sleep(Duration::from_secs(delay as u64)).await;
                 }
+                Err(plex_api::Error::ItemNotFound) => {
+                    warn!("Server dropped transcode session");
+                    self.update_state(|state| state.download = DownloadState::None)
+                        .await?;
+
+                    return Err(Error::TranscodeLost);
+                }
                 Err(e) => {
-                    error!("Error getting transcode status",);
+                    error!("Error getting transcode status");
                     return Err(e.into());
                 }
             }
@@ -591,20 +595,25 @@ impl VideoPart {
 
     #[instrument(level = "trace")]
     pub async fn wait_for_download(&self) -> Result {
-        self.prepare_download().await?;
+        loop {
+            self.prepare_download().await?;
 
-        let download_state = self.download_state().await;
-        if let DownloadState::Transcoding {
-            session_id,
-            path: _,
-        } = download_state
-        {
-            let server = self.server.connect().await?;
-            let session = server.transcode_session(&session_id).await?;
-            self.wait_for_transcode(session).await?;
+            let download_state = self.download_state().await;
+            if let DownloadState::Transcoding {
+                session_id,
+                path: _,
+            } = download_state
+            {
+                let server = self.server.connect().await?;
+                let session = server.transcode_session(&session_id).await?;
+                match self.wait_for_transcode(session).await {
+                    Err(Error::TranscodeLost) => continue,
+                    r => return r,
+                }
+            } else {
+                return Ok(());
+            }
         }
-
-        Ok(())
     }
 
     #[instrument(level = "trace", skip(self, path, progress))]
