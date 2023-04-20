@@ -1,5 +1,4 @@
 use std::{
-    cmp::max,
     fmt,
     io::{ErrorKind, IoSlice},
     path::{Path, PathBuf},
@@ -541,16 +540,7 @@ impl VideoPart {
                     remaining,
                     progress: _,
                 }) => {
-                    let delay = match remaining {
-                        Some(secs) => {
-                            let delay = max(5, secs / 2);
-                            trace!("Item due in {secs}s, delaying for {delay}s");
-                            delay
-                        }
-                        None => 5,
-                    };
-
-                    sleep(Duration::from_secs(delay as u64)).await;
+                    sleep(Duration::from_secs(10)).await;
                 }
                 Err(plex_api::Error::ItemNotFound) => {
                     warn!("Server dropped transcode session");
