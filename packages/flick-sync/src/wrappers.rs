@@ -537,7 +537,7 @@ impl VideoPart {
                 Ok(TranscodeStatus::Complete) => break,
                 Ok(TranscodeStatus::Error) => return Err(Error::TranscodeFailed),
                 Ok(TranscodeStatus::Transcoding {
-                    remaining,
+                    remaining: _,
                     progress: _,
                 }) => {
                     sleep(Duration::from_secs(10)).await;
@@ -635,6 +635,10 @@ impl VideoPart {
         let parts = media.parts();
         let part = parts.get(self.index).ok_or_else(|| Error::MissingItem)?;
 
+        if let Some(parent) = target.parent() {
+            create_dir_all(parent).await?;
+        }
+
         let file = OpenOptions::new()
             .append(true)
             .create(true)
@@ -679,6 +683,11 @@ impl VideoPart {
         }
 
         let target = { self.inner.path.read().await.join(path) };
+
+        if let Some(parent) = target.parent() {
+            create_dir_all(parent).await?;
+        }
+
         let file = OpenOptions::new()
             .append(true)
             .create(true)
