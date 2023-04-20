@@ -56,7 +56,7 @@ impl Server {
     pub async fn max_transcodes(&self) -> usize {
         let config = self.inner.config.read().await;
         let server_config = config.servers.get(&self.id).unwrap();
-        server_config.max_transcodes.unwrap_or(1)
+        server_config.max_transcodes.unwrap_or(4)
     }
 
     pub async fn videos(&self) -> Vec<wrappers::Video> {
