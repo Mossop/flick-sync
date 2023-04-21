@@ -10,7 +10,8 @@ import * as StatusBar from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import * as NavigationBar from "expo-navigation-bar";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
-import { IconButton } from "react-native-paper";
+import { IconButton, ProgressBar, Text } from "react-native-paper";
+import { useNavigation } from "@react-navigation/native";
 import { useAppState } from "../components/AppState";
 import { AppScreenProps } from "../components/AppNavigator";
 import { isDownloaded } from "../modules/state";
@@ -35,10 +36,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: "100%",
     height: "100%",
+  },
+  overlay: {
+    flex: 1,
     flexDirection: "column",
     alignItems: "stretch",
-    justifyContent: "flex-end",
-    padding: PADDING * 5,
+    justifyContent: "flex-start",
+    padding: PADDING,
   },
   buttons: {
     flex: 1,
@@ -52,8 +56,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   progress: {
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+  },
+  progressBar: {
+    flex: 1,
+    padding: PADDING,
   },
 });
 
@@ -81,14 +90,40 @@ function useOverlayState(): [boolean, () => void] {
   ];
 }
 
+function pad(val: number): string {
+  if (val >= 10) {
+    return val.toString();
+  }
+  return `0${val}`;
+}
+
+function time(millis: number): string {
+  let secs = Math.round(millis / 1000);
+  let seconds = secs % 60;
+  let mins = (secs - seconds) / 60;
+  let minutes = mins % 60;
+  let hours = (mins - minutes) / 60;
+
+  if (hours > 0) {
+    return `${hours}:${pad(minutes)}:${pad(seconds)}`;
+  }
+  return `${pad(minutes)}:${pad(seconds)}`;
+}
+
 function Overlay({
   video,
   status,
+  previousDuration,
+  totalDuration,
 }: {
   video: Video;
   status: AVPlaybackStatusSuccess;
+  previousDuration: number;
+  totalDuration: number;
 }) {
+  let navigation = useNavigation();
   let [visible, toggle] = useOverlayState();
+  let position = previousDuration + status.positionMillis;
 
   let togglePlayback = () => {
     video.setStatusAsync({ shouldPlay: !status.isPlaying });
@@ -97,8 +132,19 @@ function Overlay({
   return (
     <Pressable style={styles.overlayContainer} onPress={toggle}>
       {visible && (
-        <Animated.View entering={FadeIn} exiting={FadeOut}>
-          <View style={styles.buttons}></View>
+        <Animated.View
+          style={styles.overlay}
+          entering={FadeIn}
+          exiting={FadeOut}
+        >
+          <View style={styles.buttons}>
+            <IconButton
+              icon="close"
+              onPress={() => navigation.goBack()}
+              iconColor="white"
+              size={40}
+            />
+          </View>
           <View style={styles.controls}>
             {/* <IconButton icon="rewind-30" iconColor="white" size={40} />
             <IconButton icon="rewind-10" iconColor="white" size={40} /> */}
@@ -111,7 +157,18 @@ function Overlay({
             {/* <IconButton icon="fast-forward-10" iconColor="white" size={40} />
             <IconButton icon="fast-forward-30" iconColor="white" size={40} /> */}
           </View>
-          <View style={styles.progress}></View>
+          <View style={styles.progress}>
+            <Text style={{ color: "white" }}>{time(position)}</Text>
+            <View style={styles.progressBar}>
+              <ProgressBar
+                style={{ width: "100%" }}
+                progress={position / totalDuration}
+              />
+            </View>
+            <Text style={{ color: "white" }}>
+              {time(totalDuration - position)}
+            </Text>
+          </View>
         </Animated.View>
       )}
     </Pressable>
@@ -141,7 +198,21 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     .get(route.params.server)
     ?.videos.get(route.params.video);
 
-  let part = video?.parts?.[route.params.part ?? 0];
+  if (!video) {
+    throw new Error("Incorrect params for video route");
+  }
+
+  let partIndex = route.params.part ?? 0;
+  let part = video.parts[partIndex];
+  let [previousDuration, totalDuration] = video.parts.reduce(
+    ([previous, total], currentPart, index) => {
+      if (index < partIndex) {
+        return [previous + currentPart.duration, total + currentPart.duration];
+      }
+      return [previous, total + currentPart.duration];
+    },
+    [0, 0],
+  );
 
   if (!part) {
     throw new Error("Incorrect params for video route");
@@ -171,7 +242,12 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
         onPlaybackStatusUpdate={onStatus}
       />
       {videoRef.current && status && (
-        <Overlay status={status} video={videoRef.current} />
+        <Overlay
+          previousDuration={previousDuration}
+          totalDuration={totalDuration}
+          status={status}
+          video={videoRef.current}
+        />
       )}
     </SafeAreaView>
   );
