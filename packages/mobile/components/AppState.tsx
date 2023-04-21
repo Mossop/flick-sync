@@ -12,6 +12,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { State, StateDecoder } from "../modules/state";
 
 const SETTINGS_KEY = "settings";
+const CONTENT_ROOT = "content://com.android.externalstorage.documents/tree/";
 
 interface Settings {
   store: string;
@@ -22,25 +23,25 @@ interface ContextState {
   settings: Settings;
 }
 
-class AppState {
-  constructor(
-    private contextState: ContextState,
-    private contextSetter: Dispatch<SetStateAction<ContextState | undefined>>,
-  ) {}
-
-  public get settings(): Settings {
-    return this.contextState?.settings;
+function storagePath(store: string, path: string): string {
+  let prefix = "/document";
+  if (store.startsWith(CONTENT_ROOT)) {
+    prefix += `/${store.substring(CONTENT_ROOT.length)}`;
   }
 
-  public get mediaState(): State {
-    return this.contextState?.mediaState;
+  return `${store}${prefix}${encodeURIComponent(`/${path}`)}`;
+}
+
+async function chooseStore(): Promise<string> {
+  let permission =
+    await StorageAccessFramework.requestDirectoryPermissionsAsync(null);
+
+  if (permission.granted) {
+    console.log(`Got permission for ${permission.directoryUri}`);
+    return permission.directoryUri;
   }
 
-  public path(path: string): string {
-    return `${
-      this.settings.store
-    }/document/primary%3Aflicksync%2F${encodeURIComponent(path)}`;
-  }
+  throw new Error("Permission denied");
 }
 
 async function loadSettings(): Promise<Settings> {
@@ -57,19 +58,19 @@ async function loadSettings(): Promise<Settings> {
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    let permission =
-      await StorageAccessFramework.requestDirectoryPermissionsAsync(null);
-    if (permission.granted) {
-      console.log(`Got permission for ${permission.directoryUri}`);
+    try {
+      let store = await chooseStore();
+
       let settings: Settings = {
-        store: permission.directoryUri,
+        store,
       };
 
       await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 
       return settings;
+    } catch (e) {
+      console.error(e);
     }
-    console.log("Permission denied");
   }
 }
 
@@ -77,14 +78,54 @@ async function loadMediaState(store: string): Promise<State> {
   console.log(`Loading media state from ${store}`);
   try {
     let stateStr = await StorageAccessFramework.readAsStringAsync(
-      `${store}/document/primary%3Aflicksync%2F.flicksync.state.json`,
+      storagePath(store, ".flicksync.state.json"),
     );
-    return await StateDecoder.decodeToPromise(JSON.parse(stateStr));
+    let state = await StateDecoder.decodeToPromise(JSON.parse(stateStr));
+    console.log(`Loaded state with ${state.servers.size} servers.`);
+    return state;
   } catch (e) {
     console.error("State read failed", e);
   }
 
   return { servers: new Map() };
+}
+
+class AppState {
+  constructor(
+    private contextState: ContextState,
+    private contextSetter: Dispatch<SetStateAction<ContextState | undefined>>,
+  ) {}
+
+  public get settings(): Settings {
+    return this.contextState.settings;
+  }
+
+  public get mediaState(): State {
+    return this.contextState.mediaState;
+  }
+
+  private async updateSettings(settings: Settings) {
+    this.contextState = {
+      ...this.contextState,
+      settings,
+    };
+
+    await AsyncStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify(this.contextState.settings),
+    );
+    this.contextSetter(this.contextState);
+  }
+
+  public async pickStore() {
+    let store = await chooseStore();
+    this.contextState.mediaState = await loadMediaState(store);
+    this.updateSettings({ store });
+  }
+
+  public path(path: string): string {
+    return storagePath(this.settings.store, path);
+  }
 }
 
 async function init(): Promise<ContextState> {
