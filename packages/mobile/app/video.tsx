@@ -111,11 +111,13 @@ function time(millis: number): string {
 }
 
 function Overlay({
+  seek,
   video,
   status,
   previousDuration,
   totalDuration,
 }: {
+  seek: (position: number) => void;
   video: Video;
   status: AVPlaybackStatusSuccess;
   previousDuration: number;
@@ -128,6 +130,8 @@ function Overlay({
   let togglePlayback = () => {
     video.setStatusAsync({ shouldPlay: !status.isPlaying });
   };
+
+  let skip = (delta: number) => seek(position + delta);
 
   return (
     <Pressable style={styles.overlayContainer} onPress={toggle}>
@@ -146,16 +150,36 @@ function Overlay({
             />
           </View>
           <View style={styles.controls}>
-            {/* <IconButton icon="rewind-30" iconColor="white" size={40} />
-            <IconButton icon="rewind-10" iconColor="white" size={40} /> */}
+            <IconButton
+              icon="rewind-30"
+              onPress={() => skip(-30000)}
+              iconColor="white"
+              size={40}
+            />
+            <IconButton
+              icon="rewind-10"
+              onPress={() => skip(-15000)}
+              iconColor="white"
+              size={40}
+            />
             <IconButton
               icon={status.isPlaying ? "pause" : "play"}
               onPress={togglePlayback}
               iconColor="white"
               size={80}
             />
-            {/* <IconButton icon="fast-forward-10" iconColor="white" size={40} />
-            <IconButton icon="fast-forward-30" iconColor="white" size={40} /> */}
+            <IconButton
+              icon="fast-forward-10"
+              onPress={() => skip(15000)}
+              iconColor="white"
+              size={40}
+            />
+            <IconButton
+              icon="fast-forward-30"
+              onPress={() => skip(30000)}
+              iconColor="white"
+              size={40}
+            />
           </View>
           <View style={styles.progress}>
             <Text style={{ color: "white" }}>{time(position)}</Text>
@@ -177,7 +201,7 @@ function Overlay({
 
 export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let appState = useAppState();
-  let videoRef = useRef(null);
+  let videoRef = useRef<Video | null>(null);
   let [status, setStatus] = useState<AVPlaybackStatusSuccess | null>(null);
 
   useEffect(() => {
@@ -229,6 +253,24 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     }
   };
 
+  let seek = (position: number) => {
+    let targetPart = 0;
+    let targetPosition = Math.min(Math.max(position, 0), totalDuration);
+    while (
+      targetPart < video!.parts.length - 1 &&
+      video!.parts[targetPart]!.duration > position
+    ) {
+      targetPosition -= video!.parts[targetPart]!.duration;
+      targetPart++;
+    }
+
+    if (targetPart == partIndex) {
+      videoRef.current?.playFromPositionAsync(targetPosition);
+    } else {
+      // TODO
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <Video
@@ -243,6 +285,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
       />
       {videoRef.current && status && (
         <Overlay
+          seek={seek}
           previousDuration={previousDuration}
           totalDuration={totalDuration}
           status={status}
