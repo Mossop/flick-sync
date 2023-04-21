@@ -711,7 +711,8 @@ impl VideoPart {
         }
 
         let file = OpenOptions::new()
-            .append(true)
+            .write(true)
+            .truncate(true)
             .create(true)
             .open(&target)
             .await?;
