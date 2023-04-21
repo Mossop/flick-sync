@@ -1,5 +1,6 @@
-import { Pressable, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 import { NavigationProp, useNavigation } from "@react-navigation/native";
+import { TouchableRipple } from "react-native-paper";
 import { ShowState } from "../modules/state";
 import Thumbnail from "./Thumbnail";
 import GridView from "./GridView";
@@ -20,7 +21,7 @@ export default function Shows({ shows }: { shows: ShowState[] }) {
     <GridView itemWidth={POSTER_WIDTH}>
       {shows.map((show) => (
         <GridView.Item key={show.id}>
-          <Pressable
+          <TouchableRipple
             onPress={() =>
               navigation.navigate("show", {
                 server: show.library.server.id,
@@ -29,7 +30,7 @@ export default function Shows({ shows }: { shows: ShowState[] }) {
             }
           >
             <Thumbnail style={styles.thumb} thumbnail={show.thumbnail} />
-          </Pressable>
+          </TouchableRipple>
         </GridView.Item>
       ))}
     </GridView>

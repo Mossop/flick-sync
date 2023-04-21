@@ -1,5 +1,6 @@
-import { Pressable, ScrollView, StyleSheet } from "react-native";
+import { ScrollView, StyleSheet } from "react-native";
 import { NavigationProp, useNavigation } from "@react-navigation/native";
+import { TouchableRipple } from "react-native-paper";
 import { CollectionState } from "../modules/state";
 import Thumbnail from "./Thumbnail";
 import GridView from "./GridView";
@@ -25,7 +26,7 @@ export default function Collections({
       <GridView itemWidth={POSTER_WIDTH}>
         {collections.map((collection) => (
           <GridView.Item key={collection.id}>
-            <Pressable
+            <TouchableRipple
               onPress={() =>
                 navigation.navigate("collection", {
                   server: collection.library.server.id,
@@ -37,7 +38,7 @@ export default function Collections({
                 style={styles.thumb}
                 thumbnail={collection.thumbnail}
               />
-            </Pressable>
+            </TouchableRipple>
           </GridView.Item>
         ))}
       </GridView>

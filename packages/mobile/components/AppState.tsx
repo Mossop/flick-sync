@@ -10,6 +10,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { StorageAccessFramework } from "expo-file-system";
 import * as SplashScreen from "expo-splash-screen";
 import {
+  isDownloaded,
   isMovieCollection,
   isMovieLibrary,
   ServerState,
@@ -83,13 +84,7 @@ async function loadSettings(): Promise<Settings> {
 function filterServers(servers: Map<String, ServerState>) {
   for (let [serverId, server] of servers) {
     for (let [videoId, video] of server.videos) {
-      if (
-        !video.parts.every(
-          (videoPart) =>
-            videoPart.download.state == "transcoded" ||
-            videoPart.download.state == "downloaded",
-        )
-      ) {
+      if (!video.parts.every((videoPart) => isDownloaded(videoPart.download))) {
         server.videos.delete(videoId);
       }
     }

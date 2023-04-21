@@ -46,11 +46,18 @@ interface ShowParams {
   show: string;
 }
 
+interface VideoParams {
+  server: string;
+  video: string;
+  part?: number;
+}
+
 export interface AppRoutes {
   library: LibraryParams | undefined;
   playlist: PlaylistParams;
   collection: CollectionParams;
   show: ShowParams;
+  video: VideoParams;
   [key: string]: object | undefined;
 }
 

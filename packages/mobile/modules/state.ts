@@ -80,6 +80,12 @@ export type DownloadState =
   | { state: "downloaded"; path: string }
   | { state: "transcoded"; path: string };
 
+export function isDownloaded(
+  ds: DownloadState,
+): ds is { state: "downloaded" | "transcoded"; path: string } {
+  return ds.state == "downloaded" || ds.state == "transcoded";
+}
+
 const DownloadStateDecoder = optional(
   { state: "none" },
   JsonDecoder.oneOf<DownloadState>(
@@ -264,6 +270,13 @@ export function isMovie(v: VideoState): v is MovieState {
 
 export function isEpisode(v: VideoState): v is EpisodeState {
   return !isMovie(v);
+}
+
+export function videoLibrary(video: VideoState): LibraryState {
+  if (isMovie(video)) {
+    return video.detail.library;
+  }
+  return video.detail.season.show.library;
 }
 
 export type ServerState = Replace<
