@@ -9,7 +9,13 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { StorageAccessFramework } from "expo-file-system";
 import * as SplashScreen from "expo-splash-screen";
-import { State, StateDecoder } from "../modules/state";
+import {
+  isMovieCollection,
+  isMovieLibrary,
+  ServerState,
+  State,
+  StateDecoder,
+} from "../modules/state";
 
 const SETTINGS_KEY = "settings";
 const CONTENT_ROOT = "content://com.android.externalstorage.documents/tree/";
@@ -74,13 +80,112 @@ async function loadSettings(): Promise<Settings> {
   }
 }
 
+function filterServers(servers: Map<String, ServerState>) {
+  for (let [serverId, server] of servers) {
+    for (let [videoId, video] of server.videos) {
+      if (
+        !video.parts.every(
+          (videoPart) =>
+            videoPart.download.state == "transcoded" ||
+            videoPart.download.state == "downloaded",
+        )
+      ) {
+        server.videos.delete(videoId);
+      }
+    }
+
+    if (server.videos.size == 0) {
+      servers.delete(serverId);
+      continue;
+    }
+
+    for (let [id, playlist] of server.playlists) {
+      playlist.videos = playlist.videos.filter((video) =>
+        server.videos.has(video.id),
+      );
+
+      if (playlist.videos.length == 0) {
+        server.playlists.delete(id);
+      }
+    }
+
+    for (let [id, season] of server.seasons) {
+      season.episodes = season.episodes.filter((episode) =>
+        server.videos.has(episode.id),
+      );
+
+      if (season.episodes.length == 0) {
+        server.seasons.delete(id);
+      }
+    }
+
+    for (let [id, show] of server.shows) {
+      show.seasons = show.seasons.filter((season) =>
+        server.seasons.has(season.id),
+      );
+
+      if (show.seasons.length == 0) {
+        server.shows.delete(id);
+      }
+    }
+
+    for (let [id, collection] of server.collections) {
+      if (isMovieCollection(collection)) {
+        collection.items = collection.items.filter((movie) =>
+          server.videos.has(movie.id),
+        );
+
+        if (collection.items.length == 0) {
+          server.collections.delete(id);
+        }
+      } else {
+        collection.items = collection.items.filter((show) =>
+          server.shows.has(show.id),
+        );
+
+        if (collection.items.length == 0) {
+          server.collections.delete(id);
+        }
+      }
+    }
+
+    for (let [id, library] of server.libraries) {
+      if (isMovieLibrary(library)) {
+        library.collections = library.collections.filter((collection) =>
+          server.collections.has(collection.id),
+        );
+        library.contents = library.contents.filter((movie) =>
+          server.videos.has(movie.id),
+        );
+
+        if (library.contents.length == 0) {
+          server.libraries.delete(id);
+        }
+      } else {
+        library.collections = library.collections.filter((collection) =>
+          server.collections.has(collection.id),
+        );
+        library.contents = library.contents.filter((show) =>
+          server.shows.has(show.id),
+        );
+
+        if (library.contents.length == 0) {
+          server.libraries.delete(id);
+        }
+      }
+    }
+  }
+}
+
 async function loadMediaState(store: string): Promise<State> {
   console.log(`Loading media state from ${store}`);
   try {
     let stateStr = await StorageAccessFramework.readAsStringAsync(
       storagePath(store, ".flicksync.state.json"),
     );
+
     let state = await StateDecoder.decodeToPromise(JSON.parse(stateStr));
+    filterServers(state.servers);
     console.log(`Loaded state with ${state.servers.size} servers.`);
     return state;
   } catch (e) {
