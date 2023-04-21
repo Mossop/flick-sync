@@ -7,7 +7,10 @@ use futures::future::join_all;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{error, instrument};
 
-use crate::{console::Bar, select_servers, Console, Result, Runnable};
+use crate::{
+    console::{Bar, ProgressType},
+    select_servers, Console, Result, Runnable,
+};
 
 #[derive(Args)]
 pub struct Prune {
@@ -78,7 +81,13 @@ impl Drop for PermitHolder {
 }
 
 async fn complete_transcode(state: &PartTransferState) -> Result {
-    state.part.wait_for_download().await?;
+    let bar = state
+        .console
+        .add_progress_bar(&format!("🔄 {}", state.title), ProgressType::Percent);
+    state
+        .part
+        .wait_for_download(DownloadProgress { bar })
+        .await?;
 
     complete_download(state).await
 }
@@ -86,7 +95,9 @@ async fn complete_transcode(state: &PartTransferState) -> Result {
 async fn complete_download(state: &PartTransferState) -> Result {
     let _permit = state.download_permits.acquire().await.unwrap();
 
-    let bar = state.console.add_progress_bar(&state.title);
+    let bar = state
+        .console
+        .add_progress_bar(&format!("💾 {}", state.title), ProgressType::Bytes);
     state.part.download(DownloadProgress { bar }).await?;
 
     Ok(())

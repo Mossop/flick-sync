@@ -1,4 +1,5 @@
 use std::{
+    cmp::{max, min},
     fmt,
     io::{ErrorKind, IoSlice},
     path::{Path, PathBuf},
@@ -530,17 +531,31 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(self, session), fields(session_id=session.session_id()))]
-    async fn wait_for_transcode(&self, session: TranscodeSession) -> Result {
+    #[instrument(level = "trace", skip(self, session, progress), fields(session_id=session.session_id()))]
+    async fn wait_for_transcode<P: Progress + Unpin>(
+        &self,
+        session: TranscodeSession,
+        progress: &mut P,
+    ) -> Result {
         loop {
             match session.status().await {
-                Ok(TranscodeStatus::Complete) => break,
+                Ok(TranscodeStatus::Complete) => {
+                    progress.progress(100, 100);
+                    break;
+                }
                 Ok(TranscodeStatus::Error) => return Err(Error::TranscodeFailed),
                 Ok(TranscodeStatus::Transcoding {
-                    remaining: _,
-                    progress: _,
+                    remaining,
+                    progress: p,
                 }) => {
-                    sleep(Duration::from_secs(10)).await;
+                    progress.progress(p as u64, 100);
+                    let delay = if let Some(remaining) = remaining {
+                        max(2, min(5, remaining))
+                    } else {
+                        5
+                    };
+
+                    sleep(Duration::from_secs(delay.into())).await;
                 }
                 Err(plex_api::Error::ItemNotFound) => {
                     warn!("Server dropped transcode session");
@@ -580,8 +595,8 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace")]
-    pub async fn wait_for_download(&self) -> Result {
+    #[instrument(level = "trace", skip(progress))]
+    pub async fn wait_for_download<P: Progress + Unpin>(&self, mut progress: P) -> Result {
         loop {
             self.prepare_download().await?;
 
@@ -593,7 +608,7 @@ impl VideoPart {
             {
                 let server = self.server.connect().await?;
                 let session = server.transcode_session(&session_id).await?;
-                match self.wait_for_transcode(session).await {
+                match self.wait_for_transcode(session, &mut progress).await {
                     Err(Error::TranscodeLost) => continue,
                     r => return r,
                 }

@@ -91,6 +91,11 @@ impl Drop for BarHideGuard {
     }
 }
 
+pub enum ProgressType {
+    Bytes,
+    Percent,
+}
+
 #[derive(Clone)]
 pub struct Console {
     term: Term,
@@ -128,15 +133,21 @@ impl Console {
         }
     }
 
-    pub fn add_progress_bar(&self, msg: &str) -> Bar {
+    pub fn add_progress_bar(&self, msg: &str, progress_type: ProgressType) -> Bar {
+        let style = match progress_type {
+            ProgressType::Bytes => {
+                ProgressStyle::with_template("{msg:30!} {wide_bar}  {bytes:>10}/{total_bytes:10}")
+                    .unwrap()
+            }
+            ProgressType::Percent => {
+                ProgressStyle::with_template("{msg:30!} {wide_bar}  {percent:>10}%          ")
+                    .unwrap()
+            }
+        };
+
         let inner_bar = ProgressBar::new(100)
             .with_message(msg.to_owned())
-            .with_style(
-                ProgressStyle::with_template(
-                    "{msg:30!} {wide_bar}    {bytes:>10}/{total_bytes:10}",
-                )
-                .unwrap(),
-            );
+            .with_style(style);
 
         let mut state = self.state.lock().unwrap();
         state.progress_bar_count += 1;
