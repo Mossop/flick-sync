@@ -462,10 +462,9 @@ impl VideoPart {
         // Wait until the transcode session has started.
         let mut count = 0;
         loop {
-            sleep(Duration::from_millis(100)).await;
-
             match session.stats().await {
                 Ok(_) => {
+                    trace!("Saw transcode session after {count} delays");
                     break;
                 }
                 Err(plex_api::Error::ItemNotFound) => {
@@ -477,6 +476,8 @@ impl VideoPart {
                 }
                 Err(e) => return Err(e.into()),
             }
+
+            sleep(Duration::from_millis(100)).await;
         }
 
         debug!("Started transcode session");
@@ -495,7 +496,7 @@ impl VideoPart {
     }
 
     #[instrument(level = "trace", skip(self))]
-    async fn start_download(&self) -> Result {
+    async fn enter_downloading_state(&self) -> Result {
         let server = self.server.connect().await?;
         let item = server.item_by_id(&self.id).await?;
 
@@ -532,7 +533,7 @@ impl VideoPart {
     }
 
     #[instrument(level = "trace", skip(self, session, progress), fields(session_id=session.session_id()))]
-    async fn wait_for_transcode<P: Progress + Unpin>(
+    async fn wait_for_transcode_to_complete<P: Progress + Unpin>(
         &self,
         session: TranscodeSession,
         progress: &mut P,
@@ -575,7 +576,7 @@ impl VideoPart {
     }
 
     #[instrument(level = "trace")]
-    pub async fn prepare_download(&self) -> Result {
+    pub async fn negotiate_transfer_type(&self) -> Result {
         let download_state = self.download_state().await;
 
         if matches!(download_state, DownloadState::None) {
@@ -583,22 +584,25 @@ impl VideoPart {
                 Err(Error::PlexError {
                     source: plex_api::Error::TranscodeRefused,
                 }) => debug!("Transcode attempt refused"),
-                Err(e) => warn!(error=?e, "Transcode attempt failed"),
+                Err(e) => error!(error=?e, "Transcode attempt failed"),
                 Ok(_) => {
                     return Ok(());
                 }
             }
 
-            self.start_download().await?;
+            self.enter_downloading_state().await?;
         }
 
         Ok(())
     }
 
     #[instrument(level = "trace", skip(progress))]
-    pub async fn wait_for_download<P: Progress + Unpin>(&self, mut progress: P) -> Result {
+    pub async fn wait_for_download_to_be_available<P: Progress + Unpin>(
+        &self,
+        mut progress: P,
+    ) -> Result {
         loop {
-            self.prepare_download().await?;
+            self.negotiate_transfer_type().await?;
 
             let download_state = self.download_state().await;
             if let DownloadState::Transcoding {
@@ -608,7 +612,10 @@ impl VideoPart {
             {
                 let server = self.server.connect().await?;
                 let session = server.transcode_session(&session_id).await?;
-                match self.wait_for_transcode(session, &mut progress).await {
+                match self
+                    .wait_for_transcode_to_complete(session, &mut progress)
+                    .await
+                {
                     Err(Error::TranscodeLost) => continue,
                     r => return r,
                 }

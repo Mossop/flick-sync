@@ -86,7 +86,7 @@ async fn complete_transcode(state: &PartTransferState) -> Result {
         .add_progress_bar(&format!("🔄 {}", state.title), ProgressType::Percent);
     state
         .part
-        .wait_for_download(DownloadProgress { bar })
+        .wait_for_download_to_be_available(DownloadProgress { bar })
         .await?;
 
     complete_download(state).await
@@ -118,7 +118,7 @@ async fn download_part(mut state: PartTransferState) {
                 .into()
         };
 
-        if let Err(e) = state.part.prepare_download().await {
+        if let Err(e) = state.part.negotiate_transfer_type().await {
             error!(error=?e);
             return;
         }
