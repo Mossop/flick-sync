@@ -89,7 +89,7 @@ async fn complete_transcode(state: &PartTransferState) -> Result {
         .wait_for_download_to_be_available(DownloadProgress { bar })
         .await?;
 
-    complete_download(state).await
+    Ok(())
 }
 
 async fn complete_download(state: &PartTransferState) -> Result {
@@ -127,7 +127,6 @@ async fn download_part(mut state: PartTransferState) {
             if let Err(e) = complete_transcode(&state).await {
                 error!(error=?e);
             }
-            return;
         }
     }
 
