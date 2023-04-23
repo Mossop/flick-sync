@@ -1,9 +1,7 @@
 import { NavigationContainer } from "@react-navigation/native";
-import { Provider as PaperProvider, useTheme } from "react-native-paper";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createMaterialBottomTabNavigator } from "@react-navigation/material-bottom-tabs";
 import { useEffect, useMemo } from "react";
-import * as StatusBar from "expo-status-bar";
 import * as NavigationBar from "expo-navigation-bar";
 import { AppStateProvider } from "./components/AppState";
 import Video from "./app/video";
@@ -18,6 +16,7 @@ import LibraryCollections from "./app/collections";
 import { useLibraries } from "./modules/util";
 import Collection from "./app/collection";
 import Show from "./app/show";
+import { ThemeProvider } from "./components/ThemeProvider";
 
 const LibraryNav = createMaterialBottomTabNavigator();
 
@@ -82,19 +81,14 @@ function App() {
 const RootStack = createNativeStackNavigator();
 
 export default function Root() {
-  let theme = useTheme();
-
   useEffect(() => {
     NavigationBar.setBehaviorAsync("overlay-swipe");
-    NavigationBar.setBackgroundColorAsync(theme.colors.background);
-    NavigationBar.setButtonStyleAsync("dark");
-    StatusBar.setStatusBarBackgroundColor(theme.colors.background, false);
-  }, [theme]);
+  }, []);
 
   return (
     <AppStateProvider>
       <NavigationContainer>
-        <PaperProvider>
+        <ThemeProvider>
           <RootStack.Navigator
             initialRouteName="app"
             screenOptions={{ headerShown: false }}
@@ -102,7 +96,7 @@ export default function Root() {
             <RootStack.Screen name="app" component={App} />
             <RootStack.Screen name="video" component={Video} />
           </RootStack.Navigator>
-        </PaperProvider>
+        </ThemeProvider>
       </NavigationContainer>
     </AppStateProvider>
   );

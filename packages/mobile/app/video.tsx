@@ -10,19 +10,20 @@ import * as StatusBar from "expo-status-bar";
 import { useEffect, useRef, useState } from "react";
 import * as NavigationBar from "expo-navigation-bar";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
-import { IconButton, ProgressBar, Text } from "react-native-paper";
+import { IconButton, useTheme } from "react-native-paper";
 import { useNavigation } from "@react-navigation/native";
 import { useAppState } from "../components/AppState";
 import { AppScreenProps } from "../components/AppNavigator";
 import { isDownloaded } from "../modules/state";
 import { PADDING } from "../modules/styles";
+import Scrubber from "../components/Scrubber";
+import { SchemeOverride } from "../components/ThemeProvider";
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "black",
   },
   video: {
     width: "100%",
@@ -55,15 +56,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  progress: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  progressBar: {
-    flex: 1,
-    padding: PADDING,
-  },
 });
 
 function useOverlayState(): [boolean, () => void] {
@@ -80,34 +72,14 @@ function useOverlayState(): [boolean, () => void] {
       if (visible) {
         setVisible(false);
       } else {
-        timeout.current = setTimeout(() => {
-          timeout.current = null;
-          setVisible(false);
-        }, 5000);
+        // timeout.current = setTimeout(() => {
+        //   timeout.current = null;
+        //   setVisible(false);
+        // }, 5000);
         setVisible(true);
       }
     },
   ];
-}
-
-function pad(val: number): string {
-  if (val >= 10) {
-    return val.toString();
-  }
-  return `0${val}`;
-}
-
-function time(millis: number): string {
-  let secs = Math.round(millis / 1000);
-  let seconds = secs % 60;
-  let mins = (secs - seconds) / 60;
-  let minutes = mins % 60;
-  let hours = (mins - minutes) / 60;
-
-  if (hours > 0) {
-    return `${hours}:${pad(minutes)}:${pad(seconds)}`;
-  }
-  return `${pad(minutes)}:${pad(seconds)}`;
 }
 
 function Overlay({
@@ -145,7 +117,6 @@ function Overlay({
             <IconButton
               icon="close"
               onPress={() => navigation.goBack()}
-              iconColor="white"
               size={40}
             />
           </View>
@@ -153,46 +124,34 @@ function Overlay({
             <IconButton
               icon="rewind-30"
               onPress={() => skip(-30000)}
-              iconColor="white"
               size={40}
             />
             <IconButton
               icon="rewind-10"
               onPress={() => skip(-15000)}
-              iconColor="white"
               size={40}
             />
             <IconButton
               icon={status.isPlaying ? "pause" : "play"}
               onPress={togglePlayback}
-              iconColor="white"
               size={80}
             />
             <IconButton
               icon="fast-forward-10"
               onPress={() => skip(15000)}
-              iconColor="white"
               size={40}
             />
             <IconButton
               icon="fast-forward-30"
               onPress={() => skip(30000)}
-              iconColor="white"
               size={40}
             />
           </View>
-          <View style={styles.progress}>
-            <Text style={{ color: "white" }}>{time(position)}</Text>
-            <View style={styles.progressBar}>
-              <ProgressBar
-                style={{ width: "100%" }}
-                progress={position / totalDuration}
-              />
-            </View>
-            <Text style={{ color: "white" }}>
-              {time(totalDuration - position)}
-            </Text>
-          </View>
+          <Scrubber
+            position={position}
+            totalDuration={totalDuration}
+            onScrubbingComplete={seek}
+          />
         </Animated.View>
       )}
     </Pressable>
@@ -203,6 +162,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let appState = useAppState();
   let videoRef = useRef<Video | null>(null);
   let [status, setStatus] = useState<AVPlaybackStatusSuccess | null>(null);
+  let theme = useTheme();
 
   useEffect(() => {
     NavigationBar.setVisibilityAsync("hidden");
@@ -272,7 +232,10 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
+    >
+      <SchemeOverride scheme="dark" />
       <Video
         ref={videoRef}
         style={styles.video}
