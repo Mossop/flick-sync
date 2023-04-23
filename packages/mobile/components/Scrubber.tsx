@@ -1,6 +1,13 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { LayoutChangeEvent, StyleSheet, View } from "react-native";
 import { Text, useTheme } from "react-native-paper";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useDerivedValue,
+  useSharedValue,
+} from "react-native-reanimated";
 import { PADDING } from "../modules/styles";
 
 const BAR_HEIGHT = 6;
@@ -12,17 +19,16 @@ const styles = StyleSheet.create({
     flexDirection: "column",
     alignItems: "stretch",
     justifyContent: "flex-start",
+    margin: PADDING,
   },
   labels: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingStart: PADDING,
-    paddingEnd: PADDING,
+    paddingHorizontal: PADDING,
   },
   progressbar: {
     flexDirection: "row",
-    paddingTop: (SCRUBBER_SIZE - BAR_HEIGHT) / 2,
-    paddingBottom: (SCRUBBER_SIZE - BAR_HEIGHT) / 2,
+    padding: (SCRUBBER_SIZE - BAR_HEIGHT) / 2,
   },
   barchunk: {
     height: BAR_HEIGHT,
@@ -76,12 +82,16 @@ function Time({ value }: { value: number }) {
   );
 }
 
-export default function Scrubber({ position, totalDuration }: ScrubberProps) {
+export default function Scrubber({
+  position,
+  totalDuration,
+  onScrubbingComplete,
+}: ScrubberProps) {
   let theme = useTheme();
   let [fullWidth, setWidth] = useState(0);
 
-  let color = theme.colors.primary;
-  let background = theme.colors.surfaceVariant;
+  let filledColor = theme.colors.primary;
+  let unfilledColor = theme.colors.surfaceVariant;
 
   let progressWidth = Math.round((fullWidth * position) / totalDuration);
 
@@ -89,29 +99,66 @@ export default function Scrubber({ position, totalDuration }: ScrubberProps) {
     setWidth(event.nativeEvent.layout.width);
   };
 
+  let selectedPosition = useSharedValue<number | null>(null);
+  let displayPosition = useDerivedValue(
+    () => selectedPosition.value ?? position,
+  );
+
+  let panGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .onStart((event) => {
+          selectedPosition.value = Math.round(
+            (totalDuration * event.x) / fullWidth,
+          );
+        })
+        .onUpdate((event) => {
+          selectedPosition.value = Math.round(
+            (totalDuration * event.x) / fullWidth,
+          );
+        })
+        .onEnd(() => {
+          if (selectedPosition.value !== null) {
+            runOnJS(onScrubbingComplete)(selectedPosition.value);
+          }
+          selectedPosition.value = null;
+        }),
+    [fullWidth, totalDuration],
+  );
+
+  let animatedStyle = useAnimatedStyle(() => ({
+    left: Math.round((fullWidth * displayPosition.value) / totalDuration),
+  }));
+
   return (
-    <View style={styles.root} onLayout={onLayout}>
-      <View style={styles.progressbar}>
-        <View
+    <GestureDetector gesture={panGesture}>
+      <View style={styles.root} onLayout={onLayout}>
+        <View style={styles.progressbar}>
+          <View
+            style={[
+              styles.barchunk,
+              { width: progressWidth, backgroundColor: filledColor },
+            ]}
+          />
+          <View
+            style={[
+              styles.barchunk,
+              { flex: 1, backgroundColor: unfilledColor },
+            ]}
+          />
+        </View>
+        <Animated.View
           style={[
-            styles.barchunk,
-            { width: progressWidth, backgroundColor: color },
+            styles.scrubber,
+            { backgroundColor: filledColor },
+            animatedStyle,
           ]}
         />
-        <View
-          style={[styles.barchunk, { flex: 1, backgroundColor: background }]}
-        />
+        <View style={styles.labels}>
+          <Time value={displayPosition.value} />
+          <Time value={totalDuration - displayPosition.value} />
+        </View>
       </View>
-      <View
-        style={[
-          styles.scrubber,
-          { left: progressWidth, backgroundColor: color },
-        ]}
-      />
-      <View style={styles.labels}>
-        <Time value={position} />
-        <Time value={totalDuration - position} />
-      </View>
-    </View>
+    </GestureDetector>
   );
 }

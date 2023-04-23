@@ -44,7 +44,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       isDark
         ? { ...MD3DarkTheme, colors: theme.dark }
         : { ...MD3LightTheme, colors: theme.light },
-    [isDark],
+    [isDark, theme],
   );
 
   useEffect(() => {

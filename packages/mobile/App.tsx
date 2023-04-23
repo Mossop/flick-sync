@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createMaterialBottomTabNavigator } from "@react-navigation/material-bottom-tabs";
 import { useEffect, useMemo } from "react";
 import * as NavigationBar from "expo-navigation-bar";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AppStateProvider } from "./components/AppState";
 import Video from "./app/video";
 import createAppNavigator, {
@@ -86,18 +87,20 @@ export default function Root() {
   }, []);
 
   return (
-    <AppStateProvider>
-      <NavigationContainer>
-        <ThemeProvider>
-          <RootStack.Navigator
-            initialRouteName="app"
-            screenOptions={{ headerShown: false }}
-          >
-            <RootStack.Screen name="app" component={App} />
-            <RootStack.Screen name="video" component={Video} />
-          </RootStack.Navigator>
-        </ThemeProvider>
-      </NavigationContainer>
-    </AppStateProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AppStateProvider>
+        <NavigationContainer>
+          <ThemeProvider>
+            <RootStack.Navigator
+              initialRouteName="app"
+              screenOptions={{ headerShown: false }}
+            >
+              <RootStack.Screen name="app" component={App} />
+              <RootStack.Screen name="video" component={Video} />
+            </RootStack.Navigator>
+          </ThemeProvider>
+        </NavigationContainer>
+      </AppStateProvider>
+    </GestureHandlerRootView>
   );
 }
