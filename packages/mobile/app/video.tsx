@@ -13,6 +13,8 @@ import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { IconButton, useTheme } from "react-native-paper";
 import { useNavigation } from "@react-navigation/native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
+import * as ScreenOrientation from "expo-screen-orientation";
+import { OrientationLock } from "expo-screen-orientation";
 import { useAppState } from "../components/AppState";
 import { AppScreenProps } from "../components/AppNavigator";
 import { isDownloaded } from "../modules/state";
@@ -209,6 +211,13 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
 
     return undefined;
   }, [status?.isPlaying]);
+
+  useEffect(() => {
+    ScreenOrientation.lockAsync(OrientationLock.LANDSCAPE);
+    return () => {
+      ScreenOrientation.unlockAsync();
+    };
+  }, []);
 
   if (!part) {
     throw new Error("Incorrect params for video route");
