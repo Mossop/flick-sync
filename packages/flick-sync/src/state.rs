@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io::ErrorKind;
@@ -474,6 +475,9 @@ pub(crate) struct VideoState {
     pub(crate) parts: Vec<VideoPartState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) transcode_profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[typeshare(serialized_as = "Option<number>")]
+    pub(crate) play_position: Option<u64>,
 }
 
 derive_list_item!(VideoState);
@@ -521,6 +525,7 @@ impl VideoState {
             last_updated: metadata.updated_at.unwrap(),
             parts,
             transcode_profile: sync.transcode_profile.clone(),
+            play_position: metadata.view_offset,
         }
     }
 
@@ -534,6 +539,12 @@ impl VideoState {
         let metadata = item.metadata();
         self.title = item.title().to_owned();
         self.transcode_profile = sync.transcode_profile.clone();
+
+        self.play_position = match (self.play_position, metadata.view_offset) {
+            (p, None) => p,
+            (None, p) => p,
+            (Some(local), Some(remote)) => Some(max(local, remote)),
+        };
 
         match self.detail {
             VideoDetail::Movie(ref mut m) => m.update(metadata),

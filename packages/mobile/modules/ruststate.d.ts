@@ -64,6 +64,7 @@ export interface VideoState {
 	lastUpdated: number;
 	parts: VideoPartState[];
 	transcodeProfile?: string;
+	playPosition?: number;
 }
 
 export interface ServerState {

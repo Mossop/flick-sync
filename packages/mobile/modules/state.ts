@@ -434,6 +434,7 @@ function decodeServerState(json: any): ServerState {
       parts: JsonDecoder.array(VideoPartStateDecoder, "VideoPart[]"),
       detail: MovieDetailDecoder,
       transcodeProfile: JsonDecoder.optional(JsonDecoder.string),
+      playPosition: JsonDecoder.optional(JsonDecoder.number),
     },
     "MovieState",
   );
@@ -447,6 +448,7 @@ function decodeServerState(json: any): ServerState {
       parts: JsonDecoder.array(VideoPartStateDecoder, "VideoPart[]"),
       detail: EpisodeDetailDecoder,
       transcodeProfile: JsonDecoder.optional(JsonDecoder.string),
+      playPosition: JsonDecoder.optional(JsonDecoder.number),
     },
     "EpisodeState",
   );
