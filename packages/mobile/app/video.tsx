@@ -12,6 +12,7 @@ import * as NavigationBar from "expo-navigation-bar";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { IconButton, useTheme } from "react-native-paper";
 import { useNavigation } from "@react-navigation/native";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import { useAppState } from "../components/AppState";
 import { AppScreenProps } from "../components/AppNavigator";
 import { isDownloaded } from "../modules/state";
@@ -197,6 +198,17 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     },
     [0, 0],
   );
+
+  useEffect((): (() => void) | undefined => {
+    if (status?.isPlaying) {
+      activateKeepAwakeAsync();
+      return () => {
+        deactivateKeepAwake();
+      };
+    }
+
+    return undefined;
+  }, [status?.isPlaying]);
 
   if (!part) {
     throw new Error("Incorrect params for video route");
