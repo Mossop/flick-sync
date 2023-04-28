@@ -209,16 +209,16 @@ class AppState {
   }
 
   private async updateSettings(settings: Settings) {
-    this.contextState = {
+    let contextState: ContextState = {
       ...this.contextState,
       settings,
     };
 
     await AsyncStorage.setItem(
       SETTINGS_KEY,
-      JSON.stringify(this.contextState.settings),
+      JSON.stringify(contextState.settings),
     );
-    this.contextSetter(this.contextState);
+    this.contextSetter(contextState);
   }
 
   public async pickStore() {
