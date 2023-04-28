@@ -10,9 +10,8 @@ export default function Playlist({ route }: AppScreenProps<"playlist">) {
     throw new Error("Missing params for playlist route");
   }
 
-  let playlist = mediaState.servers
-    .get(route.params.server)
-    ?.playlists.get(route.params.playlist);
+  let playlist =
+    mediaState.servers[route.params.server]?.playlists[route.params.playlist];
   if (!playlist) {
     throw new Error("Invalid params for playlist route");
   }

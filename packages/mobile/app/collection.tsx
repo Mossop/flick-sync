@@ -37,9 +37,10 @@ export default function Collection({ route }: AppScreenProps<"collection">) {
     throw new Error("Missing params for collection route");
   }
 
-  let collection = mediaState.servers
-    .get(route.params.server)
-    ?.collections.get(route.params.collection);
+  let collection =
+    mediaState.servers[route.params.server]?.collections[
+      route.params.collection
+    ];
   if (!collection) {
     throw new Error("Invalid params for collection route");
   }

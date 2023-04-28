@@ -12,9 +12,7 @@ export default function Show({ route }: AppScreenProps<"show">) {
     throw new Error("Missing params for playlist route");
   }
 
-  let show = mediaState.servers
-    .get(route.params.server)
-    ?.shows.get(route.params.show);
+  let show = mediaState.servers[route.params.server]?.shows[route.params.show];
   if (!show) {
     throw new Error("Invalid params for show route");
   }

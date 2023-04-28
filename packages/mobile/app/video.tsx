@@ -181,9 +181,10 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     throw new Error("Missing params for playlist route");
   }
 
-  let video = appState.mediaState.servers
-    .get(route.params.server)
-    ?.videos.get(route.params.video);
+  let video =
+    appState.mediaState.servers[route.params.server]?.videos[
+      route.params.video
+    ];
 
   if (!video) {
     throw new Error("Incorrect params for video route");

@@ -3,6 +3,8 @@ import * as RustState from "./ruststate";
 
 type Replace<T, V> = Omit<T, keyof V> & V;
 
+const StringNumberDecoder = JsonDecoder.number.map((n) => n.toString());
+
 function optional<T>(
   failover: T,
   decoder: JsonDecoder.Decoder<T>,
@@ -26,8 +28,12 @@ function decode<T>(decoder: JsonDecoder.Decoder<T>, val: any): T {
   throw new Error(result.error);
 }
 
-function getOrThrow<K, V>(map: Map<K, V>, key: K, error: string): V {
-  let val = map.get(key);
+function getOrThrow<K extends string, V>(
+  map: Record<K, V>,
+  key: K,
+  error: string,
+): V {
+  let val = map[key];
   if (val !== undefined) {
     return val;
   }
@@ -35,16 +41,18 @@ function getOrThrow<K, V>(map: Map<K, V>, key: K, error: string): V {
   throw new Error(error);
 }
 
-function mapIndex<I, V>(
+function mapIndex<I extends string, V>(
   decoder: JsonDecoder.Decoder<I>,
-  map: Map<I, V>,
+  map: Record<I, V>,
   error: string,
 ): JsonDecoder.Decoder<V> {
   return decoder.map((id) => getOrThrow(map, id, `${error}: ${id}`));
 }
 
-function mapped<T extends { id: any }>(items: T[]): Map<T["id"], T> {
-  return new Map(items.map((item: T): [T["id"], T] => [item.id, item]));
+function mapped<T extends { id: string }>(items: T[]): Record<string, T> {
+  return Object.fromEntries(
+    items.map((item: T): [T["id"], T] => [item.id, item]),
+  );
 }
 
 export type ThumbnailState =
@@ -164,6 +172,7 @@ export enum LibraryType {
 export type MovieLibraryState = Replace<
   RustState.LibraryState,
   {
+    id: string;
     server: ServerState;
     type: LibraryType.Movie;
     contents: MovieState[];
@@ -283,12 +292,12 @@ export type ServerState = Replace<
   Omit<RustState.ServerState, "token">,
   {
     id: string;
-    playlists: Map<string, PlaylistState>;
-    collections: Map<string, CollectionState>;
-    libraries: Map<number, LibraryState>;
-    shows: Map<string, ShowState>;
-    seasons: Map<string, SeasonState>;
-    videos: Map<string, VideoState>;
+    playlists: Record<string, PlaylistState>;
+    collections: Record<string, CollectionState>;
+    libraries: Record<string, LibraryState>;
+    shows: Record<string, ShowState>;
+    seasons: Record<string, SeasonState>;
+    videos: Record<string, VideoState>;
   }
 >;
 
@@ -304,17 +313,17 @@ function decodeServerState(json: any): ServerState {
   let serverState: ServerState = {
     id: "",
     name: decode(JsonDecoder.string, json.name),
-    playlists: new Map(),
-    collections: new Map(),
-    libraries: new Map(),
-    shows: new Map(),
-    seasons: new Map(),
-    videos: new Map(),
+    playlists: {},
+    collections: {},
+    libraries: {},
+    shows: {},
+    seasons: {},
+    videos: {},
   };
 
   const ShowLibraryStateDecoder = JsonDecoder.object<ShowLibraryState>(
     {
-      id: JsonDecoder.number,
+      id: StringNumberDecoder,
       title: JsonDecoder.string,
       type: JsonDecoder.isExactly(LibraryType.Show),
       server: JsonDecoder.constant(serverState),
@@ -326,7 +335,7 @@ function decodeServerState(json: any): ServerState {
 
   const MovieLibraryStateDecoder = JsonDecoder.object<MovieLibraryState>(
     {
-      id: JsonDecoder.number,
+      id: StringNumberDecoder,
       title: JsonDecoder.string,
       type: JsonDecoder.isExactly(LibraryType.Movie),
       server: JsonDecoder.constant(serverState),
@@ -351,7 +360,7 @@ function decodeServerState(json: any): ServerState {
       id: JsonDecoder.string,
       title: JsonDecoder.string,
       library: mapIndex(
-        JsonDecoder.number,
+        StringNumberDecoder,
         serverState.libraries,
         "Unknown library",
       ).map((l) => {
@@ -372,7 +381,7 @@ function decodeServerState(json: any): ServerState {
     json.shows,
   );
 
-  for (let show of serverState.shows.values()) {
+  for (let show of Object.values(serverState.shows)) {
     show.library.contents.push(show);
   }
 
@@ -392,14 +401,14 @@ function decodeServerState(json: any): ServerState {
     json.seasons,
   );
 
-  for (let season of serverState.seasons.values()) {
+  for (let season of Object.values(serverState.seasons)) {
     season.show.seasons.push(season);
   }
 
   const MovieDetailDecoder = JsonDecoder.object<MovieDetail>(
     {
       library: mapIndex(
-        JsonDecoder.number,
+        StringNumberDecoder,
         serverState.libraries,
         "Unknown library",
       ).map((l) => {
@@ -463,7 +472,7 @@ function decodeServerState(json: any): ServerState {
     json.videos,
   );
 
-  for (let video of serverState.videos.values()) {
+  for (let video of Object.values(serverState.videos)) {
     if (isMovie(video)) {
       video.detail.library.contents.push(video);
     } else {
@@ -475,7 +484,7 @@ function decodeServerState(json: any): ServerState {
     {
       id: JsonDecoder.string,
       library: mapIndex(
-        JsonDecoder.number,
+        StringNumberDecoder,
         serverState.libraries,
         "Unknown library",
       ).map((l) => {
@@ -487,7 +496,7 @@ function decodeServerState(json: any): ServerState {
       title: JsonDecoder.string,
       items: optionalArray(
         JsonDecoder.string.map((id) => {
-          let val = serverState.videos.get(id);
+          let val = serverState.videos[id];
           if (val === undefined || isEpisode(val)) {
             throw new Error(`Unknown collection item '${id}'`);
           }
@@ -504,7 +513,7 @@ function decodeServerState(json: any): ServerState {
     {
       id: JsonDecoder.string,
       library: mapIndex(
-        JsonDecoder.number,
+        StringNumberDecoder,
         serverState.libraries,
         "Unknown library",
       ).map((l) => {
@@ -516,7 +525,7 @@ function decodeServerState(json: any): ServerState {
       title: JsonDecoder.string,
       items: optionalArray(
         JsonDecoder.string.map((id) => {
-          let val = serverState.shows.get(id);
+          let val = serverState.shows[id];
           if (val === undefined) {
             throw new Error(`Unknown collection item '${id}'`);
           }
@@ -539,7 +548,7 @@ function decodeServerState(json: any): ServerState {
     json.collections,
   );
 
-  for (let collection of serverState.collections.values()) {
+  for (let collection of Object.values(serverState.collections)) {
     if (isMovieCollection(collection)) {
       collection.library.collections.push(collection);
     } else {
@@ -570,26 +579,25 @@ function decodeServerState(json: any): ServerState {
 export type State = Replace<
   Omit<RustState.State, "clientId">,
   {
-    servers: Map<string, ServerState>;
+    servers: Record<string, ServerState>;
   }
 >;
 
 export const StateDecoder = JsonDecoder.object<State>(
   {
     servers: optional(
-      new Map(),
+      {},
       JsonDecoder.dictionary(
         JsonDecoder.succeed.map(decodeServerState),
         "Record<string, ServerState>",
-      ).map(
-        (rec) =>
-          new Map(
-            Object.entries(rec).map(([id, ss]) => {
-              // eslint-disable-next-line no-param-reassign
-              ss.id = id;
-              return [id, ss];
-            }),
-          ),
+      ).map((rec) =>
+        Object.fromEntries(
+          Object.entries(rec).map(([id, ss]) => {
+            // eslint-disable-next-line no-param-reassign
+            ss.id = id;
+            return [id, ss];
+          }),
+        ),
       ),
     ),
   },

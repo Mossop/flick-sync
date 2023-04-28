@@ -81,91 +81,95 @@ async function loadSettings(): Promise<Settings> {
   }
 }
 
-function filterServers(servers: Map<String, ServerState>) {
-  for (let [serverId, server] of servers) {
-    for (let [videoId, video] of server.videos) {
+function filterServers(servers: Record<string, ServerState>) {
+  for (let [serverId, server] of Object.entries(servers)) {
+    let empty = true;
+    for (let [videoId, video] of Object.entries(server.videos)) {
       if (!video.parts.every((videoPart) => isDownloaded(videoPart.download))) {
-        server.videos.delete(videoId);
+        delete server.videos[videoId];
+      } else {
+        empty = false;
       }
     }
 
-    if (server.videos.size == 0) {
-      servers.delete(serverId);
+    if (empty) {
+      // eslint-disable-next-line no-param-reassign
+      delete servers[serverId];
       continue;
     }
 
-    for (let [id, playlist] of server.playlists) {
-      playlist.videos = playlist.videos.filter((video) =>
-        server.videos.has(video.id),
+    for (let [id, playlist] of Object.entries(server.playlists)) {
+      playlist.videos = playlist.videos.filter(
+        (video) => video.id in server.videos,
       );
 
       if (playlist.videos.length == 0) {
-        server.playlists.delete(id);
+        delete server.playlists[id];
       }
     }
 
-    for (let [id, season] of server.seasons) {
-      season.episodes = season.episodes.filter((episode) =>
-        server.videos.has(episode.id),
+    for (let [id, season] of Object.entries(server.seasons)) {
+      season.episodes = season.episodes.filter(
+        (episode) => episode.id in server.videos,
       );
 
       if (season.episodes.length == 0) {
-        server.seasons.delete(id);
+        delete server.seasons[id];
       }
     }
 
-    for (let [id, show] of server.shows) {
-      show.seasons = show.seasons.filter((season) =>
-        server.seasons.has(season.id),
+    for (let [id, show] of Object.entries(server.shows)) {
+      show.seasons = show.seasons.filter(
+        (season) => season.id in server.seasons,
       );
 
       if (show.seasons.length == 0) {
-        server.shows.delete(id);
+        delete server.shows[id];
       }
     }
 
-    for (let [id, collection] of server.collections) {
+    for (let [id, collection] of Object.entries(server.collections)) {
       if (isMovieCollection(collection)) {
-        collection.items = collection.items.filter((movie) =>
-          server.videos.has(movie.id),
+        collection.items = collection.items.filter(
+          (movie) => movie.id in server.videos,
         );
 
         if (collection.items.length == 0) {
-          server.collections.delete(id);
+          delete server.collections[id];
         }
       } else {
-        collection.items = collection.items.filter((show) =>
-          server.shows.has(show.id),
+        collection.items = collection.items.filter(
+          (show) => show.id in server.shows,
         );
 
         if (collection.items.length == 0) {
-          server.collections.delete(id);
+          delete server.collections[id];
         }
       }
     }
 
-    for (let [id, library] of server.libraries) {
+    for (let [id, library] of Object.entries(server.libraries)) {
       if (isMovieLibrary(library)) {
-        library.collections = library.collections.filter((collection) =>
-          server.collections.has(collection.id),
+        library.collections = library.collections.filter(
+          (collection) => collection.id in server.collections,
         );
-        library.contents = library.contents.filter((movie) =>
-          server.videos.has(movie.id),
+        library.contents = library.contents.filter(
+          (movie) => movie.id in server.videos,
         );
 
         if (library.contents.length == 0) {
-          server.libraries.delete(id);
+          delete server.libraries[id];
         }
       } else {
-        library.collections = library.collections.filter((collection) =>
-          server.collections.has(collection.id),
+        library.collections = library.collections.filter(
+          (collection) => collection.id in server.collections,
         );
-        library.contents = library.contents.filter((show) =>
-          server.shows.has(show.id),
+        library.contents = library.contents.filter(
+          (show) => show.id in server.shows,
         );
 
         if (library.contents.length == 0) {
-          server.libraries.delete(id);
+          delete server.libraries[id];
         }
       }
     }
@@ -187,7 +191,7 @@ async function loadMediaState(store: string): Promise<State> {
     console.error("State read failed", e);
   }
 
-  return { servers: new Map() };
+  return { servers: {} };
 }
 
 class AppState {

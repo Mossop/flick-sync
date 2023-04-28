@@ -28,7 +28,7 @@ const styles = StyleSheet.create({
 
 interface LibraryParams {
   server: string;
-  library: number;
+  library: string;
 }
 
 interface PlaylistParams {

@@ -25,8 +25,8 @@ export function useLibraries(): LibraryState[] {
   let mediaState = useMediaState();
 
   return useMemo(() => {
-    let libraries = Array.from(mediaState.servers.values()).flatMap((server) =>
-      Array.from(server.libraries.values()),
+    let libraries = Array.from(Object.values(mediaState.servers)).flatMap(
+      (server) => Array.from(Object.values(server.libraries)),
     );
 
     libraries.sort((a, b) => a.title.localeCompare(b.title));
@@ -39,8 +39,8 @@ export function usePlaylists(): PlaylistState[] {
   let mediaState = useMediaState();
 
   return useMemo(() => {
-    let playlists = Array.from(mediaState.servers.values()).flatMap((server) =>
-      Array.from(server.playlists.values()),
+    let playlists = Array.from(Object.values(mediaState.servers)).flatMap(
+      (server) => Array.from(Object.values(server.playlists)),
     );
 
     playlists.sort((a, b) => a.title.localeCompare(b.title));
