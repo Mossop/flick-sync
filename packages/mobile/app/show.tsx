@@ -12,13 +12,12 @@ export default function Show({ route }: AppScreenProps<"show">) {
     throw new Error("Missing params for playlist route");
   }
 
-  let show = mediaState.servers[route.params.server]?.shows[route.params.show];
-  if (!show) {
-    throw new Error("Invalid params for show route");
-  }
+  let show = mediaState
+    .getServer(route.params.server)
+    .getShow(route.params.show);
 
   let episodes = useMemo(
-    () => byIndex(show!.seasons.flatMap((ss) => ss.episodes)),
+    () => byIndex(show.seasons.flatMap((ss) => ss.episodes)),
     [show],
   );
 

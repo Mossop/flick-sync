@@ -1,7 +1,7 @@
 import { StyleSheet } from "react-native";
 import { TouchableRipple } from "react-native-paper";
 import { NavigationProp, useNavigation } from "@react-navigation/native";
-import { MovieState, VideoState, videoLibrary } from "../modules/state";
+import { Movie, Video } from "../state";
 import Thumbnail from "./Thumbnail";
 import GridView from "./GridView";
 import { POSTER_HEIGHT, POSTER_WIDTH } from "../modules/styles";
@@ -14,12 +14,12 @@ const styles = StyleSheet.create({
   },
 });
 
-export default function Movies({ movies }: { movies: MovieState[] }) {
+export default function Movies({ movies }: { movies: Movie[] }) {
   let navigation = useNavigation<NavigationProp<AppRoutes>>();
 
-  let launchVideo = (video: VideoState) => {
+  let launchVideo = (video: Video) => {
     navigation.navigate("video", {
-      server: videoLibrary(video).server.id,
+      server: video.library.server.id,
       video: video.id,
     });
   };

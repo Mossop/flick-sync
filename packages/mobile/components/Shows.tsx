@@ -1,7 +1,7 @@
 import { StyleSheet } from "react-native";
 import { NavigationProp, useNavigation } from "@react-navigation/native";
 import { TouchableRipple } from "react-native-paper";
-import { ShowState } from "../modules/state";
+import { Show } from "../state";
 import Thumbnail from "./Thumbnail";
 import GridView from "./GridView";
 import { POSTER_HEIGHT, POSTER_WIDTH } from "../modules/styles";
@@ -14,7 +14,7 @@ const styles = StyleSheet.create({
   },
 });
 
-export default function Shows({ shows }: { shows: ShowState[] }) {
+export default function Shows({ shows }: { shows: Show[] }) {
   let navigation = useNavigation<NavigationProp<AppRoutes>>();
 
   return (

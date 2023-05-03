@@ -1,0 +1,212 @@
+import { JsonDecoder } from "ts.data.json";
+import {
+  CollectionState,
+  DownloadState,
+  EpisodeDetail,
+  LibraryState,
+  LibraryType,
+  MovieDetail,
+  PlaylistState,
+  SeasonState,
+  ServerState,
+  ShowState,
+  State,
+  ThumbnailState,
+  VideoDetail,
+  VideoPartState,
+  VideoState,
+} from "./base";
+
+const ThumbnailStateDecoder = JsonDecoder.oneOf<ThumbnailState>(
+  [
+    JsonDecoder.object(
+      {
+        state: JsonDecoder.isExactly("none"),
+      },
+      "none",
+    ),
+    JsonDecoder.object(
+      {
+        state: JsonDecoder.isExactly("downloaded"),
+        path: JsonDecoder.string,
+      },
+      "downloaded",
+    ),
+  ],
+  "ThumbnailState",
+);
+
+const DownloadStateDecoder = JsonDecoder.oneOf<DownloadState>(
+  [
+    JsonDecoder.object(
+      {
+        state: JsonDecoder.isExactly("none"),
+      },
+      "none",
+    ),
+    JsonDecoder.object(
+      {
+        state: JsonDecoder.isExactly("downloading"),
+        path: JsonDecoder.string,
+      },
+      "downloading",
+    ),
+    JsonDecoder.object(
+      {
+        state: JsonDecoder.isExactly("transcoding"),
+        path: JsonDecoder.string,
+      },
+      "transcoding",
+    ),
+    JsonDecoder.object(
+      {
+        state: JsonDecoder.isExactly("downloaded"),
+        path: JsonDecoder.string,
+      },
+      "downloaded",
+    ),
+    JsonDecoder.object(
+      {
+        state: JsonDecoder.isExactly("transcoded"),
+        path: JsonDecoder.string,
+      },
+      "transcoded",
+    ),
+  ],
+  "DownloadState",
+);
+
+const VideoPartStateDecoder = JsonDecoder.object<VideoPartState>(
+  {
+    duration: JsonDecoder.number,
+    download: DownloadStateDecoder,
+  },
+  "VideoPart",
+);
+
+const LibraryTypeDecoder = JsonDecoder.enumeration<LibraryType>(
+  LibraryType,
+  "LibraryState",
+);
+
+const LibraryStateDecoder = JsonDecoder.object<LibraryState>(
+  {
+    id: JsonDecoder.string,
+    title: JsonDecoder.string,
+    type: LibraryTypeDecoder,
+  },
+  "ShowLibraryState",
+);
+
+const ShowStateDecoder = JsonDecoder.object<ShowState>(
+  {
+    id: JsonDecoder.string,
+    library: JsonDecoder.string,
+    title: JsonDecoder.string,
+    year: JsonDecoder.number,
+    thumbnail: ThumbnailStateDecoder,
+    lastUpdated: JsonDecoder.number,
+  },
+  "ShowState",
+);
+
+const SeasonStateDecoder = JsonDecoder.object<SeasonState>(
+  {
+    id: JsonDecoder.string,
+    title: JsonDecoder.string,
+    show: JsonDecoder.string,
+    index: JsonDecoder.number,
+  },
+  "SeasonState",
+);
+
+const MovieDetailDecoder = JsonDecoder.object<MovieDetail>(
+  {
+    library: JsonDecoder.string,
+    year: JsonDecoder.number,
+  },
+  "MovieState",
+);
+
+const EpisodeDetailDecoder = JsonDecoder.object<EpisodeDetail>(
+  {
+    season: JsonDecoder.string,
+    index: JsonDecoder.number,
+  },
+  "EpisodeState",
+);
+
+const VideoDetailDecoder = JsonDecoder.oneOf<VideoDetail>(
+  [MovieDetailDecoder, EpisodeDetailDecoder],
+  "VideoState",
+);
+
+const VideoStateDecoder = JsonDecoder.object<VideoState>(
+  {
+    id: JsonDecoder.string,
+    title: JsonDecoder.string,
+    thumbnail: ThumbnailStateDecoder,
+    airDate: JsonDecoder.string,
+    mediaId: JsonDecoder.string,
+    parts: JsonDecoder.array(VideoPartStateDecoder, "VideoPart[]"),
+    detail: VideoDetailDecoder,
+    transcodeProfile: JsonDecoder.optional(JsonDecoder.string),
+    playPosition: JsonDecoder.optional(JsonDecoder.number),
+    lastUpdated: JsonDecoder.number,
+  },
+  "VideoState",
+);
+
+const PlaylistStateDecoder = JsonDecoder.object<PlaylistState>(
+  {
+    id: JsonDecoder.string,
+    title: JsonDecoder.string,
+    videos: JsonDecoder.array(JsonDecoder.string, "PlaylistState.videos"),
+  },
+  "PlaylistState",
+);
+
+const CollectionStateDecoder = JsonDecoder.object<CollectionState>(
+  {
+    id: JsonDecoder.string,
+    library: JsonDecoder.string,
+    title: JsonDecoder.string,
+    contents: JsonDecoder.array(JsonDecoder.string, "CollectionState.items"),
+    thumbnail: ThumbnailStateDecoder,
+    lastUpdated: JsonDecoder.number,
+  },
+  "CollectionState",
+);
+
+const ServerStateDecoder = JsonDecoder.object<ServerState>(
+  {
+    token: JsonDecoder.optional(JsonDecoder.string),
+    name: JsonDecoder.string,
+    libraries: JsonDecoder.dictionary(
+      LibraryStateDecoder,
+      "ServerState.libraries",
+    ),
+    playlists: JsonDecoder.optional(
+      JsonDecoder.dictionary(PlaylistStateDecoder, "ServerState.playlists"),
+    ),
+    collections: JsonDecoder.optional(
+      JsonDecoder.dictionary(CollectionStateDecoder, "ServerState.collections"),
+    ),
+    shows: JsonDecoder.optional(
+      JsonDecoder.dictionary(ShowStateDecoder, "ServerState.shows"),
+    ),
+    seasons: JsonDecoder.optional(
+      JsonDecoder.dictionary(SeasonStateDecoder, "ServerState.seasons"),
+    ),
+    videos: JsonDecoder.dictionary(VideoStateDecoder, "ServerState.videos"),
+  },
+  "ServerState",
+);
+
+export const StateDecoder = JsonDecoder.object<State>(
+  {
+    clientId: JsonDecoder.string,
+    servers: JsonDecoder.dictionary(ServerStateDecoder, "State.servers"),
+  },
+  "State",
+);

@@ -1,7 +1,7 @@
 import { ScrollView, StyleSheet } from "react-native";
 import { NavigationProp, useNavigation } from "@react-navigation/native";
 import { TouchableRipple } from "react-native-paper";
-import { CollectionState } from "../modules/state";
+import { Collection } from "../state";
 import Thumbnail from "./Thumbnail";
 import GridView from "./GridView";
 import { POSTER_HEIGHT, POSTER_WIDTH } from "../modules/styles";
@@ -17,7 +17,7 @@ const styles = StyleSheet.create({
 export default function Collections({
   collections,
 }: {
-  collections: CollectionState[];
+  collections: Collection[];
 }) {
   let navigation = useNavigation<NavigationProp<AppRoutes>>();
 

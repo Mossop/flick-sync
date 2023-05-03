@@ -1,7 +1,7 @@
 import { StyleSheet, View, Text } from "react-native";
 import { TouchableRipple } from "react-native-paper";
 import { NavigationProp, useNavigation } from "@react-navigation/native";
-import { VideoState, isMovie, videoLibrary } from "../modules/state";
+import { Video, isMovie } from "../state";
 import Thumbnail from "./Thumbnail";
 import {
   EPISODE_WIDTH,
@@ -37,12 +37,12 @@ const styles = StyleSheet.create({
   },
 });
 
-export default function Video({ video }: { video: VideoState }) {
+export default function VideoComponent({ video }: { video: Video }) {
   let navigation = useNavigation<NavigationProp<AppRoutes>>();
 
   let launchVideo = () => {
     navigation.navigate("video", {
-      server: videoLibrary(video).server.id,
+      server: video.library.server.id,
       video: video.id,
     });
   };

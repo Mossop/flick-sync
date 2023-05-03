@@ -1,5 +1,5 @@
 import { Image, ImageStyle, StyleProp, StyleSheet } from "react-native";
-import { ThumbnailState } from "../modules/state";
+import { ThumbnailState } from "../state";
 import { useAppState } from "./AppState";
 
 const styles = StyleSheet.create({

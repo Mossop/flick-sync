@@ -18,7 +18,7 @@ import { ReactNode, createContext, useContext, useRef } from "react";
 import { Drawer } from "react-native-paper";
 import { MaterialIcons } from "@expo/vector-icons";
 import { ScreenProps, useLibraries, usePlaylists } from "../modules/util";
-import { LibraryState, LibraryType, PlaylistState } from "../modules/state";
+import { Library, MovieLibrary, Playlist } from "../state";
 
 const styles = StyleSheet.create({
   drawer: {
@@ -91,7 +91,7 @@ function DrawerContent({ navigation }: { navigation: Navigation }) {
   let libraries = useLibraries();
   let playlists = usePlaylists();
 
-  let openLibrary = (library: LibraryState) => {
+  let openLibrary = (library: Library) => {
     navigation.navigate("library", {
       server: library.server.id,
       library: library.id,
@@ -100,7 +100,7 @@ function DrawerContent({ navigation }: { navigation: Navigation }) {
     closeDrawer();
   };
 
-  let openPlaylist = (playlist: PlaylistState) => {
+  let openPlaylist = (playlist: Playlist) => {
     navigation.navigate("playlist", {
       server: playlist.server.id,
       playlist: playlist.id,
@@ -123,7 +123,7 @@ function DrawerContent({ navigation }: { navigation: Navigation }) {
                 key={library.id}
                 onPress={() => openLibrary(library)}
                 icon={
-                  library.type == LibraryType.Movie
+                  library instanceof MovieLibrary
                     ? "movie"
                     : (props) => <MaterialIcons name="tv" {...props} />
                 }

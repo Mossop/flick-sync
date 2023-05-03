@@ -9,14 +9,8 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { StorageAccessFramework } from "expo-file-system";
 import * as SplashScreen from "expo-splash-screen";
-import {
-  isDownloaded,
-  isMovieCollection,
-  isMovieLibrary,
-  ServerState,
-  State,
-  StateDecoder,
-} from "../modules/state";
+import { MediaState, StateDecoder } from "../state";
+import { State } from "../state/base";
 
 const SETTINGS_KEY = "settings";
 const CONTENT_ROOT = "content://com.android.externalstorage.documents/tree/";
@@ -81,101 +75,6 @@ async function loadSettings(): Promise<Settings> {
   }
 }
 
-function filterServers(servers: Record<string, ServerState>) {
-  for (let [serverId, server] of Object.entries(servers)) {
-    let empty = true;
-    for (let [videoId, video] of Object.entries(server.videos)) {
-      if (!video.parts.every((videoPart) => isDownloaded(videoPart.download))) {
-        delete server.videos[videoId];
-      } else {
-        empty = false;
-      }
-    }
-
-    if (empty) {
-      // eslint-disable-next-line no-param-reassign
-      delete servers[serverId];
-      continue;
-    }
-
-    for (let [id, playlist] of Object.entries(server.playlists)) {
-      playlist.videos = playlist.videos.filter(
-        (video) => video.id in server.videos,
-      );
-
-      if (playlist.videos.length == 0) {
-        delete server.playlists[id];
-      }
-    }
-
-    for (let [id, season] of Object.entries(server.seasons)) {
-      season.episodes = season.episodes.filter(
-        (episode) => episode.id in server.videos,
-      );
-
-      if (season.episodes.length == 0) {
-        delete server.seasons[id];
-      }
-    }
-
-    for (let [id, show] of Object.entries(server.shows)) {
-      show.seasons = show.seasons.filter(
-        (season) => season.id in server.seasons,
-      );
-
-      if (show.seasons.length == 0) {
-        delete server.shows[id];
-      }
-    }
-
-    for (let [id, collection] of Object.entries(server.collections)) {
-      if (isMovieCollection(collection)) {
-        collection.items = collection.items.filter(
-          (movie) => movie.id in server.videos,
-        );
-
-        if (collection.items.length == 0) {
-          delete server.collections[id];
-        }
-      } else {
-        collection.items = collection.items.filter(
-          (show) => show.id in server.shows,
-        );
-
-        if (collection.items.length == 0) {
-          delete server.collections[id];
-        }
-      }
-    }
-
-    for (let [id, library] of Object.entries(server.libraries)) {
-      if (isMovieLibrary(library)) {
-        library.collections = library.collections.filter(
-          (collection) => collection.id in server.collections,
-        );
-        library.contents = library.contents.filter(
-          (movie) => movie.id in server.videos,
-        );
-
-        if (library.contents.length == 0) {
-          delete server.libraries[id];
-        }
-      } else {
-        library.collections = library.collections.filter(
-          (collection) => collection.id in server.collections,
-        );
-        library.contents = library.contents.filter(
-          (show) => show.id in server.shows,
-        );
-
-        if (library.contents.length == 0) {
-          delete server.libraries[id];
-        }
-      }
-    }
-  }
-}
-
 async function loadMediaState(store: string): Promise<State> {
   console.log(`Loading media state from ${store}`);
   try {
@@ -184,14 +83,17 @@ async function loadMediaState(store: string): Promise<State> {
     );
 
     let state = await StateDecoder.decodeToPromise(JSON.parse(stateStr));
-    filterServers(state.servers);
-    console.log(`Loaded state with ${state.servers.size} servers.`);
+    let servers = Object.values(state.servers ?? {});
+    let videos = servers.flatMap((server) => Object.values(server.videos));
+    console.log(
+      `Loaded state with ${servers.length} servers and ${videos.length} videos.`,
+    );
     return state;
   } catch (e) {
     console.error("State read failed", e);
   }
 
-  return { servers: {} };
+  return { clientId: "", servers: {} };
 }
 
 class AppState {
@@ -204,8 +106,18 @@ class AppState {
     return this.contextState.settings;
   }
 
-  public get mediaState(): State {
-    return this.contextState.mediaState;
+  public get mediaState(): MediaState {
+    return MediaState.wrap(
+      this.contextState.mediaState,
+      (mediaState: State) => {
+        let contextState: ContextState = {
+          ...this.contextState,
+          mediaState,
+        };
+
+        this.contextSetter(contextState);
+      },
+    );
   }
 
   private async updateSettings(settings: Settings) {
@@ -261,7 +173,7 @@ export function useSettings(): Settings {
   return useAppState().settings;
 }
 
-export function useMediaState(): State {
+export function useMediaState(): MediaState {
   return useAppState().mediaState;
 }
 

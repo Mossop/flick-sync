@@ -1,16 +1,11 @@
 import { ScrollView } from "react-native";
 import AppView from "../components/AppView";
-import {
-  LibraryState,
-  MovieLibraryState,
-  ShowLibraryState,
-  isMovieLibrary,
-} from "../modules/state";
+import { Library, MovieLibrary, ShowLibrary, isMovieLibrary } from "../state";
 import Movies from "../components/Movies";
 import Shows from "../components/Shows";
 import { useMapped, byTitle } from "../modules/util";
 
-function MovieLibraryContents({ library }: { library: MovieLibraryState }) {
+function MovieLibraryContents({ library }: { library: MovieLibrary }) {
   let movies = useMapped(library.contents, byTitle);
 
   return (
@@ -20,7 +15,7 @@ function MovieLibraryContents({ library }: { library: MovieLibraryState }) {
   );
 }
 
-function ShowLibraryContents({ library }: { library: ShowLibraryState }) {
+function ShowLibraryContents({ library }: { library: ShowLibrary }) {
   let shows = useMapped(library.contents, byTitle);
 
   return (
@@ -30,11 +25,7 @@ function ShowLibraryContents({ library }: { library: ShowLibraryState }) {
   );
 }
 
-export default function LibraryContents({
-  library,
-}: {
-  library: LibraryState;
-}) {
+export default function LibraryContents({ library }: { library: Library }) {
   return (
     <AppView title={library.title}>
       <ScrollView>

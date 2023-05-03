@@ -12,8 +12,8 @@ import createAppNavigator, {
 } from "./components/AppNavigator";
 import Settings from "./app/settings";
 import Playlist from "./app/playlist";
-import LibraryContent from "./app/contents";
-import LibraryCollections from "./app/collections";
+import LibraryContent from "./app/libraryContents";
+import LibraryCollections from "./app/libraryCollections";
 import { useLibraries } from "./modules/util";
 import Collection from "./app/collection";
 import Show from "./app/show";
@@ -37,7 +37,7 @@ function Library({ route }: AppScreenProps<"library">) {
     return null;
   }
 
-  if (library.collections.length > 0) {
+  if (library.collections().length > 0) {
     return (
       <LibraryNav.Navigator initialRouteName="contents">
         <LibraryNav.Screen

@@ -1,6 +1,6 @@
 import { StyleSheet, View } from "react-native";
-import { VideoState } from "../modules/state";
-import Video from "./Video";
+import { Video } from "../state";
+import VideoComponent from "./Video";
 import { PADDING } from "../modules/styles";
 
 const styles = StyleSheet.create({
@@ -10,11 +10,11 @@ const styles = StyleSheet.create({
   },
 });
 
-export default function Videos({ videos }: { videos: VideoState[] }) {
+export default function Videos({ videos }: { videos: readonly Video[] }) {
   return (
     <View style={styles.outer}>
       {videos.map((video) => (
-        <Video key={video.id} video={video} />
+        <VideoComponent key={video.id} video={video} />
       ))}
     </View>
   );

@@ -1051,7 +1051,7 @@ impl MovieCollection {
 
     pub async fn movies(&self) -> Vec<Movie> {
         self.with_state(|cs| {
-            cs.items
+            cs.contents
                 .iter()
                 .map(|id| Movie {
                     server: self.server.clone(),
@@ -1097,7 +1097,7 @@ impl ShowCollection {
 
     pub async fn shows(&self) -> Vec<Show> {
         self.with_state(|cs| {
-            cs.items
+            cs.contents
                 .iter()
                 .map(|id| Show {
                     server: self.server.clone(),
@@ -1140,7 +1140,7 @@ impl Collection {
 #[derive(Clone)]
 pub struct MovieLibrary {
     pub(crate) server: Server,
-    pub(crate) id: u32,
+    pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
 
@@ -1183,7 +1183,7 @@ impl MovieLibrary {
 #[derive(Clone)]
 pub struct ShowLibrary {
     pub(crate) server: Server,
-    pub(crate) id: u32,
+    pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
 }
 

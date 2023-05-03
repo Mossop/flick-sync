@@ -93,12 +93,12 @@ impl Server {
             .map(|(id, ls)| match ls.library_type {
                 LibraryType::Movie => wrappers::Library::Movie(wrappers::MovieLibrary {
                     server: self.clone(),
-                    id: *id,
+                    id: id.clone(),
                     inner: self.inner.clone(),
                 }),
                 LibraryType::Show => wrappers::Library::Show(wrappers::ShowLibrary {
                     server: self.clone(),
-                    id: *id,
+                    id: id.clone(),
                     inner: self.inner.clone(),
                 }),
             })
@@ -337,7 +337,7 @@ struct StateSync<'a> {
     root: &'a Path,
 
     seen_items: HashSet<String>,
-    seen_libraries: HashSet<u32>,
+    seen_libraries: HashSet<String>,
 }
 
 macro_rules! return_if_seen {
@@ -418,7 +418,8 @@ impl<'a> StateSync<'a> {
             .ok_or(Error::ItemIncomplete(
                 item.rating_key().to_owned(),
                 "library ID was missing".to_string(),
-            ))?;
+            ))?
+            .to_string();
         let library_title =
             item.metadata()
                 .library_section_title
@@ -437,10 +438,10 @@ impl<'a> StateSync<'a> {
         let library = self
             .server_state
             .libraries
-            .entry(library_id)
+            .entry(library_id.clone())
             .and_modify(|l| l.title = library_title.clone())
             .or_insert_with(|| LibraryState {
-                id: library_id,
+                id: library_id.clone(),
                 title: library_title.clone(),
                 library_type,
             });
@@ -461,7 +462,7 @@ impl<'a> StateSync<'a> {
             .collections
             .entry(collection.rating_key().to_owned())
             .or_insert_with(|| CollectionState::from(collection));
-        collection_state.items = items;
+        collection_state.contents = items;
 
         collection_state.update(collection, self.root).await;
 

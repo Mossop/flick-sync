@@ -17,7 +17,7 @@ import * as ScreenOrientation from "expo-screen-orientation";
 import { OrientationLock } from "expo-screen-orientation";
 import { useAppState } from "../components/AppState";
 import { AppScreenProps } from "../components/AppNavigator";
-import { isDownloaded } from "../modules/state";
+import { isDownloaded } from "../state";
 import { PADDING } from "../modules/styles";
 import Scrubber from "../components/Scrubber";
 import { SchemeOverride } from "../components/ThemeProvider";
@@ -181,10 +181,9 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     throw new Error("Missing params for playlist route");
   }
 
-  let video =
-    appState.mediaState.servers[route.params.server]?.videos[
-      route.params.video
-    ];
+  let video = appState.mediaState
+    .getServer(route.params.server)
+    .getVideo(route.params.video);
 
   if (!video) {
     throw new Error("Incorrect params for video route");
