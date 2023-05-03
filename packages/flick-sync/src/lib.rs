@@ -38,21 +38,22 @@ pub const STATE_FILE: &str = ".flicksync.state.json";
 pub const CONFIG_FILE: &str = "flicksync.json";
 
 lazy_static! {
-    static ref DEFAULT_PROFILES: HashMap<String, TranscodeProfile> = {
+    static ref DEFAULT_PROFILES: HashMap<String, Option<TranscodeProfile>> = {
         let mut map = HashMap::new();
+        map.insert("original".to_string(), None);
         map.insert(
             "720p".to_string(),
-            TranscodeProfile {
+            Some(TranscodeProfile {
                 bitrate: Some(2000),
                 dimensions: Some((1280, 720)),
-            },
+            }),
         );
         map.insert(
             "1080p".to_string(),
-            TranscodeProfile {
+            Some(TranscodeProfile {
                 bitrate: Some(8000),
                 dimensions: Some((1920, 720)),
-            },
+            }),
         );
         map
     };
@@ -66,21 +67,24 @@ struct Inner {
 }
 
 impl Inner {
-    async fn transcode_options(&self, profile: Option<String>) -> VideoTranscodeOptions {
+    async fn transcode_options(&self, profile: Option<String>) -> Option<VideoTranscodeOptions> {
         if let Some(ref profile) = profile {
             let config = self.config.read().await;
             if let Some(profile) = config.profiles.get(profile) {
-                return profile.options();
+                return Some(profile.options());
             }
 
-            if let Some(profile) = DEFAULT_PROFILES.get(profile) {
-                return profile.options();
+            match DEFAULT_PROFILES.get(profile) {
+                Some(Some(profile)) => Some(profile.options()),
+                Some(None) => None,
+                _ => {
+                    warn!("Unknown transcode profile {profile}, falling back to defaults.");
+                    Some(Default::default())
+                }
             }
-
-            warn!("Unknown transcode profile {profile}, falling back to defaults.");
+        } else {
+            Some(Default::default())
         }
-
-        Default::default()
     }
 
     async fn persist_config(&self, config: &RwLockWriteGuard<'_, Config>) -> Result {

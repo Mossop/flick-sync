@@ -37,6 +37,8 @@ pub enum Error {
     TranscodeLost,
     #[error("Server transcode failed")]
     TranscodeFailed,
+    #[error("Transcoding was skipped")]
+    TranscodeSkipped,
     #[error("Unknown transcode profile {0}")]
     UnknownProfile(String),
     #[error("Unknown error")]

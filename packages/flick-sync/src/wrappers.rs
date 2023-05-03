@@ -428,6 +428,16 @@ impl VideoPart {
 
     #[instrument(level = "trace", skip(self), fields(session_id))]
     async fn start_transcode(&self) -> Result {
+        let (media_id, profile) = self
+            .with_video_state(|vs| (vs.media_id.clone(), vs.transcode_profile.clone()))
+            .await;
+
+        let options = if let Some(options) = self.inner.transcode_options(profile).await {
+            options
+        } else {
+            return Err(Error::TranscodeSkipped);
+        };
+
         let _permit = self.server.transcode_permit().await;
 
         let server = self.server.connect().await?;
@@ -439,10 +449,6 @@ impl VideoPart {
             _ => panic!("Unexpected item type"),
         };
 
-        let (media_id, profile) = self
-            .with_video_state(|vs| (vs.media_id.clone(), vs.transcode_profile.clone()))
-            .await;
-
         let media = video
             .media()
             .into_iter()
@@ -450,8 +456,6 @@ impl VideoPart {
             .ok_or_else(|| Error::MissingItem)?;
         let parts = media.parts();
         let part = parts.get(self.index).ok_or_else(|| Error::MissingItem)?;
-
-        let options = self.inner.transcode_options(profile).await;
 
         debug!("Attempting transcode");
 
@@ -581,6 +585,7 @@ impl VideoPart {
 
         if matches!(download_state, DownloadState::None) {
             match self.start_transcode().await {
+                Err(Error::TranscodeSkipped) => (),
                 Err(Error::PlexError {
                     source: plex_api::Error::TranscodeRefused,
                 }) => debug!("Transcode attempt refused"),
