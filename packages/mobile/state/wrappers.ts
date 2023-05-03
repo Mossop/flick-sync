@@ -16,6 +16,10 @@ import {
 } from "./base";
 import { Replace } from "../modules/types";
 
+function any<R>(items: readonly R[], cb: (item: R) => boolean): boolean {
+  return !items.every((item: R) => !cb(item));
+}
+
 function memo<T, K, R>(fn: (this: T, id: K) => R): (this: T, id: K) => R {
   let cache = new Map<K, R>();
 
@@ -29,6 +33,22 @@ function memo<T, K, R>(fn: (this: T, id: K) => R): (this: T, id: K) => R {
     cache.set(id, result);
     return result;
   };
+}
+
+function videoIsDownloaded(video: Video): boolean {
+  return video.isDownloaded;
+}
+
+function videosHaveDownloads(videos: readonly Video[]): boolean {
+  return any(videos, videoIsDownloaded);
+}
+
+function seasonHasDownloads(season: Season): boolean {
+  return videosHaveDownloads(season.episodes);
+}
+
+function showHasDownloads(show: Show): boolean {
+  return any(show.seasons, seasonHasDownloads);
 }
 
 export function isMovie(v: Video): v is Movie {
@@ -206,6 +226,7 @@ export class MovieLibrary extends LibraryWrapper implements IMovieLibrary {
     return this.server
       .videos()
       .filter(isMovie)
+      .filter(videoIsDownloaded)
       .filter((vid) => vid.library === this);
   }
 
@@ -213,6 +234,7 @@ export class MovieLibrary extends LibraryWrapper implements IMovieLibrary {
     return this.server
       .collections()
       .filter(isMovieCollection)
+      .filter((collection) => videosHaveDownloads(collection.contents))
       .filter((col) => col.library === this);
   }
 }
@@ -226,6 +248,7 @@ export class ShowLibrary extends LibraryWrapper implements IShowLibrary {
     return this.server
       .collections()
       .filter(isShowCollection)
+      .filter((collection) => any(collection.contents, showHasDownloads))
       .filter((col) => col.library === this);
   }
 }
@@ -266,7 +289,8 @@ export class MovieCollection
   public get contents(): readonly Movie[] {
     return this.state.contents
       .map((id) => this.server.getVideo(id))
-      .filter(isMovie);
+      .filter(isMovie)
+      .filter(videoIsDownloaded);
   }
 }
 
@@ -279,7 +303,9 @@ export class ShowCollection
   }
 
   public get contents(): readonly Show[] {
-    return this.state.contents.map((id) => this.server.getShow(id));
+    return this.state.contents
+      .map((id) => this.server.getShow(id))
+      .filter(showHasDownloads);
   }
 }
 
@@ -296,7 +322,9 @@ export class Playlist
   }
 
   public get videos(): readonly Video[] {
-    return this.state.videos.map((id) => this.server.getVideo(id));
+    return this.state.videos
+      .map((id) => this.server.getVideo(id))
+      .filter(videoIsDownloaded);
   }
 }
 
@@ -326,7 +354,10 @@ export class Show extends ServerItemWrapper<ShowState> implements IShow {
   }
 
   public get seasons(): readonly Season[] {
-    return this.server.seasons().filter((season) => season.show === this);
+    return this.server
+      .seasons()
+      .filter((season) => season.show === this)
+      .filter(seasonHasDownloads);
   }
 }
 
@@ -355,7 +386,8 @@ export class Season extends ServerItemWrapper<SeasonState> implements ISeason {
     return this.server
       .videos()
       .filter(isEpisode)
-      .filter((ep) => ep.season === this);
+      .filter((ep) => ep.season === this)
+      .filter(videoIsDownloaded);
   }
 }
 
@@ -397,6 +429,14 @@ abstract class VideoWapper<S extends Omit<VideoState, "detail">>
 
   public get playPosition(): number | undefined {
     return this.state.playPosition;
+  }
+
+  public get isDownloaded(): boolean {
+    return this.parts.every(
+      (part) =>
+        part.download.state == "downloaded" ||
+        part.download.state == "transcoded",
+    );
   }
 
   public abstract get library(): Library;
@@ -462,6 +502,7 @@ function itemGetter<R>(
 function listGetter<R>(
   key: string,
   itemLookup: (server: Server, id: string) => R,
+  itemFilter: (item: R) => boolean = () => true,
 ): () => R[] {
   let result: R[] | null = null;
 
@@ -472,6 +513,10 @@ function listGetter<R>(
 
     let items = (this.state[key] ?? {}) as Record<string, any>;
     result = Object.keys(items).map((id) => itemLookup(this, id));
+    if (itemFilter) {
+      result = result.filter(itemFilter);
+    }
+
     return result;
   };
 }
@@ -547,23 +592,51 @@ export class Server extends StateWrapper<ServerState> implements IServer {
     },
   );
 
-  public libraries = listGetter("libraries", (server, id) =>
-    server.getLibrary(id),
+  public libraries = listGetter(
+    "libraries",
+    (server, id) => server.getLibrary(id),
+    (library) => {
+      if (library instanceof ShowLibrary) {
+        return any(library.contents, showHasDownloads);
+      }
+      return videosHaveDownloads(library.contents);
+    },
   );
 
-  public collections = listGetter("collections", (server, id) =>
-    server.getCollection(id),
+  public collections = listGetter(
+    "collections",
+    (server, id) => server.getCollection(id),
+    (collection) => {
+      if (collection instanceof ShowCollection) {
+        return any(collection.contents, showHasDownloads);
+      }
+      return videosHaveDownloads(collection.contents);
+    },
   );
 
-  public playlists = listGetter("playlists", (server, id) =>
-    server.getPlaylist(id),
+  public playlists = listGetter(
+    "playlists",
+    (server, id) => server.getPlaylist(id),
+    (playlist) => videosHaveDownloads(playlist.videos),
   );
 
-  public shows = listGetter("shows", (server, id) => server.getShow(id));
+  public shows = listGetter(
+    "shows",
+    (server, id) => server.getShow(id),
+    showHasDownloads,
+  );
 
-  public seasons = listGetter("seasons", (server, id) => server.getSeason(id));
+  public seasons = listGetter(
+    "seasons",
+    (server, id) => server.getSeason(id),
+    seasonHasDownloads,
+  );
 
-  public videos = listGetter("videos", (server, id) => server.getVideo(id));
+  public videos = listGetter(
+    "videos",
+    (server, id) => server.getVideo(id),
+    (video) => video.isDownloaded,
+  );
 }
 
 export class MediaState extends StateWrapper<State> {
