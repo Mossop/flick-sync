@@ -7,10 +7,11 @@ import {
   useState,
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { StorageAccessFramework } from "expo-file-system";
+import { getInfoAsync, StorageAccessFramework } from "expo-file-system";
 import * as SplashScreen from "expo-splash-screen";
 import { MediaState, StateDecoder } from "../state";
 import { State } from "../state/base";
+import { Replace } from "../modules/types";
 
 const SETTINGS_KEY = "settings";
 const CONTENT_ROOT = "content://com.android.externalstorage.documents/tree/";
@@ -47,22 +48,41 @@ async function chooseStore(): Promise<string> {
 
 async function loadSettings(): Promise<Settings> {
   console.log("Loading settings...");
+
+  let partialSettings: Replace<Settings, { store?: string }> = {};
+
   try {
     let settingsStr = await AsyncStorage.getItem(SETTINGS_KEY);
     console.log("Got settings", settingsStr);
     if (settingsStr) {
-      return JSON.parse(settingsStr);
+      partialSettings = JSON.parse(settingsStr);
     }
   } catch (e) {
     console.error(e);
+  }
+
+  if (partialSettings.store) {
+    try {
+      let info = await getInfoAsync(
+        storagePath(partialSettings.store, ".flicksync.state.json"),
+      );
+
+      if (info.exists && !info.isDirectory) {
+        return partialSettings as Settings;
+      }
+
+      console.warn(`Previous state store is no longer a file.`);
+    } catch (e) {
+      console.warn(`Failed to access previous store: ${e}`);
+    }
   }
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       let store = await chooseStore();
-
       let settings: Settings = {
+        ...partialSettings,
         store,
       };
 
