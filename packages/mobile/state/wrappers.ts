@@ -169,6 +169,7 @@ type IVideo = WrapperInterface<
   {
     readonly server: Server;
     readonly library: Library;
+    playPosition?: number;
   }
 >;
 
@@ -188,7 +189,7 @@ type IEpisode = Replace<
 >;
 
 abstract class StateWrapper<S> {
-  protected constructor(
+  public constructor(
     protected readonly state: S,
     protected readonly setState: Dispatch<S>,
   ) {}
@@ -431,6 +432,13 @@ abstract class VideoWapper<S extends Omit<VideoState, "detail">>
     return this.state.playPosition;
   }
 
+  public set playPosition(playPosition: number | undefined) {
+    this.setState({
+      ...this.state,
+      playPosition,
+    });
+  }
+
   public get isDownloaded(): boolean {
     return this.parts.every(
       (part) =>
@@ -640,19 +648,6 @@ export class Server extends StateWrapper<ServerState> implements IServer {
 }
 
 export class MediaState extends StateWrapper<State> {
-  private static wrappers = new WeakMap<State, MediaState>();
-
-  public static wrap(state: State, setState: Dispatch<State>): MediaState {
-    let ms = MediaState.wrappers.get(state);
-    if (ms) {
-      return ms;
-    }
-
-    ms = new MediaState(state, setState);
-    MediaState.wrappers.set(state, ms);
-    return ms;
-  }
-
   getServer = memo(function getServer(this: MediaState, id: string): Server {
     let ss = this.state.servers?.[id];
     if (!ss) {

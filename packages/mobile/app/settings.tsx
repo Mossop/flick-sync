@@ -3,7 +3,7 @@ import { Text, TouchableRipple } from "react-native-paper";
 import { ReactNode, memo } from "react";
 import AppView from "../components/AppView";
 import { PADDING } from "../modules/styles";
-import { useAppState } from "../components/AppState";
+import { useSettings } from "../components/AppState";
 
 const styles = StyleSheet.create({
   container: {
@@ -35,13 +35,13 @@ function SettingBlock({
 }
 
 export default memo(() => {
-  let appState = useAppState();
+  let settings = useSettings();
 
   return (
     <AppView title="Settings" style={styles.container}>
-      <SettingBlock title="Store" onPress={() => appState.pickStore()}>
+      <SettingBlock title="Store" onPress={() => settings.pickStore()}>
         <View style={{ flexDirection: "row" }}>
-          <Text style={{ flex: 1 }}>{appState.settings.store}</Text>
+          <Text style={{ flex: 1 }}>{settings.store}</Text>
         </View>
       </SettingBlock>
     </AppView>

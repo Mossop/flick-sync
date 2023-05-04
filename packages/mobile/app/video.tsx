@@ -15,12 +15,12 @@ import { useNavigation } from "@react-navigation/native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { OrientationLock } from "expo-screen-orientation";
-import { useAppState } from "../components/AppState";
+import { useMediaState, useSettings } from "../components/AppState";
 import { AppScreenProps } from "../components/AppNavigator";
-import { isDownloaded } from "../state";
 import { PADDING } from "../modules/styles";
 import Scrubber from "../components/Scrubber";
 import { SchemeOverride } from "../components/ThemeProvider";
+import { isDownloaded } from "../state";
 
 const styles = StyleSheet.create({
   container: {
@@ -162,9 +162,11 @@ function Overlay({
 }
 
 export default function VideoPlayer({ route }: AppScreenProps<"video">) {
-  let appState = useAppState();
+  let settings = useSettings();
+  let mediaState = useMediaState();
   let videoRef = useRef<Video | null>(null);
-  let [status, setStatus] = useState<AVPlaybackStatusSuccess | null>(null);
+  let [playbackStatus, setPlaybackStatus] =
+    useState<AVPlaybackStatusSuccess | null>(null);
   let theme = useTheme();
 
   useEffect(() => {
@@ -181,13 +183,9 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     throw new Error("Missing params for playlist route");
   }
 
-  let video = appState.mediaState
+  let video = mediaState
     .getServer(route.params.server)
     .getVideo(route.params.video);
-
-  if (!video) {
-    throw new Error("Incorrect params for video route");
-  }
 
   let partIndex = route.params.part ?? 0;
   let part = video.parts[partIndex];
@@ -202,7 +200,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   );
 
   useEffect((): (() => void) | undefined => {
-    if (status?.isPlaying) {
+    if (playbackStatus?.isPlaying) {
       activateKeepAwakeAsync();
       return () => {
         deactivateKeepAwake();
@@ -210,7 +208,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     }
 
     return undefined;
-  }, [status?.isPlaying]);
+  }, [playbackStatus?.isPlaying]);
 
   useEffect(() => {
     ScreenOrientation.lockAsync(OrientationLock.LANDSCAPE);
@@ -230,7 +228,13 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
 
   let onStatus = (avStatus: AVPlaybackStatus) => {
     if ("uri" in avStatus) {
-      setStatus(avStatus);
+      setPlaybackStatus(avStatus);
+
+      if (
+        Math.abs(avStatus.positionMillis - (video.playPosition ?? 0)) > 5000
+      ) {
+        video.playPosition = avStatus.positionMillis;
+      }
     }
   };
 
@@ -261,18 +265,18 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
         ref={videoRef}
         style={styles.video}
         source={{
-          uri: appState.path(download.path),
+          uri: settings.path(download.path),
         }}
         shouldPlay
         resizeMode={ResizeMode.CONTAIN}
         onPlaybackStatusUpdate={onStatus}
       />
-      {videoRef.current && status && (
+      {videoRef.current && playbackStatus && (
         <Overlay
           seek={seek}
           previousDuration={previousDuration}
           totalDuration={totalDuration}
-          status={status}
+          status={playbackStatus}
           video={videoRef.current}
         />
       )}

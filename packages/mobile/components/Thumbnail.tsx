@@ -1,6 +1,6 @@
 import { Image, ImageStyle, StyleProp, StyleSheet } from "react-native";
 import { ThumbnailState } from "../state";
-import { useAppState } from "./AppState";
+import { useSettings } from "./AppState";
 
 const styles = StyleSheet.create({
   image: {
@@ -17,9 +17,9 @@ export default function Thumbnail({
   thumbnail: ThumbnailState;
   style?: StyleProp<ImageStyle>;
 }) {
-  let appState = useAppState();
+  let settings = useSettings();
 
   let uri =
-    thumbnail.state == "downloaded" ? appState.path(thumbnail.path) : undefined;
+    thumbnail.state == "downloaded" ? settings.path(thumbnail.path) : undefined;
   return <Image source={{ uri }} style={[styles.image, style]} />;
 }
