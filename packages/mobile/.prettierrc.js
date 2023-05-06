@@ -1,1 +1,1 @@
-module.exports = "@mossop/config/web-ts/prettier";
+module.exports = "@mossop/config/react-native-ts/prettier";

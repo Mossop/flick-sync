@@ -6,7 +6,7 @@ module.exports = {
 
   ignorePatterns: ["node_modules"],
 
-  extends: [require.resolve("@mossop/config/web-ts/eslintrc")],
+  extends: [require.resolve("@mossop/config/react-native-ts/eslintrc")],
 
   rules: {
     "no-console": "off",

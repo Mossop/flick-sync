@@ -219,7 +219,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
         ScreenOrientation.unlockAsync();
         deactivateKeepAwake();
       };
-    }, []),
+    }, [video]),
   );
 
   let onStatus = useCallback(

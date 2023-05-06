@@ -1,17 +1,5 @@
 {
-  "extends": "@mossop/config/web-ts/tsconfig.base.json",
-  "compilerOptions": {
-    "allowJs": true,
-    "esModuleInterop": true,
-    "jsx": "react-native",
-    "lib": ["DOM", "ESNext"],
-    "moduleResolution": "node",
-    "noEmit": true,
-    "resolveJsonModule": true,
-    "skipLibCheck": true,
-    "target": "ESNext",
-    "strict": true
-  },
+  "extends": "@mossop/config/react-native-ts/tsconfig.base.json",
 
   "include": [
     ".*.js",

@@ -26,7 +26,7 @@ export function SchemeOverride({ scheme }: { scheme: Scheme }) {
   useEffect(() => {
     setOverride(scheme);
     return () => setOverride(null);
-  }, [scheme]);
+  }, [setOverride, scheme]);
 
   return null;
 }

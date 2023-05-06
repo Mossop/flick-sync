@@ -14,10 +14,14 @@ import {
 import { DrawerLayoutAndroid, View, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackNavigatorProps } from "@react-navigation/native-stack/lib/typescript/src/types";
-import { ReactNode, createContext, useContext, useRef } from "react";
+import { ReactNode, createContext, useContext, useMemo, useRef } from "react";
 import { Drawer } from "react-native-paper";
-import { MaterialIcons } from "@expo/vector-icons";
-import { ScreenProps, useLibraries, usePlaylists } from "../modules/util";
+import {
+  ScreenProps,
+  namedIcon,
+  useLibraries,
+  usePlaylists,
+} from "../modules/util";
 import { Library, MovieLibrary, Playlist } from "../state";
 
 const styles = StyleSheet.create({
@@ -91,6 +95,9 @@ function DrawerContent({ navigation }: { navigation: Navigation }) {
   let libraries = useLibraries();
   let playlists = usePlaylists();
 
+  let tvIcon = useMemo(() => namedIcon("tv"), []);
+  let settingsIcon = useMemo(() => namedIcon("settings"), []);
+
   let openLibrary = (library: Library) => {
     navigation.navigate("library", {
       server: library.server.id,
@@ -122,11 +129,7 @@ function DrawerContent({ navigation }: { navigation: Navigation }) {
               <Drawer.Item
                 key={library.id}
                 onPress={() => openLibrary(library)}
-                icon={
-                  library instanceof MovieLibrary
-                    ? "movie"
-                    : (props) => <MaterialIcons name="tv" {...props} />
-                }
+                icon={library instanceof MovieLibrary ? "movie" : tvIcon}
                 label={library.title}
               />
             ))}
@@ -148,7 +151,7 @@ function DrawerContent({ navigation }: { navigation: Navigation }) {
 
         <Drawer.Item
           onPress={openSettings}
-          icon={(props) => <MaterialIcons name="settings" {...props} />}
+          icon={settingsIcon}
           label="Settings"
         />
       </SafeAreaView>
@@ -164,10 +167,13 @@ function AppNavigatorView({
   children: ReactNode;
 }) {
   let drawer = useRef<DrawerLayoutAndroid>(null);
-  let appDrawer = {
-    openDrawer: () => drawer.current?.openDrawer(),
-    closeDrawer: () => drawer.current?.closeDrawer(),
-  };
+  let appDrawer = useMemo(
+    () => ({
+      openDrawer: () => drawer.current?.openDrawer(),
+      closeDrawer: () => drawer.current?.closeDrawer(),
+    }),
+    [],
+  );
 
   return (
     <DrawerContext.Provider value={appDrawer}>

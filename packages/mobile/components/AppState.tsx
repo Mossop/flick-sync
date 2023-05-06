@@ -226,12 +226,12 @@ function ProviderInner({
 }) {
   let settings = useMemo(
     () => new Settings(contextState.settings, setContextState),
-    [contextState.settings],
+    [contextState.settings, setContextState],
   );
 
   let appState = useMemo(
     () => new AppManager(settings, contextState.state),
-    [settings],
+    [settings, contextState.state],
   );
 
   let mediaState = useMemo(
@@ -242,12 +242,12 @@ function ProviderInner({
           state,
         });
       }),
-    [contextState.state],
+    [contextState, setContextState],
   );
 
   useEffect(() => {
     appState.persistState(contextState.state);
-  }, [contextState.state]);
+  }, [appState, contextState.state]);
 
   let providerValue = useMemo<[MediaState, Settings]>(
     () => [mediaState, settings],
@@ -276,7 +276,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     <ProviderInner
       contextState={contextState}
       setContextState={setContextState}
-      children={children}
-    />
+    >
+      {children}
+    </ProviderInner>
   );
 }

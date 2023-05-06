@@ -4,6 +4,8 @@ import {
   NavigationProp,
   ParamListBase,
 } from "@react-navigation/native";
+import { MaterialIcons } from "@expo/vector-icons";
+import { TextProps } from "react-native";
 import { useMediaState } from "../components/AppState";
 import { Episode, Library, Movie, Playlist, Show } from "../state";
 
@@ -86,5 +88,12 @@ export function useMapped<T>(
   val: readonly T[],
   mapper: (val: readonly T[]) => T[],
 ): T[] {
-  return useMemo(() => mapper(val), [val]);
+  return useMemo(() => mapper(val), [mapper, val]);
+}
+
+export function namedIcon(icon: string) {
+  return function Icon(props: TextProps) {
+    // @ts-ignore
+    return <MaterialIcons name={icon} {...props} />;
+  };
 }

@@ -123,7 +123,7 @@ export default function Scrubber({
           }
           selectedPosition.value = null;
         }),
-    [fullWidth, totalDuration],
+    [fullWidth, totalDuration, onScrubbingComplete, selectedPosition],
   );
 
   let animatedStyle = useAnimatedStyle(() => ({
