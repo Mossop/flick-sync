@@ -7,11 +7,11 @@ import {
 } from "expo-av";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as StatusBar from "expo-status-bar";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as NavigationBar from "expo-navigation-bar";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { IconButton, useTheme } from "react-native-paper";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { OrientationLock } from "expo-screen-orientation";
@@ -168,6 +168,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let [playbackStatus, setPlaybackStatus] =
     useState<AVPlaybackStatusSuccess | null>(null);
   let theme = useTheme();
+  let playbackPosition = useRef<number>(route.params.position ?? 0);
 
   useEffect(() => {
     NavigationBar.setVisibilityAsync("hidden");
@@ -210,12 +211,53 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     return undefined;
   }, [playbackStatus?.isPlaying]);
 
-  useEffect(() => {
-    ScreenOrientation.lockAsync(OrientationLock.LANDSCAPE);
-    return () => {
-      ScreenOrientation.unlockAsync();
-    };
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      ScreenOrientation.lockAsync(OrientationLock.LANDSCAPE);
+      return () => {
+        video.playPosition = playbackPosition.current;
+        ScreenOrientation.unlockAsync();
+        deactivateKeepAwake();
+      };
+    }, []),
+  );
+
+  let onStatus = useCallback(
+    (avStatus: AVPlaybackStatus) => {
+      if ("uri" in avStatus) {
+        setPlaybackStatus(avStatus);
+        playbackPosition.current = previousDuration + avStatus.positionMillis;
+
+        if (
+          Math.abs(avStatus.positionMillis - (video.playPosition ?? 0)) > 5000
+        ) {
+          video.playPosition = avStatus.positionMillis;
+        }
+      }
+    },
+    [video, previousDuration],
+  );
+
+  let seek = useCallback(
+    (position: number) => {
+      let targetPart = 0;
+      let targetPosition = Math.min(Math.max(position, 0), totalDuration);
+      while (
+        targetPart < video.parts.length - 1 &&
+        video!.parts[targetPart]!.duration > position
+      ) {
+        targetPosition -= video.parts[targetPart]!.duration;
+        targetPart++;
+      }
+
+      if (targetPart == partIndex) {
+        videoRef.current?.playFromPositionAsync(targetPosition);
+      } else {
+        // TODO
+      }
+    },
+    [video, partIndex, totalDuration],
+  );
 
   if (!part) {
     throw new Error("Incorrect params for video route");
@@ -225,36 +267,6 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   if (!isDownloaded(download)) {
     throw new Error("Unexpected missing download");
   }
-
-  let onStatus = (avStatus: AVPlaybackStatus) => {
-    if ("uri" in avStatus) {
-      setPlaybackStatus(avStatus);
-
-      if (
-        Math.abs(avStatus.positionMillis - (video.playPosition ?? 0)) > 5000
-      ) {
-        video.playPosition = avStatus.positionMillis;
-      }
-    }
-  };
-
-  let seek = (position: number) => {
-    let targetPart = 0;
-    let targetPosition = Math.min(Math.max(position, 0), totalDuration);
-    while (
-      targetPart < video!.parts.length - 1 &&
-      video!.parts[targetPart]!.duration > position
-    ) {
-      targetPosition -= video!.parts[targetPart]!.duration;
-      targetPart++;
-    }
-
-    if (targetPart == partIndex) {
-      videoRef.current?.playFromPositionAsync(targetPosition);
-    } else {
-      // TODO
-    }
-  };
 
   return (
     <SafeAreaView

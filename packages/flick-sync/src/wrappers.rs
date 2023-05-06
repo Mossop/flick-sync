@@ -468,7 +468,9 @@ impl VideoPart {
         loop {
             match session.stats().await {
                 Ok(_) => {
-                    trace!("Saw transcode session after {count} delays");
+                    if count > 0 {
+                        trace!("Saw transcode session after {count} delays");
+                    }
                     break;
                 }
                 Err(plex_api::Error::ItemNotFound) => {
