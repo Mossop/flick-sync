@@ -396,6 +396,17 @@ abstract class VideoWapper<S extends Omit<VideoState, "detail">>
   extends ServerItemWrapper<S>
   implements IVideo
 {
+  public readonly totalDuration: number;
+
+  public constructor(server: Server, state: S, setState: Dispatch<S>) {
+    super(server, state, setState);
+
+    this.totalDuration = state.parts.reduce(
+      (total, part) => total + part.duration,
+      0,
+    );
+  }
+
   public get id(): string {
     return this.state.id;
   }
@@ -433,9 +444,21 @@ abstract class VideoWapper<S extends Omit<VideoState, "detail">>
   }
 
   public set playPosition(playPosition: number | undefined) {
+    let storedPosition = playPosition;
+    if (
+      playPosition &&
+      (playPosition < 30000 || playPosition / this.totalDuration > 0.9)
+    ) {
+      storedPosition = undefined;
+    }
+
+    if (storedPosition === this.state.playPosition) {
+      return;
+    }
+
     this.setState({
       ...this.state,
-      playPosition,
+      playPosition: storedPosition,
     });
   }
 

@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as NavigationBar from "expo-navigation-bar";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { IconButton, useTheme } from "react-native-paper";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { OrientationLock } from "expo-screen-orientation";
@@ -162,43 +162,70 @@ function Overlay({
 }
 
 export default function VideoPlayer({ route }: AppScreenProps<"video">) {
+  let navigation = useNavigation();
   let settings = useSettings();
   let mediaState = useMediaState();
   let videoRef = useRef<Video | null>(null);
   let [playbackStatus, setPlaybackStatus] =
     useState<AVPlaybackStatusSuccess | null>(null);
   let theme = useTheme();
-  let playbackPosition = useRef<number>(route.params.position ?? 0);
-
-  useEffect(() => {
-    NavigationBar.setVisibilityAsync("hidden");
-    StatusBar.setStatusBarHidden(true, "fade");
-
-    return () => {
-      StatusBar.setStatusBarHidden(false, "fade");
-      NavigationBar.setVisibilityAsync("visible");
-    };
-  }, []);
-
-  if (!route.params) {
-    throw new Error("Missing params for playlist route");
-  }
+  let initialized = useRef(false);
 
   let video = mediaState
     .getServer(route.params.server)
     .getVideo(route.params.video);
 
-  let partIndex = route.params.part ?? 0;
-  let part = video.parts[partIndex];
-  let [previousDuration, totalDuration] = video.parts.reduce(
-    ([previous, total], currentPart, index) => {
-      if (index < partIndex) {
-        return [previous + currentPart.duration, total + currentPart.duration];
+  let playbackPosition = useRef<number | undefined>(video.playPosition);
+
+  let previousDuration = useRef<number>(0);
+  let currentPart = useRef<number>();
+  let seek = useCallback(
+    async (position: number) => {
+      let targetPart = 0;
+      let partPosition = Math.min(Math.max(position, 0), video.totalDuration);
+
+      while (
+        targetPart < video.parts.length - 1 &&
+        video.parts[targetPart]!.duration >= position
+      ) {
+        partPosition -= video.parts[targetPart]!.duration;
+        targetPart++;
       }
-      return [previous, total + currentPart.duration];
+
+      if (targetPart === currentPart.current) {
+        videoRef.current!.playFromPositionAsync(partPosition);
+      } else {
+        await videoRef.current!.unloadAsync();
+
+        currentPart.current = targetPart;
+        let { download } = video.parts[targetPart]!;
+
+        if (!isDownloaded(download)) {
+          throw new Error("Unexpected non-downloaded part.");
+        }
+
+        console.log(`Loading ${download.path} at position ${partPosition}`);
+        await videoRef.current!.loadAsync(
+          { uri: settings.path(download.path) },
+          { positionMillis: partPosition, shouldPlay: true },
+        );
+      }
     },
-    [0, 0],
+    [video, settings],
   );
+
+  useEffect(() => {
+    NavigationBar.setVisibilityAsync("hidden");
+    StatusBar.setStatusBarHidden(true, "fade");
+    ScreenOrientation.lockAsync(OrientationLock.LANDSCAPE);
+
+    return () => {
+      StatusBar.setStatusBarHidden(false, "fade");
+      NavigationBar.setVisibilityAsync("visible");
+      ScreenOrientation.unlockAsync();
+      deactivateKeepAwake();
+    };
+  }, []);
 
   useEffect((): (() => void) | undefined => {
     if (playbackStatus?.isPlaying) {
@@ -211,62 +238,52 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     return undefined;
   }, [playbackStatus?.isPlaying]);
 
-  useFocusEffect(
-    useCallback(() => {
-      ScreenOrientation.lockAsync(OrientationLock.LANDSCAPE);
-      return () => {
-        video.playPosition = playbackPosition.current;
-        ScreenOrientation.unlockAsync();
-        deactivateKeepAwake();
-      };
-    }, [video]),
-  );
+  useEffect(() => {
+    if (!initialized.current) {
+      seek(video.playPosition ?? 0);
+      initialized.current = true;
+    }
+  }, [video, seek]);
 
   let onStatus = useCallback(
     (avStatus: AVPlaybackStatus) => {
       if ("uri" in avStatus) {
         setPlaybackStatus(avStatus);
-        playbackPosition.current = previousDuration + avStatus.positionMillis;
+        playbackPosition.current =
+          previousDuration.current + avStatus.positionMillis;
 
-        if (
-          Math.abs(avStatus.positionMillis - (video.playPosition ?? 0)) > 5000
+        if (avStatus.didJustFinish) {
+          if (currentPart.current == video.parts.length - 1) {
+            video.playPosition = undefined;
+            navigation.goBack();
+          } else {
+            previousDuration.current +=
+              video.parts[currentPart.current!]!.duration;
+            currentPart.current = currentPart.current! + 1;
+            playbackPosition.current = previousDuration.current;
+            video.playPosition = previousDuration.current;
+
+            let { download } = video.parts[currentPart.current!]!;
+            if (!isDownloaded(download)) {
+              throw new Error("Unexpected non-downloaded part.");
+            }
+
+            videoRef.current?.loadAsync(
+              { uri: settings.path(download.path) },
+              { positionMillis: 0, shouldPlay: true },
+            );
+          }
+        } else if (
+          Math.abs(playbackPosition.current - (video.playPosition ?? 0)) > 5000
         ) {
-          video.playPosition = avStatus.positionMillis;
+          video.playPosition = playbackPosition.current;
         }
-      }
-    },
-    [video, previousDuration],
-  );
-
-  let seek = useCallback(
-    (position: number) => {
-      let targetPart = 0;
-      let targetPosition = Math.min(Math.max(position, 0), totalDuration);
-      while (
-        targetPart < video.parts.length - 1 &&
-        video!.parts[targetPart]!.duration > position
-      ) {
-        targetPosition -= video.parts[targetPart]!.duration;
-        targetPart++;
-      }
-
-      if (targetPart == partIndex) {
-        videoRef.current?.playFromPositionAsync(targetPosition);
       } else {
-        // TODO
+        setPlaybackStatus(null);
       }
     },
-    [video, partIndex, totalDuration],
+    [video, previousDuration, navigation, settings],
   );
-
-  if (!part) {
-    throw new Error("Incorrect params for video route");
-  }
-
-  let { download } = part;
-  if (!isDownloaded(download)) {
-    throw new Error("Unexpected missing download");
-  }
 
   return (
     <SafeAreaView
@@ -276,18 +293,14 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
       <Video
         ref={videoRef}
         style={styles.video}
-        source={{
-          uri: settings.path(download.path),
-        }}
-        shouldPlay
         resizeMode={ResizeMode.CONTAIN}
         onPlaybackStatusUpdate={onStatus}
       />
       {videoRef.current && playbackStatus && (
         <Overlay
           seek={seek}
-          previousDuration={previousDuration}
-          totalDuration={totalDuration}
+          previousDuration={previousDuration.current}
+          totalDuration={video.totalDuration}
           status={playbackStatus}
           video={videoRef.current}
         />
