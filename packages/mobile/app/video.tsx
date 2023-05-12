@@ -254,7 +254,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
 
         if (avStatus.didJustFinish) {
           if (currentPart.current == video.parts.length - 1) {
-            video.playPosition = undefined;
+            video.playbackState = { state: "played" };
             navigation.goBack();
           } else {
             previousDuration.current +=

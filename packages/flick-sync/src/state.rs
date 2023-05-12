@@ -1,10 +1,9 @@
-use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use plex_api::library::MediaItem;
+use plex_api::library::{FromMetadata, MediaItem};
 use plex_api::{
     library::{Collection, MetadataItem, Playlist, Season, Show},
     media_container::server::library::{Metadata, MetadataType},
@@ -437,6 +436,14 @@ pub(crate) enum VideoDetail {
     Episode(EpisodeDetail),
 }
 
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
+#[serde(tag = "state", rename_all = "lowercase")]
+pub(crate) enum PlaybackState {
+    Unplayed,
+    InProgress { position: u64 },
+    Played,
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
@@ -453,8 +460,20 @@ pub(crate) struct VideoState {
     pub(crate) last_updated: OffsetDateTime,
     pub(crate) parts: Vec<VideoPartState>,
     pub(crate) transcode_profile: Option<String>,
+    pub(crate) playback_state: PlaybackState,
+    #[serde(with = "time::serde::timestamp::option")]
     #[typeshare(serialized_as = "Option<number>")]
-    pub(crate) play_position: Option<u64>,
+    pub(crate) last_viewed_at: Option<OffsetDateTime>,
+}
+
+fn playback_state_from_metadata(metadata: &Metadata) -> PlaybackState {
+    if let Some(position) = metadata.view_offset {
+        PlaybackState::InProgress { position }
+    } else if metadata.view_count.is_some() {
+        PlaybackState::Played
+    } else {
+        PlaybackState::Unplayed
+    }
 }
 
 impl VideoState {
@@ -500,11 +519,12 @@ impl VideoState {
             last_updated: metadata.updated_at.unwrap(),
             parts,
             transcode_profile: sync.transcode_profile.clone(),
-            play_position: metadata.view_offset,
+            playback_state: playback_state_from_metadata(metadata),
+            last_viewed_at: metadata.last_viewed_at,
         }
     }
 
-    pub(crate) async fn update<M: MetadataItem>(
+    pub(crate) async fn update<M: MediaItem + FromMetadata>(
         &mut self,
         sync: &SyncItem,
         item: &M,
@@ -515,11 +535,41 @@ impl VideoState {
         self.title = item.title().to_owned();
         self.transcode_profile = sync.transcode_profile.clone();
 
-        self.play_position = match (self.play_position, metadata.view_offset) {
-            (p, None) => p,
-            (None, p) => p,
-            (Some(local), Some(remote)) => Some(max(local, remote)),
-        };
+        let server_state = playback_state_from_metadata(metadata);
+        if self.last_viewed_at == metadata.last_viewed_at {
+            // No server-side views since last sync.
+            if server_state != self.playback_state {
+                match self.playback_state {
+                    PlaybackState::Unplayed => {
+                        // Not going to mark as unplayed on the server for now.
+                    }
+                    PlaybackState::InProgress { position } => {
+                        if let Err(e) = server.update_timeline(item, position).await {
+                            warn!("Failed to update playback position: {e}");
+                        }
+                    }
+                    PlaybackState::Played => {
+                        if let Err(e) = server.mark_watched(item).await {
+                            warn!("Failed to mark item as watched: {e}");
+                        }
+                    }
+                }
+            }
+        } else {
+            // Viewed on the server, just take the server's state.
+            self.last_viewed_at = metadata.last_viewed_at;
+            self.playback_state = server_state;
+        }
+
+        if self.last_viewed_at != metadata.last_viewed_at {
+            self.playback_state = if let Some(position) = metadata.view_offset {
+                PlaybackState::InProgress { position }
+            } else if metadata.view_count.is_some() {
+                PlaybackState::Played
+            } else {
+                PlaybackState::Unplayed
+            };
+        }
 
         match self.detail {
             VideoDetail::Movie(ref mut m) => m.update(metadata),

@@ -9,6 +9,11 @@ export type DownloadState =
   | { state: "downloaded"; path: string }
   | { state: "transcoded"; path: string };
 
+export type PlaybackState =
+  | { state: "unplayed" }
+  | { state: "inprogress"; position: number }
+  | { state: "played" };
+
 export type VideoDetail = MovieDetail | EpisodeDetail;
 
 // Typeshare generated types
@@ -17,88 +22,88 @@ export type VideoDetail = MovieDetail | EpisodeDetail;
 */
 
 export interface CollectionState {
-	id: string;
-	library: string;
-	title: string;
-	contents: string[];
-	lastUpdated: number;
-	thumbnail: ThumbnailState;
+  id: string;
+  library: string;
+  title: string;
+  contents: string[];
+  lastUpdated: number;
+  thumbnail: ThumbnailState;
 }
 
 export interface PlaylistState {
-	id: string;
-	title: string;
-	videos: string[];
+  id: string;
+  title: string;
+  videos: string[];
 }
 
 export enum LibraryType {
-	Movie = "movie",
-	Show = "show",
+  Movie = "movie",
+  Show = "show",
 }
 
 export interface LibraryState {
-	id: string;
-	title: string;
-	type: LibraryType;
+  id: string;
+  title: string;
+  type: LibraryType;
 }
 
 export interface SeasonState {
-	id: string;
-	show: string;
-	index: number;
-	title: string;
+  id: string;
+  show: string;
+  index: number;
+  title: string;
 }
 
 export interface ShowState {
-	id: string;
-	library: string;
-	title: string;
-	year: number;
-	lastUpdated: number;
-	thumbnail: ThumbnailState;
+  id: string;
+  library: string;
+  title: string;
+  year: number;
+  lastUpdated: number;
+  thumbnail: ThumbnailState;
 }
 
 export interface MovieDetail {
-	library: string;
-	year: number;
+  library: string;
+  year: number;
 }
 
 export interface EpisodeDetail {
-	season: string;
-	index: number;
+  season: string;
+  index: number;
 }
 
 export interface VideoPartState {
-	duration: number;
-	download: DownloadState;
+  duration: number;
+  download: DownloadState;
 }
 
 export interface VideoState {
-	id: string;
-	title: string;
-	detail: VideoDetail;
-	airDate: string;
-	thumbnail: ThumbnailState;
-	mediaId: string;
-	lastUpdated: number;
-	parts: VideoPartState[];
-	transcodeProfile?: string;
-	playPosition?: number;
+  id: string;
+  title: string;
+  detail: VideoDetail;
+  airDate: string;
+  thumbnail: ThumbnailState;
+  mediaId: string;
+  lastUpdated: number;
+  parts: VideoPartState[];
+  transcodeProfile?: string;
+  playbackState: PlaybackState;
+  lastViewedAt?: number;
 }
 
 export interface ServerState {
-	token?: string;
-	name: string;
-	playlists?: Record<string, PlaylistState>;
-	collections?: Record<string, CollectionState>;
-	libraries: Record<string, LibraryState>;
-	shows?: Record<string, ShowState>;
-	seasons?: Record<string, SeasonState>;
-	videos: Record<string, VideoState>;
+  token?: string;
+  name: string;
+  playlists?: Record<string, PlaylistState>;
+  collections?: Record<string, CollectionState>;
+  libraries: Record<string, LibraryState>;
+  shows?: Record<string, ShowState>;
+  seasons?: Record<string, SeasonState>;
+  videos: Record<string, VideoState>;
 }
 
 export interface State {
-	clientId: string;
-	servers?: Record<string, ServerState>;
+  clientId: string;
+  servers?: Record<string, ServerState>;
 }
-

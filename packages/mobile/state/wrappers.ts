@@ -13,6 +13,7 @@ import {
   ThumbnailState,
   VideoPartState,
   LibraryType,
+  PlaybackState,
 } from "./base";
 import { Replace } from "../modules/types";
 
@@ -439,27 +440,26 @@ abstract class VideoWapper<S extends Omit<VideoState, "detail">>
     return this.state.transcodeProfile;
   }
 
-  public get playPosition(): number | undefined {
-    return this.state.playPosition;
+  public get playbackState(): PlaybackState {
+    return this.state.playbackState;
   }
 
-  public set playPosition(playPosition: number | undefined) {
-    let storedPosition = playPosition;
-    if (
-      playPosition &&
-      (playPosition < 30000 || playPosition / this.totalDuration > 0.9)
-    ) {
-      storedPosition = undefined;
-    }
-
-    if (storedPosition === this.state.playPosition) {
-      return;
-    }
-
+  public set playbackState(playbackState: PlaybackState) {
     this.setState({
       ...this.state,
-      playPosition: storedPosition,
+      playbackState,
     });
+  }
+
+  public set playPosition(position: number) {
+    let playbackState: PlaybackState = { state: "inprogress", position };
+    if (position < 30000) {
+      playbackState = { state: "unplayed" };
+    } else if (position / this.totalDuration > 0.9) {
+      playbackState = { state: "played" };
+    }
+
+    this.playbackState = playbackState;
   }
 
   public get isDownloaded(): boolean {
