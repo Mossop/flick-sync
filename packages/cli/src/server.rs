@@ -5,7 +5,6 @@ use flick_sync::{
         self,
         device::{Device, DeviceConnection},
         library::{Item, MetadataItem},
-        media_container::devices::Feature,
         MyPlexBuilder, Server,
     },
     FlickSync, ServerConnection,
@@ -104,7 +103,7 @@ impl Runnable for Login {
                         .devices()
                         .await?
                         .into_iter()
-                        .filter(|d| d.provides(Feature::Server))
+                        .filter(|d| d.is_server())
                         .collect();
 
                     let device = if devices.is_empty() {
