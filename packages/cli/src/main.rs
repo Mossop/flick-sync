@@ -17,7 +17,7 @@ mod server;
 mod sync;
 
 pub use crate::console::Console;
-use server::{Add, List, Login};
+use server::{Add, Login};
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
@@ -32,8 +32,6 @@ pub enum Command {
     Login(Login),
     /// Adds an item to sync.
     Add(Add),
-    /// Updates the lists of items to sync and then list them all.
-    List(List),
     /// Updates the lists of items to sync and then remove any local content no
     /// longer included.
     Prune(Prune),
@@ -47,7 +45,6 @@ impl Runnable for Command {
         match self {
             Command::Login(c) => c.run(flick_sync, console).await,
             Command::Add(c) => c.run(flick_sync, console).await,
-            Command::List(c) => c.run(flick_sync, console).await,
             Command::Prune(c) => c.run(flick_sync, console).await,
             Command::Sync(c) => c.run(flick_sync, console).await,
         }

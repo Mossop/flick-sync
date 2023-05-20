@@ -12,7 +12,7 @@ use flick_sync::{
 use tracing::error;
 use url::Url;
 
-use crate::{error::err, select_servers, Console, Error, Result, Runnable};
+use crate::{error::err, Console, Error, Result, Runnable};
 
 #[derive(Args)]
 pub struct Login {
@@ -217,27 +217,5 @@ impl Runnable for Add {
         }
 
         Err(Error::ErrorMessage("No matching server found".to_string()))
-    }
-}
-
-#[derive(Args)]
-pub struct List {
-    /// The servers to list. Can be repeated. When not passed all servers are listed.
-    #[clap(short = 's', long = "server")]
-    ids: Vec<String>,
-}
-
-#[async_trait]
-impl Runnable for List {
-    async fn run(self, flick_sync: FlickSync, _console: Console) -> Result {
-        let servers = select_servers(&flick_sync, &self.ids).await?;
-
-        for server in servers {
-            if let Err(e) = server.update_state().await {
-                error!(server=server.id(), error=?e, "Failed to update server");
-            }
-        }
-
-        Ok(())
     }
 }

@@ -151,6 +151,11 @@ impl Runnable for Sync {
         let mut jobs = Vec::new();
 
         for server in servers {
+            if let Err(e) = server.update_state().await {
+                error!(server=server.id(), error=?e, "Failed to update server");
+                continue;
+            }
+
             let mut transfers = Vec::new();
             let transcode_permits = Arc::new(Semaphore::new(server.max_transcodes().await));
 
