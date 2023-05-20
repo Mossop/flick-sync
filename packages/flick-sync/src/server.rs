@@ -190,7 +190,12 @@ impl Server {
     }
 
     /// Adds an item to sync based on its rating key.
-    pub async fn add_sync(&self, rating_key: &str, transcode_profile: Option<String>) -> Result {
+    pub async fn add_sync(
+        &self,
+        rating_key: &str,
+        transcode_profile: Option<String>,
+        only_unread: bool,
+    ) -> Result {
         let mut config = self.inner.config.write().await;
 
         if let Some(ref profile) = transcode_profile {
@@ -205,6 +210,7 @@ impl Server {
             SyncItem {
                 id: rating_key.to_owned(),
                 transcode_profile,
+                only_unread,
             },
         );
 
@@ -351,6 +357,10 @@ macro_rules! return_if_seen {
 
 impl<'a> StateSync<'a> {
     async fn add_movie(&mut self, sync: &SyncItem, movie: &Movie) -> Result {
+        if sync.only_unread && movie.metadata().view_count.unwrap_or_default() > 0 {
+            return Ok(());
+        }
+
         return_if_seen!(self, movie);
 
         let video = self
@@ -367,6 +377,10 @@ impl<'a> StateSync<'a> {
     }
 
     async fn add_episode(&mut self, sync: &SyncItem, episode: &Episode) -> Result {
+        if sync.only_unread && episode.metadata().view_count.unwrap_or_default() > 0 {
+            return Ok(());
+        }
+
         return_if_seen!(self, episode);
 
         let video = self

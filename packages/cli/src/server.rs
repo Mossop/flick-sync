@@ -143,7 +143,11 @@ pub struct Add {
     /// The web url of the item to add to the list to sync.
     url: String,
     /// The transcode profile to use for this item.
+    #[clap(short, long)]
     profile: Option<String>,
+    /// Only sync unwatched items
+    #[clap(short, long)]
+    only_unread: bool,
 }
 
 #[async_trait]
@@ -211,7 +215,9 @@ impl Runnable for Add {
                 server.id(),
             ));
 
-            server.add_sync(&rating_key, self.profile).await?;
+            server
+                .add_sync(&rating_key, self.profile, self.only_unread)
+                .await?;
 
             return Ok(());
         }
