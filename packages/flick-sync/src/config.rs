@@ -36,6 +36,8 @@ pub(crate) struct ServerConfig {
     pub(crate) syncs: HashMap<String, SyncItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) max_transcodes: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) profile: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Default, Clone, Debug)]

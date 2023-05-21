@@ -49,6 +49,12 @@ impl Server {
         &self.id
     }
 
+    pub(crate) async fn profile(&self) -> Option<String> {
+        let config = self.inner.config.read().await;
+        let server_config = config.servers.get(&self.id).unwrap();
+        server_config.profile.clone()
+    }
+
     pub(crate) async fn transcode_permit(&self) -> SemaphorePermit {
         self.transcode_requests.acquire().await.unwrap()
     }

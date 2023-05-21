@@ -18,6 +18,9 @@ use crate::{error::err, Console, Error, Result, Runnable};
 pub struct Login {
     /// An identifier for the server.
     id: String,
+    /// The default transcode profile to use for items.
+    #[clap(short, long)]
+    profile: Option<String>,
 }
 
 #[async_trait]
@@ -49,7 +52,9 @@ impl Runnable for Login {
 
                     let connection = ServerConnection::Direct { url };
 
-                    flick_sync.add_server(&self.id, server, connection).await?;
+                    flick_sync
+                        .add_server(&self.id, server, connection, self.profile)
+                        .await?;
                 } else {
                     let username = console.input("Username");
                     let password = console.password("Password");
@@ -129,7 +134,9 @@ impl Runnable for Login {
                         id: server.machine_identifier().to_owned(),
                     };
 
-                    flick_sync.add_server(&self.id, server, connection).await?;
+                    flick_sync
+                        .add_server(&self.id, server, connection, self.profile)
+                        .await?;
                 }
             }
         }
