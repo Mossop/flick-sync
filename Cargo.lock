@@ -1229,8 +1229,7 @@ checksum = "6ac9a59f73473f1b8d852421e59e64809f025994837ef743615c6d0c5b305160"
 [[package]]
 name = "plex-api"
 version = "0.0.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc8b50af588f03cd7de492454abf682d5e91e94e529e1fc1ac2a1e7d4a038f8e"
+source = "git+https://github.com/Mossop/plex-api.rs.git?branch=field_fixes#c8f7b2d5da8ae78cc30f9f5f1218f2bac4712c66"
 dependencies = [
  "enum_dispatch",
  "futures",
