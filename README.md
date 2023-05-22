@@ -1,5 +1,9 @@
 # flick-sync
 
+<p align="center">
+  <img width="100" height="100" src="logo/logo.svg">
+</p>
+
 Tools to support automatically synchronising media from a [Plex Media Server](https://www.plex.tv/) to a local disk.
 
 Currently includes the following:
