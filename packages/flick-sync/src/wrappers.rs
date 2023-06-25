@@ -597,7 +597,7 @@ impl VideoPart {
                 Err(Error::PlexError {
                     source: plex_api::Error::TranscodeRefused,
                 }) => debug!("Transcode attempt refused"),
-                Err(e) => error!(error=?e, "Transcode attempt failed"),
+                Err(e) => return Err(e),
                 Ok(_) => {
                     return Ok(());
                 }

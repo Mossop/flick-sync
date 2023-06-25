@@ -5,6 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use clap::{Parser, Subcommand};
+use enum_dispatch::enum_dispatch;
 use error::{err, Error};
 use flick_sync::{FlickSync, Server, CONFIG_FILE, STATE_FILE};
 use sync::{Prune, Sync};
@@ -21,34 +22,24 @@ use server::{Add, Login};
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
-#[async_trait]
-pub trait Runnable {
-    async fn run(self, flick_sync: FlickSync, console: Console) -> Result;
-}
-
+#[enum_dispatch]
 #[derive(Subcommand)]
 pub enum Command {
     /// Logs in or re-logs in to a server.
-    Login(Login),
+    Login,
     /// Adds an item to sync.
-    Add(Add),
+    Add,
     /// Updates the lists of items to sync and then remove any local content no
     /// longer included.
-    Prune(Prune),
+    Prune,
     /// Performs a full sync
-    Sync(Sync),
+    Sync,
 }
 
 #[async_trait]
-impl Runnable for Command {
-    async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
-        match self {
-            Command::Login(c) => c.run(flick_sync, console).await,
-            Command::Add(c) => c.run(flick_sync, console).await,
-            Command::Prune(c) => c.run(flick_sync, console).await,
-            Command::Sync(c) => c.run(flick_sync, console).await,
-        }
-    }
+#[enum_dispatch(Command)]
+pub trait Runnable {
+    async fn run(self, flick_sync: FlickSync, console: Console) -> Result;
 }
 
 pub async fn select_servers(flick_sync: &FlickSync, ids: &Vec<String>) -> Result<Vec<Server>> {

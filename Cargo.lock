@@ -594,6 +594,7 @@ dependencies = [
  "clap",
  "console",
  "dialoguer",
+ "enum_dispatch",
  "flick-sync",
  "futures",
  "indicatif",
@@ -1228,8 +1229,8 @@ checksum = "6ac9a59f73473f1b8d852421e59e64809f025994837ef743615c6d0c5b305160"
 
 [[package]]
 name = "plex-api"
-version = "0.0.10"
-source = "git+https://github.com/Mossop/plex-api.rs.git?branch=field_fixes#c8f7b2d5da8ae78cc30f9f5f1218f2bac4712c66"
+version = "0.0.11"
+source = "git+https://github.com/Mossop/plex-api.rs.git?branch=field_fixes#57de808bdc98bacf0aa11f57d48fa244f4000524"
 dependencies = [
  "enum_dispatch",
  "futures",
@@ -1288,9 +1289,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.28.1"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5c1a97b1bc42b1d550bfb48d4262153fe400a12bab1511821736f7eac76d7e2"
+checksum = "81b9228215d82c7b61490fec1de287136b5de6f5700f6e58ea9ad61a7964ca51"
 dependencies = [
  "memchr",
  "serde",
