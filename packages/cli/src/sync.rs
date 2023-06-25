@@ -22,8 +22,24 @@ pub struct Prune {
 
 #[async_trait]
 impl Runnable for Prune {
-    async fn run(self, _flick_sync: FlickSync, _console: Console) -> Result {
-        todo!();
+    async fn run(self, flick_sync: FlickSync, _console: Console) -> Result {
+        flick_sync.prune_root().await;
+
+        let servers = select_servers(&flick_sync, &self.ids).await?;
+
+        for server in servers {
+            if let Err(e) = server.update_state().await {
+                error!(server=server.id(), error=?e, "Failed to update server");
+                continue;
+            }
+
+            if let Err(e) = server.prune().await {
+                error!(server=server.id(), error=?e, "Failed to prune server directory");
+                continue;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -150,9 +166,16 @@ impl Runnable for Sync {
         let download_permits = Arc::new(Semaphore::new(flick_sync.max_downloads().await));
         let mut jobs = Vec::new();
 
+        flick_sync.prune_root().await;
+
         for server in servers {
             if let Err(e) = server.update_state().await {
                 error!(server=server.id(), error=?e, "Failed to update server");
+                continue;
+            }
+
+            if let Err(e) = server.prune().await {
+                error!(server=server.id(), error=?e, "Failed to prune server directory");
                 continue;
             }
 

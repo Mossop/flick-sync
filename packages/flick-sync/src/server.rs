@@ -1,4 +1,9 @@
-use std::{collections::HashSet, fmt, path::Path, sync::Arc};
+use std::{
+    collections::HashSet,
+    fmt,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use async_recursion::async_recursion;
 use core::ops::Deref;
@@ -8,8 +13,9 @@ use plex_api::{
     media_container::server::library::MetadataType,
     MyPlexBuilder,
 };
+use tokio::fs::{read_dir, remove_dir, remove_dir_all, remove_file};
 use tokio::sync::{Mutex, Semaphore, SemaphorePermit};
-use tracing::{info, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
     config::SyncItem,
@@ -17,6 +23,7 @@ use crate::{
         CollectionState, LibraryState, LibraryType, PlaylistState, SeasonState, ServerState,
         ShowState, VideoDetail, VideoState,
     },
+    util::safe,
     wrappers, Error, Inner, Library, Result, ServerConnection,
 };
 
@@ -32,6 +39,72 @@ impl fmt::Debug for Server {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Server").field("id", &self.id).finish()
     }
+}
+
+#[async_recursion]
+async fn prune_directory(path: &Path, expected_files: &HashSet<PathBuf>) -> bool {
+    let mut reader = match read_dir(&path).await {
+        Ok(reader) => reader,
+        Err(e) => {
+            error!(error=?e, path=%path.display(), "Failed to read directory");
+            return false;
+        }
+    };
+
+    let mut should_prune = true;
+
+    loop {
+        match reader.next_entry().await {
+            Ok(Some(entry)) => {
+                let path = entry.path();
+                match entry.file_type().await {
+                    Ok(file_type) => {
+                        if file_type.is_dir() {
+                            if !prune_directory(&path, expected_files).await {
+                                should_prune = false;
+                            }
+                        } else if !expected_files.contains(&path) {
+                            match remove_file(&path).await {
+                                Ok(()) => {
+                                    debug!(path = %path.display(), "Deleted unknown file");
+                                }
+                                Err(e) => {
+                                    error!(error=?e, path=%path.display(), "Failed to delete unknown file");
+                                    should_prune = false;
+                                }
+                            }
+                        } else {
+                            should_prune = false;
+                        }
+                    }
+                    Err(e) => {
+                        error!(error=?e, path=%path.display(), "Failed to read file type");
+                    }
+                }
+            }
+            Ok(None) => {
+                break;
+            }
+            Err(e) => {
+                error!(error=?e, path=%path.display(), "Failed to read directory");
+                return false;
+            }
+        }
+    }
+
+    if should_prune {
+        match remove_dir(&path).await {
+            Ok(()) => {
+                debug!(path = %path.display(), "Deleted unknown directory");
+                return true;
+            }
+            Err(e) => {
+                error!(error=?e, path=%path.display(), "Failed to delete unknown directory");
+            }
+        }
+    }
+
+    false
 }
 
 impl Server {
@@ -338,6 +411,59 @@ impl Server {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    /// Verifies the presence of downloads for synced items.
+    #[instrument(level = "trace", skip(self), fields(server = self.id))]
+    pub async fn prune(&self) -> Result {
+        info!("Pruning server filesystem");
+
+        let root = self.inner.path.write().await;
+
+        let mut expected_files: HashSet<PathBuf> = HashSet::new();
+
+        let state = self.inner.state.read().await;
+
+        let server_state = match state.servers.get(&self.id) {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+
+        for collection in server_state.collections.values() {
+            if let Some(file) = collection.thumbnail.file() {
+                expected_files.insert(root.join(file));
+            }
+        }
+
+        for show in server_state.shows.values() {
+            if let Some(file) = show.thumbnail.file() {
+                expected_files.insert(root.join(file));
+            }
+        }
+
+        for video in server_state.videos.values() {
+            if let Some(file) = video.thumbnail.file() {
+                expected_files.insert(root.join(file));
+            }
+
+            for part in video.parts.iter() {
+                if let Some(file) = part.download.file() {
+                    expected_files.insert(root.join(file));
+                }
+            }
+        }
+
+        let server_root = root.join(safe(&self.id));
+
+        if expected_files.is_empty() {
+            debug!("Deleting empty server directory {}", server_root.display());
+            remove_dir_all(&server_root).await?;
+            return Ok(());
+        }
+
+        prune_directory(&server_root, &expected_files).await;
 
         Ok(())
     }

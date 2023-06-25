@@ -29,19 +29,9 @@ use crate::{
         CollectionState, DownloadState, LibraryState, PlaylistState, SeasonState, ServerState,
         ShowState, ThumbnailState, VideoDetail, VideoPartState, VideoState,
     },
+    util::safe,
     Error, Inner, Result, Server,
 };
-
-fn safe<S: AsRef<str>>(str: S) -> String {
-    str.as_ref()
-        .chars()
-        .map(|x| match x {
-            '#' | '%' | '{' | '}' | '\\' | '/' | '<' | '>' | '*' | '?' | '$' | '!' | '"' | '\''
-            | ':' | '@' | '+' | '`' | '|' | '=' => '_',
-            _ => x,
-        })
-        .collect()
-}
 
 #[derive(Debug, Clone, Copy)]
 enum FileType {
@@ -578,7 +568,7 @@ impl VideoPart {
                     return Err(Error::TranscodeLost);
                 }
                 Err(e) => {
-                    error!("Error getting transcode status");
+                    error!(error=?e, "Error getting transcode status");
                     return Err(e.into());
                 }
             }

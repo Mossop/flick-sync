@@ -40,3 +40,14 @@ where
     let list: Vec<&V> = map.values().collect();
     list.serialize(serializer)
 }
+
+pub(crate) fn safe<S: AsRef<str>>(str: S) -> String {
+    str.as_ref()
+        .chars()
+        .map(|x| match x {
+            '#' | '%' | '{' | '}' | '\\' | '/' | '<' | '>' | '*' | '?' | '$' | '!' | '"' | '\''
+            | ':' | '@' | '+' | '`' | '|' | '=' => '_',
+            _ => x,
+        })
+        .collect()
+}

@@ -1,6 +1,6 @@
 #![deny(unreachable_pub)]
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::ErrorKind,
     ops::Deref,
     path::{Path, PathBuf},
@@ -25,10 +25,10 @@ use serde_json::{from_str, to_string_pretty};
 pub use server::Server;
 use state::{ServerState, State};
 use tokio::{
-    fs::{read_to_string, write},
+    fs::{read_dir, read_to_string, remove_dir_all, remove_file, write},
     sync::{Mutex, RwLock, RwLockWriteGuard},
 };
-use tracing::warn;
+use tracing::{debug, info, warn};
 
 pub use wrappers::*;
 
@@ -238,6 +238,73 @@ impl FlickSync {
                 })
             })
             .collect()
+    }
+
+    pub async fn prune_root(&self) {
+        info!("Pruning root filesystem");
+
+        let servers: HashSet<String> = {
+            let config: tokio::sync::RwLockReadGuard<'_, Config> = self.inner.config.read().await;
+
+            config.servers.keys().cloned().collect()
+        };
+
+        let root = self.inner.path.write().await;
+
+        let mut reader = match read_dir(root.as_path()).await {
+            Ok(reader) => reader,
+            Err(e) => {
+                tracing::error!(error=?e, path=%root.display(), "Failed to read directory");
+                return;
+            }
+        };
+
+        loop {
+            match reader.next_entry().await {
+                Ok(Some(entry)) => {
+                    if let Some(str) = entry.file_name().to_str() {
+                        if str == STATE_FILE || str == CONFIG_FILE || servers.contains(str) {
+                            continue;
+                        }
+                    }
+
+                    let path = entry.path();
+                    match entry.file_type().await {
+                        Ok(file_type) => {
+                            if file_type.is_dir() {
+                                match remove_dir_all(&path).await {
+                                    Ok(()) => {
+                                        debug!(path = %path.display(), "Deleted unknown directory");
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(error=?e, path=%path.display(), "Failed to delete unknown directory");
+                                    }
+                                }
+                            } else {
+                                match remove_file(&path).await {
+                                    Ok(()) => {
+                                        debug!(path = %path.display(), "Deleted unknown file");
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(error=?e, path=%path.display(), "Failed to delete unknown file");
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(error=?e, path=%path.display(), "Failed to read file type");
+                        }
+                    }
+                }
+                Ok(None) => {
+                    break;
+                }
+                Err(e) => {
+                    tracing::error!(error=?e, path=%root.display(), "Failed to read directory");
+                    break;
+                }
+            }
+        }
     }
 
     pub async fn client(&self) -> HttpClient {

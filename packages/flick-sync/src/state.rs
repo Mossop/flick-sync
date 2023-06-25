@@ -28,6 +28,13 @@ pub(crate) enum ThumbnailState {
 }
 
 impl ThumbnailState {
+    pub(crate) fn file(&self) -> Option<PathBuf> {
+        match self {
+            Self::None => None,
+            Self::Downloaded { path } => Some(path.clone()),
+        }
+    }
+
     pub(crate) fn is_none(&self) -> bool {
         matches!(self, ThumbnailState::None)
     }
@@ -317,6 +324,19 @@ pub(crate) enum DownloadState {
 }
 
 impl DownloadState {
+    pub(crate) fn file(&self) -> Option<PathBuf> {
+        match self {
+            Self::None => None,
+            Self::Downloading { path } => Some(path.clone()),
+            Self::Transcoding {
+                path,
+                session_id: _,
+            } => Some(path.clone()),
+            Self::Downloaded { path } => Some(path.clone()),
+            Self::Transcoded { path } => Some(path.clone()),
+        }
+    }
+
     pub(crate) fn needs_download(&self) -> bool {
         !matches!(
             self,
