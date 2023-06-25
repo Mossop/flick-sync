@@ -444,6 +444,7 @@ impl fmt::Debug for DownloadState {
 #[typeshare]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct VideoPartState {
+    pub(crate) id: String,
     #[typeshare(serialized_as = "number")]
     pub(crate) duration: u64,
     pub(crate) download: DownloadState,
@@ -524,6 +525,7 @@ impl VideoState {
             .parts()
             .iter()
             .map(|p| VideoPartState {
+                id: p.metadata().id.clone().unwrap(),
                 duration: p.metadata().duration.unwrap(),
                 download: Default::default(),
             })
@@ -599,11 +601,39 @@ impl VideoState {
         if let Some(updated) = metadata.updated_at {
             if updated > self.last_updated {
                 self.thumbnail.delete(root).await;
-                for part in self.parts.iter_mut() {
-                    part.download.delete(server, root).await;
-                }
             }
             self.last_updated = updated;
+        }
+
+        let media = &item.media()[0];
+        let parts = media.parts();
+
+        if parts.len() != self.parts.len() {
+            for part in self.parts.iter_mut() {
+                part.download.delete(server, root).await;
+            }
+
+            self.parts = parts
+                .iter()
+                .map(|p| VideoPartState {
+                    id: p.metadata().id.clone().unwrap(),
+                    duration: p.metadata().duration.unwrap(),
+                    download: Default::default(),
+                })
+                .collect()
+        } else {
+            for (part_state, part) in self.parts.iter_mut().zip(parts.iter()) {
+                let part_meta = part.metadata();
+                if part_state.id.as_str() != part_meta.id.as_deref().unwrap() {
+                    part_state.download.delete(server, root).await;
+                    part_state.id = part_meta.id.clone().unwrap();
+                    part_state.duration = part_meta.duration.unwrap();
+                }
+            }
+        }
+
+        for part in self.parts.iter_mut() {
+            part.download.delete(server, root).await;
         }
     }
 
