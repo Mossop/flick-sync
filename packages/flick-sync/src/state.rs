@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -95,8 +95,7 @@ pub(crate) struct CollectionState {
     pub(crate) id: String,
     pub(crate) library: String,
     pub(crate) title: String,
-    #[typeshare(serialized_as = "Vec<String>")]
-    pub(crate) contents: HashSet<String>,
+    pub(crate) contents: Vec<String>,
     #[serde(with = "time::serde::timestamp")]
     #[typeshare(serialized_as = "number")]
     pub(crate) last_updated: OffsetDateTime,
@@ -677,11 +676,13 @@ pub(crate) struct ServerState {
     pub(crate) playlists: HashMap<String, PlaylistState>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub(crate) collections: HashMap<String, CollectionState>,
+    #[serde(default)]
     pub(crate) libraries: HashMap<String, LibraryState>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub(crate) shows: HashMap<String, ShowState>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub(crate) seasons: HashMap<String, SeasonState>,
+    #[serde(default)]
     pub(crate) videos: HashMap<String, VideoState>,
 }
 

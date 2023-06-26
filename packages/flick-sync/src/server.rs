@@ -9,7 +9,9 @@ use async_recursion::async_recursion;
 use core::ops::Deref;
 use plex_api::{
     device::DeviceConnection,
-    library::{Collection, Episode, Item, MetadataItem, Movie, Playlist, Season, Show, Video},
+    library::{
+        Episode, Item, Library as PlexLibrary, MetadataItem, Movie, Playlist, Season, Show, Video,
+    },
     media_container::server::library::MetadataType,
     MyPlexBuilder,
 };
@@ -313,7 +315,6 @@ impl Server {
     }
 
     /// Updates the state for the synced items
-    #[instrument(level = "trace", skip(self), fields(server = self.id))]
     pub async fn update_state(&self) -> Result {
         info!("Updating item metadata");
         let server = self.connect().await?;
@@ -333,7 +334,7 @@ impl Server {
 
                 let mut state_sync = StateSync {
                     server_state,
-                    server,
+                    server: server.clone(),
                     root: &root,
                     seen_items: Default::default(),
                     seen_libraries: Default::default(),
@@ -346,6 +347,87 @@ impl Server {
                 }
 
                 state_sync.prune_unseen().await?;
+
+                let mut seen_collections: HashSet<String> = HashSet::new();
+
+                for library in server.libraries() {
+                    if server_state.libraries.contains_key(library.id()) {
+                        match library {
+                            PlexLibrary::Movie(lib) => {
+                                let collections = lib.collections().await?;
+                                for collection in collections {
+                                    let children = collection.children().await?;
+
+                                    let available: Vec<String> = children
+                                        .iter()
+                                        .filter_map(|movie| {
+                                            if server_state.videos.contains_key(movie.rating_key())
+                                            {
+                                                Some(movie.rating_key().to_owned())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+
+                                    if !available.is_empty() {
+                                        let collection_state = server_state
+                                            .collections
+                                            .entry(collection.rating_key().to_owned())
+                                            .or_insert_with(|| CollectionState::from(&collection));
+                                        collection_state.contents = available;
+
+                                        collection_state.update(&collection, &root).await;
+
+                                        seen_collections.insert(collection_state.id.clone());
+                                    }
+                                }
+                            }
+                            PlexLibrary::TV(lib) => {
+                                let collections = lib.collections().await?;
+                                for collection in collections {
+                                    let children = collection.children().await?;
+
+                                    let available: Vec<String> = children
+                                        .iter()
+                                        .filter_map(|show| {
+                                            if server_state.shows.contains_key(show.rating_key()) {
+                                                Some(show.rating_key().to_owned())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+
+                                    if !available.is_empty() {
+                                        let collection_state = server_state
+                                            .collections
+                                            .entry(collection.rating_key().to_owned())
+                                            .or_insert_with(|| CollectionState::from(&collection));
+                                        collection_state.contents = available;
+
+                                        collection_state.update(&collection, &root).await;
+
+                                        seen_collections.insert(collection_state.id.clone());
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                for collection in server_state
+                    .collections
+                    .values_mut()
+                    .filter(|v| !seen_collections.contains(&v.id))
+                {
+                    collection.delete(&root).await;
+                }
+
+                server_state
+                    .collections
+                    .retain(|k, _v| seen_collections.contains(k));
             }
 
             self.inner.persist_state(&state).await?;
@@ -612,25 +694,6 @@ impl<'a> StateSync<'a> {
         Ok(library)
     }
 
-    async fn add_collection<T>(
-        &mut self,
-        collection: &Collection<T>,
-        items: HashSet<String>,
-    ) -> Result {
-        return_if_seen!(self, collection);
-
-        let collection_state = self
-            .server_state
-            .collections
-            .entry(collection.rating_key().to_owned())
-            .or_insert_with(|| CollectionState::from(collection));
-        collection_state.contents = items;
-
-        collection_state.update(collection, self.root).await;
-
-        Ok(())
-    }
-
     fn add_playlist(&mut self, playlist: &Playlist<Video>, videos: Vec<String>) -> Result {
         return_if_seen!(self, playlist);
 
@@ -657,15 +720,6 @@ impl<'a> StateSync<'a> {
             video.delete(&self.server, self.root).await;
         }
 
-        for collection in self
-            .server_state
-            .collections
-            .values_mut()
-            .filter(|v| !self.seen_items.contains(&v.id))
-        {
-            collection.delete(self.root).await;
-        }
-
         for show in self
             .server_state
             .shows
@@ -681,10 +735,6 @@ impl<'a> StateSync<'a> {
 
         self.server_state
             .playlists
-            .retain(|k, _v| self.seen_items.contains(k));
-
-        self.server_state
-            .collections
             .retain(|k, _v| self.seen_items.contains(k));
 
         self.server_state
@@ -799,7 +849,7 @@ impl<'a> StateSync<'a> {
                     }
                 }
 
-                self.add_collection(&collection, items).await
+                Ok(())
             }
             Item::ShowCollection(collection) => {
                 let mut items = HashSet::new();
@@ -814,7 +864,7 @@ impl<'a> StateSync<'a> {
                     }
                 }
 
-                self.add_collection(&collection, items).await
+                Ok(())
             }
             Item::VideoPlaylist(playlist) => {
                 let mut items = Vec::new();
