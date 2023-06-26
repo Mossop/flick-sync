@@ -474,10 +474,12 @@ where
 {
     fn eq(&self, part: &Part<'_, M>) -> bool {
         let metadata = part.metadata();
-        metadata.id.as_deref() == Some(self.id.as_str())
-            && metadata.key.as_deref() == Some(self.key.as_str())
-            && metadata.size == Some(self.size)
-            && metadata.duration == Some(self.duration)
+        metadata.id.as_ref().is_some_and(|id| id == &self.id)
+            && metadata.key.as_ref().is_some_and(|key| key == &self.key)
+            && metadata.size.is_some_and(|size| size == self.size)
+            && metadata
+                .duration
+                .is_some_and(|duration| duration == self.duration)
     }
 }
 
