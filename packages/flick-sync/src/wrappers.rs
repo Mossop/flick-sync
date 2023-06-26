@@ -454,7 +454,7 @@ impl VideoPart {
         let parts = media.parts();
         let part = parts.get(self.index).ok_or_else(|| Error::MissingItem)?;
 
-        debug!("Attempting transcode");
+        trace!("Attempting transcode");
 
         let session = part.create_download_session(options).await?;
 
@@ -847,6 +847,7 @@ impl VideoStats {
             let state = part.download_state().await;
 
             if let Some(path) = state.file() {
+                let path = part.inner.path.read().await.join(path);
                 if let Ok(file_stats) = metadata(path).await {
                     stats.downloaded_bytes += file_stats.len();
                 }
