@@ -128,6 +128,22 @@ impl Server {
         server_config.profile.clone()
     }
 
+    pub async fn connection(&self) -> ServerConnection {
+        let config = self.inner.config.read().await;
+        let server_config = config.servers.get(&self.id).unwrap();
+        server_config.connection.clone()
+    }
+
+    pub async fn update_connection(&self, server: plex_api::Server) -> Result {
+        let mut state = self.inner.state.write().await;
+
+        let server_state = state.servers.entry(self.id.to_owned()).or_default();
+        server_state.token = server.client().x_plex_token().to_owned();
+        server_state.name = server.media_container.friendly_name;
+
+        self.inner.persist_state(&state).await
+    }
+
     pub(crate) async fn transcode_permit(&self) -> SemaphorePermit {
         self.transcode_requests.acquire().await.unwrap()
     }

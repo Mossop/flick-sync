@@ -5,9 +5,9 @@ use flick_sync::{
         self,
         device::{Device, DeviceConnection},
         library::{Item, MetadataItem},
-        MyPlexBuilder, Server,
+        HttpClient, MyPlex, MyPlexBuilder, Server as PlexServer,
     },
-    FlickSync, ServerConnection,
+    FlickSync, Server, ServerConnection,
 };
 use tracing::error;
 use url::Url;
@@ -23,125 +23,163 @@ pub struct Login {
     profile: Option<String>,
 }
 
+async fn myplex_auth(console: &Console, client: &HttpClient, username: &str) -> Result<MyPlex> {
+    let password = console.password("Password");
+
+    let myplex = match MyPlexBuilder::default()
+        .set_client(client.clone())
+        .set_username_and_password(username, password.clone())
+        .build()
+        .await
+    {
+        Ok(p) => p,
+        Err(e) => {
+            if matches!(e, plex_api::Error::OtpRequired) {
+                let otp = console.input("OTP");
+                MyPlexBuilder::default()
+                    .set_client(client.clone())
+                    .set_username_and_password(username, password.clone())
+                    .set_otp(otp)
+                    .build()
+                    .await?
+            } else {
+                return Err(e.into());
+            }
+        }
+    };
+
+    let home = myplex.home()?;
+    let users = home.users().await?;
+
+    let index = if users.len() == 1 {
+        0
+    } else {
+        let names = users
+            .iter()
+            .map(|u| u.title.clone())
+            .collect::<Vec<String>>();
+        console.select("Select user", &names)
+    };
+
+    let user = &users[index];
+    let pin = if user.protected {
+        console.input("Enter PIN")
+    } else {
+        "".to_string()
+    };
+
+    Ok(home.switch_user(myplex, user, Some(&pin)).await?)
+}
+
+async fn reconnect_server(server: Server, flick_sync: FlickSync, console: Console) -> Result {
+    let connection = server.connection().await;
+
+    match connection {
+        ServerConnection::MyPlex { username, id } => {
+            let client = flick_sync.client().await;
+
+            console.println(format!("Username: {username}"));
+            let myplex = myplex_auth(&console, &client, &username).await?;
+
+            let manager = myplex.device_manager()?;
+            let device = manager
+                .devices()
+                .await?
+                .into_iter()
+                .find(|d| d.is_server() && d.identifier() == id);
+
+            if let Some(device) = device {
+                let server_connection = match device.connect().await? {
+                    DeviceConnection::Server(server) => *server,
+                    _ => panic!("Unexpected client connection"),
+                };
+
+                server.update_connection(server_connection).await?;
+            } else {
+                console.println("Expected server no longer exists.")
+            }
+        }
+        ServerConnection::Direct { url: _ } => {
+            console.println("No need to re-authenticate with direct connection.");
+        }
+    }
+    Ok(())
+}
+
+async fn create_server(args: Login, flick_sync: FlickSync, console: Console) -> Result {
+    let client = flick_sync.client().await;
+
+    let method = console.select(
+        "Select how to connect to the new server",
+        &["MyPlex", "Direct"],
+    );
+
+    if method == 1 {
+        let mut url = console.input("Enter the server address (IP:port or URL)");
+        if !url.contains("://") {
+            if !url.contains(':') {
+                url = format!("http://{}:32400", url);
+            } else {
+                url = format!("http://{}", url);
+            }
+        }
+
+        let server = PlexServer::new(url.clone(), client).await?;
+
+        let connection = ServerConnection::Direct { url };
+
+        flick_sync
+            .add_server(&args.id, server, connection, args.profile)
+            .await?;
+    } else {
+        let username = console.input("Username");
+        let myplex = myplex_auth(&console, &client, &username).await?;
+
+        let manager = myplex.device_manager()?;
+        let devices: Vec<Device<'_>> = manager
+            .devices()
+            .await?
+            .into_iter()
+            .filter(|d| d.is_server())
+            .collect();
+
+        let device = if devices.is_empty() {
+            return err("No servers found in this account");
+        } else if devices.len() == 1 {
+            &devices[0]
+        } else {
+            let names: Vec<String> = devices.iter().map(|d| d.name().to_owned()).collect();
+            let index = console.select("Select server", &names);
+            &devices[index]
+        };
+
+        console.println(format!("Got device {}", device.identifier()));
+
+        let server = match device.connect().await? {
+            DeviceConnection::Server(server) => *server,
+            _ => panic!("Unexpected client connection"),
+        };
+
+        let connection = ServerConnection::MyPlex {
+            username,
+            id: server.machine_identifier().to_owned(),
+        };
+
+        flick_sync
+            .add_server(&args.id, server, connection, args.profile)
+            .await?;
+    }
+
+    Ok(())
+}
+
 #[async_trait]
 impl Runnable for Login {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         match flick_sync.server(&self.id).await {
-            Some(_server) => {
-                todo!();
-            }
-            None => {
-                let client = flick_sync.client().await;
-
-                let method = console.select(
-                    "Select how to connect to the new server",
-                    &["MyPlex", "Direct"],
-                );
-
-                if method == 1 {
-                    let mut url = console.input("Enter the server address (IP:port or URL)");
-                    if !url.contains("://") {
-                        if !url.contains(':') {
-                            url = format!("http://{}:32400", url);
-                        } else {
-                            url = format!("http://{}", url);
-                        }
-                    }
-
-                    let server = Server::new(url.clone(), client).await?;
-
-                    let connection = ServerConnection::Direct { url };
-
-                    flick_sync
-                        .add_server(&self.id, server, connection, self.profile)
-                        .await?;
-                } else {
-                    let username = console.input("Username");
-                    let password = console.password("Password");
-
-                    let myplex = match MyPlexBuilder::default()
-                        .set_client(client.clone())
-                        .set_username_and_password(&username, password.clone())
-                        .build()
-                        .await
-                    {
-                        Ok(p) => p,
-                        Err(e) => {
-                            if matches!(e, plex_api::Error::OtpRequired) {
-                                let otp = console.input("OTP");
-                                MyPlexBuilder::default()
-                                    .set_client(client.clone())
-                                    .set_username_and_password(&username, password.clone())
-                                    .set_otp(otp)
-                                    .build()
-                                    .await?
-                            } else {
-                                return Err(e.into());
-                            }
-                        }
-                    };
-
-                    let home = myplex.home()?;
-                    let users = home.users().await?;
-
-                    let index = if users.len() == 1 {
-                        0
-                    } else {
-                        let names = users
-                            .iter()
-                            .map(|u| u.title.clone())
-                            .collect::<Vec<String>>();
-                        console.select("Select user", &names)
-                    };
-
-                    let user = &users[index];
-                    let pin = if user.protected {
-                        console.input("Enter PIN")
-                    } else {
-                        "".to_string()
-                    };
-
-                    let myplex = home.switch_user(myplex, user, Some(&pin)).await?;
-
-                    let manager = myplex.device_manager()?;
-                    let devices: Vec<Device<'_>> = manager
-                        .devices()
-                        .await?
-                        .into_iter()
-                        .filter(|d| d.is_server())
-                        .collect();
-
-                    let device = if devices.is_empty() {
-                        return err("No servers found in this account");
-                    } else if devices.len() == 1 {
-                        &devices[0]
-                    } else {
-                        let names: Vec<String> =
-                            devices.iter().map(|d| d.name().to_owned()).collect();
-                        let index = console.select("Select server", &names);
-                        &devices[index]
-                    };
-
-                    console.println(format!("Got device {}", device.identifier()));
-
-                    let server = match device.connect().await? {
-                        DeviceConnection::Server(server) => *server,
-                        _ => panic!("Unexpected client connection"),
-                    };
-
-                    let connection = ServerConnection::MyPlex {
-                        username,
-                        id: server.machine_identifier().to_owned(),
-                    };
-
-                    flick_sync
-                        .add_server(&self.id, server, connection, self.profile)
-                        .await?;
-                }
-            }
+            Some(server) => reconnect_server(server, flick_sync, console).await,
+            None => create_server(self, flick_sync, console).await,
         }
-
-        Ok(())
     }
 }
 
