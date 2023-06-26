@@ -133,7 +133,7 @@ async fn wrapped_main(args: Args, console: Console) -> Result {
 
 #[tokio::main]
 async fn main() -> Result {
-    let args = Args::parse();
+    let args: Args = Args::parse();
 
     let console = Console::default();
 

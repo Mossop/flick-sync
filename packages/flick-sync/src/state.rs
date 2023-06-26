@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use plex_api::library::{FromMetadata, MediaItem};
 use plex_api::{
-    library::{Collection, MetadataItem, Playlist, Season, Show},
+    library::{Collection, MetadataItem, Part, Playlist, Season, Show},
     media_container::server::library::{Metadata, MetadataType},
     Server,
 };
@@ -445,9 +445,40 @@ impl fmt::Debug for DownloadState {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct VideoPartState {
     pub(crate) id: String,
+    pub(crate) key: String,
+    pub(crate) size: u64,
     #[typeshare(serialized_as = "number")]
     pub(crate) duration: u64,
     pub(crate) download: DownloadState,
+}
+
+impl<M> From<&Part<'_, M>> for VideoPartState
+where
+    M: MediaItem,
+{
+    fn from(part: &Part<'_, M>) -> Self {
+        let metadata = part.metadata();
+        Self {
+            id: metadata.id.clone().unwrap(),
+            key: metadata.key.clone().unwrap(),
+            size: metadata.size.unwrap(),
+            duration: metadata.duration.unwrap(),
+            download: Default::default(),
+        }
+    }
+}
+
+impl<M> PartialEq<Part<'_, M>> for VideoPartState
+where
+    M: MediaItem,
+{
+    fn eq(&self, part: &Part<'_, M>) -> bool {
+        let metadata = part.metadata();
+        metadata.id.as_deref() == Some(self.id.as_str())
+            && metadata.key.as_deref() == Some(self.key.as_str())
+            && metadata.size == Some(self.size)
+            && metadata.duration == Some(self.duration)
+    }
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -521,15 +552,7 @@ impl VideoState {
         };
 
         let media = &item.media()[0];
-        let parts: Vec<VideoPartState> = media
-            .parts()
-            .iter()
-            .map(|p| VideoPartState {
-                id: p.metadata().id.clone().unwrap(),
-                duration: p.metadata().duration.unwrap(),
-                download: Default::default(),
-            })
-            .collect();
+        let parts: Vec<VideoPartState> = media.parts().iter().map(VideoPartState::from).collect();
 
         Self {
             id: item.rating_key().to_owned(),
@@ -613,21 +636,12 @@ impl VideoState {
                 part.download.delete(server, root).await;
             }
 
-            self.parts = parts
-                .iter()
-                .map(|p| VideoPartState {
-                    id: p.metadata().id.clone().unwrap(),
-                    duration: p.metadata().duration.unwrap(),
-                    download: Default::default(),
-                })
-                .collect()
+            self.parts = parts.iter().map(VideoPartState::from).collect()
         } else {
             for (part_state, part) in self.parts.iter_mut().zip(parts.iter()) {
-                let part_meta = part.metadata();
-                if part_state.id.as_str() != part_meta.id.as_deref().unwrap() {
+                if part_state != part {
                     part_state.download.delete(server, root).await;
-                    part_state.id = part_meta.id.clone().unwrap();
-                    part_state.duration = part_meta.duration.unwrap();
+                    *part_state = part.into();
                 }
             }
         }
