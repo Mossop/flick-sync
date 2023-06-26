@@ -2,6 +2,7 @@ use std::{
     cmp::{max, min},
     fmt,
     io::{ErrorKind, IoSlice},
+    ops::{Add, AddAssign},
     path::{Path, PathBuf},
     pin::Pin,
     result,
@@ -801,6 +802,65 @@ impl StateWrapper<VideoPartState> for VideoPart {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct VideoStats {
+    pub downloaded_parts: u32,
+    pub total_parts: u32,
+    pub downloaded_bytes: u64,
+    pub total_bytes: u64,
+}
+
+impl Add for VideoStats {
+    type Output = VideoStats;
+
+    fn add(self, rhs: VideoStats) -> VideoStats {
+        Self {
+            downloaded_parts: self.downloaded_parts + rhs.downloaded_parts,
+            total_parts: self.total_parts + rhs.total_parts,
+            downloaded_bytes: self.downloaded_bytes + rhs.downloaded_bytes,
+            total_bytes: self.total_bytes + rhs.total_bytes,
+        }
+    }
+}
+
+impl AddAssign for VideoStats {
+    fn add_assign(&mut self, rhs: VideoStats) {
+        self.downloaded_parts += rhs.downloaded_parts;
+        self.total_parts += rhs.total_parts;
+        self.downloaded_bytes += rhs.downloaded_bytes;
+        self.total_bytes += rhs.total_bytes;
+    }
+}
+
+impl VideoStats {
+    async fn try_from<M: MediaItem>(item: M, parts: Vec<VideoPart>) -> Result<Self> {
+        let media = item.media();
+        let media = &media[0];
+
+        let mut stats = VideoStats::default();
+        for part in media.parts() {
+            stats.total_parts += 1;
+            stats.total_bytes += part.metadata().size.unwrap();
+        }
+
+        for part in parts {
+            let state = part.download_state().await;
+
+            if let Some(path) = state.file() {
+                if let Ok(file_stats) = metadata(path).await {
+                    stats.downloaded_bytes += file_stats.len();
+                }
+            }
+
+            if !state.needs_download() {
+                stats.downloaded_parts += 1;
+            }
+        }
+
+        Ok(stats)
+    }
+}
+
 #[derive(Clone)]
 pub struct Episode {
     pub(crate) server: Server,
@@ -819,6 +879,12 @@ state_wrapper!(Episode, VideoState, videos);
 impl Episode {
     thumbnail_methods!();
     parent!(season, Season, episode_state().season);
+
+    pub async fn stats(&self) -> Result<VideoStats> {
+        let server = self.server.connect().await?;
+        let item = server.item_by_id(&self.id).await?;
+        VideoStats::try_from(item, self.parts().await).await
+    }
 
     pub async fn show(&self) -> Show {
         self.season().await.show().await
@@ -903,6 +969,12 @@ impl Movie {
     thumbnail_methods!();
     parent!(library, MovieLibrary, movie_state().library);
 
+    pub async fn stats(&self) -> Result<VideoStats> {
+        let server = self.server.connect().await?;
+        let item = server.item_by_id(&self.id).await?;
+        VideoStats::try_from(item, self.parts().await).await
+    }
+
     pub async fn title(&self) -> String {
         self.with_state(|s| s.title.clone()).await
     }
@@ -962,6 +1034,13 @@ impl Video {
         match self {
             Self::Movie(v) => Library::Movie(v.library().await),
             Self::Episode(v) => Library::Show(v.library().await),
+        }
+    }
+
+    pub async fn stats(&self) -> Result<VideoStats> {
+        match self {
+            Self::Movie(v) => v.stats().await,
+            Self::Episode(v) => v.stats().await,
         }
     }
 

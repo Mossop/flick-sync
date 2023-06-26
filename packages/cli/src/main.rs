@@ -16,9 +16,11 @@ mod console;
 mod error;
 mod server;
 mod sync;
+mod util;
 
 pub use crate::console::Console;
 use server::{Add, Login};
+use util::Stats;
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
@@ -32,8 +34,10 @@ pub enum Command {
     /// Updates the lists of items to sync and then remove any local content no
     /// longer included.
     Prune,
-    /// Performs a full sync
+    /// Performs a full sync.
     Sync,
+    /// List download statistics.
+    Stats,
 }
 
 #[async_trait]
