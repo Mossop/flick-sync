@@ -587,12 +587,7 @@ impl VideoPart {
                 Err(Error::PlexError {
                     source: plex_api::Error::TranscodeRefused,
                 }) => debug!("Transcode attempt refused"),
-                Err(e) => {
-                    if cfg!(debug_assertions) {
-                        return Err(e);
-                    }
-                    error!(error=?e, "Transcode attempt failed, falling back to direct download");
-                }
+                Err(e) => return Err(e),
                 Ok(_) => {
                     return Ok(());
                 }

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 use plex_api::transcode::VideoTranscodeOptions;
 use serde::{Deserialize, Serialize};
@@ -40,7 +40,7 @@ pub(crate) struct ServerConfig {
     pub(crate) profile: Option<String>,
 }
 
-#[derive(Deserialize, Serialize, Default, Clone, Debug)]
+#[derive(Deserialize, Serialize, Default, Clone, Debug, PartialEq)]
 pub(crate) struct TranscodeProfile {
     /// Maximum bitrate in kbps.
     pub(crate) bitrate: Option<u32>,
@@ -62,6 +62,25 @@ impl TranscodeProfile {
         }
 
         options
+    }
+}
+
+impl PartialOrd for TranscodeProfile {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        let mut fallback: Option<Ordering> = None;
+
+        if let (Some(a), Some(b)) = (&self.bitrate, &other.bitrate) {
+            if a != b {
+                return Some(a.cmp(b));
+            }
+            fallback = Some(Ordering::Equal);
+        }
+
+        if let (Some((ax, ay)), Some((bx, by))) = (self.dimensions, other.dimensions) {
+            return Some((ax * ay).cmp(&(bx * by)));
+        }
+
+        fallback
     }
 }
 

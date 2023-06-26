@@ -12,11 +12,9 @@ use plex_api::{
 use serde::{Deserialize, Serialize};
 use time::{Date, OffsetDateTime};
 use tokio::fs;
-use tracing::{error, instrument, trace, warn};
+use tracing::{error, info, instrument, trace, warn};
 use typeshare::typeshare;
 use uuid::Uuid;
-
-use crate::config::SyncItem;
 
 #[derive(Deserialize, Default, Serialize, Clone, PartialEq)]
 #[serde(tag = "state", rename_all = "camelCase")]
@@ -544,7 +542,7 @@ impl VideoState {
         }
     }
 
-    pub(crate) fn from<M: MediaItem>(sync: &SyncItem, item: &M) -> Self {
+    pub(crate) fn from<M: MediaItem>(item: &M) -> Self {
         let metadata = item.metadata();
         let detail = match metadata.metadata_type {
             Some(MetadataType::Movie) => VideoDetail::Movie(MovieDetail::from(metadata)),
@@ -564,7 +562,8 @@ impl VideoState {
             media_id: media.metadata().id.clone().unwrap(),
             last_updated: metadata.updated_at.unwrap(),
             parts,
-            transcode_profile: sync.transcode_profile.clone(),
+            // Determined later
+            transcode_profile: None,
             playback_state: playback_state_from_metadata(metadata),
             last_viewed_at: metadata.last_viewed_at,
         }
@@ -572,14 +571,12 @@ impl VideoState {
 
     pub(crate) async fn update<M: MediaItem + FromMetadata>(
         &mut self,
-        sync: &SyncItem,
         item: &M,
         server: &Server,
         root: &Path,
     ) {
         let metadata = item.metadata();
         self.title = item.title().to_owned();
-        self.transcode_profile = sync.transcode_profile.clone();
 
         let server_state = playback_state_from_metadata(metadata);
         if self.last_viewed_at == metadata.last_viewed_at {
@@ -633,6 +630,7 @@ impl VideoState {
         let parts = media.parts();
 
         if parts.len() != self.parts.len() {
+            info!("Number of video parts changed, deleting existing downloads.");
             for part in self.parts.iter_mut() {
                 part.download.delete(server, root).await;
             }
@@ -641,14 +639,14 @@ impl VideoState {
         } else {
             for (part_state, part) in self.parts.iter_mut().zip(parts.iter()) {
                 if part_state != part {
+                    info!(
+                        part = part_state.id,
+                        "Part changed, deleting existing download."
+                    );
                     part_state.download.delete(server, root).await;
                     *part_state = part.into();
                 }
             }
-        }
-
-        for part in self.parts.iter_mut() {
-            part.download.delete(server, root).await;
         }
     }
 
