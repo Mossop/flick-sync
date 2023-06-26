@@ -24,7 +24,7 @@ use crate::{
         ShowState, VideoDetail, VideoState,
     },
     util::safe,
-    wrappers, Error, Inner, Library, Result, ServerConnection,
+    wrappers, Error, Inner, Library, Result, ServerConnection, DEFAULT_PROFILES,
 };
 
 #[derive(Clone)]
@@ -294,7 +294,7 @@ impl Server {
         let mut config = self.inner.config.write().await;
 
         if let Some(ref profile) = transcode_profile {
-            if !config.profiles.contains_key(profile) {
+            if !config.profiles.contains_key(profile) && !DEFAULT_PROFILES.contains_key(profile) {
                 return Err(Error::UnknownProfile(profile.to_owned()));
             }
         }
