@@ -360,6 +360,11 @@ impl VideoPart {
             .await
     }
 
+    pub async fn duration(&self) -> Duration {
+        self.with_state(|vs| Duration::from_millis(vs.duration))
+            .await
+    }
+
     pub async fn transfer_state(&self) -> TransferState {
         let download_state = self.download_state().await;
 
@@ -808,6 +813,7 @@ pub struct VideoStats {
     pub total_parts: u32,
     pub downloaded_bytes: u64,
     pub total_bytes: u64,
+    pub total_duration: Duration,
 }
 
 impl Add for VideoStats {
@@ -819,6 +825,7 @@ impl Add for VideoStats {
             total_parts: self.total_parts + rhs.total_parts,
             downloaded_bytes: self.downloaded_bytes + rhs.downloaded_bytes,
             total_bytes: self.total_bytes + rhs.total_bytes,
+            total_duration: self.total_duration + rhs.total_duration,
         }
     }
 }
@@ -829,6 +836,7 @@ impl AddAssign for VideoStats {
         self.total_parts += rhs.total_parts;
         self.downloaded_bytes += rhs.downloaded_bytes;
         self.total_bytes += rhs.total_bytes;
+        self.total_duration += rhs.total_duration;
     }
 }
 
@@ -844,6 +852,7 @@ impl VideoStats {
         }
 
         for part in parts {
+            stats.total_duration += part.duration().await;
             let state = part.download_state().await;
 
             if let Some(path) = state.file() {

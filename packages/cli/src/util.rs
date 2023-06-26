@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use clap::Args;
 use flick_sync::{FlickSync, VideoStats};
-use indicatif::DecimalBytes;
+use indicatif::{DecimalBytes, HumanDuration};
 
 use crate::{Console, Result, Runnable};
 
@@ -42,6 +42,10 @@ impl Runnable for Stats {
                 DecimalBytes(stats.total_bytes),
                 percent(stats.downloaded_bytes, stats.total_bytes)
             ));
+            console.println(format!(
+                "  Duration available: {}",
+                HumanDuration(stats.total_duration)
+            ));
 
             total += stats;
         }
@@ -58,6 +62,10 @@ impl Runnable for Stats {
                 DecimalBytes(total.downloaded_bytes),
                 DecimalBytes(total.total_bytes),
                 percent(total.downloaded_bytes, total.total_bytes)
+            ));
+            console.println(format!(
+                "Total duration available: {}",
+                HumanDuration(total.total_duration)
             ));
         }
 
