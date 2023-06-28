@@ -3,6 +3,10 @@ name = "flick-sync-cli"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "flick-sync"
+path = "src/main.rs"
+
 [dependencies]
 futures = "0.3.28"
 flick-sync = { path = "../flick-sync" }
