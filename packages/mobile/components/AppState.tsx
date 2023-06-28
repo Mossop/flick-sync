@@ -103,7 +103,9 @@ async function loadMediaState(store: string): Promise<State> {
 
     let state = await StateDecoder.decodeToPromise(JSON.parse(stateStr));
     let servers = Object.values(state.servers ?? {});
-    let videos = servers.flatMap((server) => Object.values(server.videos));
+    let videos = servers.flatMap((server) =>
+      Object.values(server.videos ?? {}),
+    );
     console.log(
       `Loaded state with ${servers.length} servers and ${videos.length} videos.`,
     );

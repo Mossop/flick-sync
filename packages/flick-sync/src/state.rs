@@ -467,6 +467,7 @@ impl fmt::Debug for DownloadState {
 pub(crate) struct VideoPartState {
     pub(crate) id: String,
     pub(crate) key: String,
+    #[typeshare(serialized_as = "number")]
     pub(crate) size: u64,
     #[typeshare(serialized_as = "number")]
     pub(crate) duration: u64,

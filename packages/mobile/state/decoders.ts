@@ -6,6 +6,7 @@ import {
   LibraryState,
   LibraryType,
   MovieDetail,
+  PlaybackState,
   PlaylistState,
   SeasonState,
   ServerState,
@@ -76,8 +77,36 @@ const DownloadStateDecoder = JsonDecoder.oneOf<DownloadState>(
   "DownloadState",
 );
 
+const PlaybackStateDecoder = JsonDecoder.oneOf<PlaybackState>(
+  [
+    JsonDecoder.object(
+      {
+        state: JsonDecoder.isExactly("unplayed"),
+      },
+      "unplayed",
+    ),
+    JsonDecoder.object(
+      {
+        state: JsonDecoder.isExactly("inprogress"),
+        position: JsonDecoder.number,
+      },
+      "inprogress",
+    ),
+    JsonDecoder.object(
+      {
+        state: JsonDecoder.isExactly("played"),
+      },
+      "played",
+    ),
+  ],
+  "PlaybackState",
+);
+
 const VideoPartStateDecoder = JsonDecoder.object<VideoPartState>(
   {
+    id: JsonDecoder.string,
+    key: JsonDecoder.string,
+    size: JsonDecoder.number,
     duration: JsonDecoder.number,
     download: DownloadStateDecoder,
   },
@@ -151,8 +180,9 @@ const VideoStateDecoder = JsonDecoder.object<VideoState>(
     parts: JsonDecoder.array(VideoPartStateDecoder, "VideoPart[]"),
     detail: VideoDetailDecoder,
     transcodeProfile: JsonDecoder.optional(JsonDecoder.string),
-    playPosition: JsonDecoder.optional(JsonDecoder.number),
+    playbackState: PlaybackStateDecoder,
     lastUpdated: JsonDecoder.number,
+    lastViewedAt: JsonDecoder.optional(JsonDecoder.number),
   },
   "VideoState",
 );
@@ -182,9 +212,8 @@ const ServerStateDecoder = JsonDecoder.object<ServerState>(
   {
     token: JsonDecoder.optional(JsonDecoder.string),
     name: JsonDecoder.string,
-    libraries: JsonDecoder.dictionary(
-      LibraryStateDecoder,
-      "ServerState.libraries",
+    libraries: JsonDecoder.optional(
+      JsonDecoder.dictionary(LibraryStateDecoder, "ServerState.libraries"),
     ),
     playlists: JsonDecoder.optional(
       JsonDecoder.dictionary(PlaylistStateDecoder, "ServerState.playlists"),
@@ -198,7 +227,9 @@ const ServerStateDecoder = JsonDecoder.object<ServerState>(
     seasons: JsonDecoder.optional(
       JsonDecoder.dictionary(SeasonStateDecoder, "ServerState.seasons"),
     ),
-    videos: JsonDecoder.dictionary(VideoStateDecoder, "ServerState.videos"),
+    videos: JsonDecoder.optional(
+      JsonDecoder.dictionary(VideoStateDecoder, "ServerState.videos"),
+    ),
   },
   "ServerState",
 );

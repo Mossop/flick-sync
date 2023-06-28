@@ -74,6 +74,9 @@ export interface EpisodeDetail {
 }
 
 export interface VideoPartState {
+  id: string;
+  key: string;
+  size: number;
   duration: number;
   download: DownloadState;
 }
@@ -97,10 +100,10 @@ export interface ServerState {
   name: string;
   playlists?: Record<string, PlaylistState>;
   collections?: Record<string, CollectionState>;
-  libraries: Record<string, LibraryState>;
+  libraries?: Record<string, LibraryState>;
   shows?: Record<string, ShowState>;
   seasons?: Record<string, SeasonState>;
-  videos: Record<string, VideoState>;
+  videos?: Record<string, VideoState>;
 }
 
 export interface State {
