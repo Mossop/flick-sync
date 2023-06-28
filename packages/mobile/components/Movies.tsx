@@ -1,18 +1,10 @@
-import { StyleSheet } from "react-native";
 import { TouchableRipple } from "react-native-paper";
 import { NavigationProp, useNavigation } from "@react-navigation/native";
 import { Movie, Video } from "../state";
-import Thumbnail from "./Thumbnail";
 import GridView from "./GridView";
-import { POSTER_HEIGHT, POSTER_WIDTH } from "../modules/styles";
+import { POSTER_WIDTH } from "../modules/styles";
 import { AppRoutes } from "./AppNavigator";
-
-const styles = StyleSheet.create({
-  thumb: {
-    width: POSTER_WIDTH,
-    height: POSTER_HEIGHT,
-  },
-});
+import Poster from "./Poster";
 
 export default function Movies({ movies }: { movies: Movie[] }) {
   let navigation = useNavigation<NavigationProp<AppRoutes>>();
@@ -29,7 +21,7 @@ export default function Movies({ movies }: { movies: Movie[] }) {
       {movies.map((movie) => (
         <GridView.Item key={movie.id}>
           <TouchableRipple onPress={() => launchVideo(movie)}>
-            <Thumbnail style={styles.thumb} thumbnail={movie.thumbnail} />
+            <Poster thumbnail={movie.thumbnail} text={movie.title} />
           </TouchableRipple>
         </GridView.Item>
       ))}

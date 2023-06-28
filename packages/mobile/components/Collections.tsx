@@ -1,18 +1,11 @@
-import { ScrollView, StyleSheet } from "react-native";
+import { ScrollView } from "react-native";
 import { NavigationProp, useNavigation } from "@react-navigation/native";
 import { TouchableRipple } from "react-native-paper";
 import { Collection } from "../state";
-import Thumbnail from "./Thumbnail";
 import GridView from "./GridView";
-import { POSTER_HEIGHT, POSTER_WIDTH } from "../modules/styles";
+import { POSTER_WIDTH } from "../modules/styles";
 import { AppRoutes } from "./AppNavigator";
-
-const styles = StyleSheet.create({
-  thumb: {
-    width: POSTER_WIDTH,
-    height: POSTER_HEIGHT,
-  },
-});
+import Poster from "./Poster";
 
 export default function Collections({
   collections,
@@ -34,9 +27,9 @@ export default function Collections({
                 })
               }
             >
-              <Thumbnail
-                style={styles.thumb}
+              <Poster
                 thumbnail={collection.thumbnail}
+                text={collection.title}
               />
             </TouchableRipple>
           </GridView.Item>

@@ -1,18 +1,10 @@
-import { StyleSheet } from "react-native";
 import { NavigationProp, useNavigation } from "@react-navigation/native";
 import { TouchableRipple } from "react-native-paper";
 import { Show } from "../state";
-import Thumbnail from "./Thumbnail";
 import GridView from "./GridView";
-import { POSTER_HEIGHT, POSTER_WIDTH } from "../modules/styles";
+import { POSTER_WIDTH } from "../modules/styles";
 import { AppRoutes } from "./AppNavigator";
-
-const styles = StyleSheet.create({
-  thumb: {
-    width: POSTER_WIDTH,
-    height: POSTER_HEIGHT,
-  },
-});
+import Poster from "./Poster";
 
 export default function Shows({ shows }: { shows: Show[] }) {
   let navigation = useNavigation<NavigationProp<AppRoutes>>();
@@ -29,7 +21,7 @@ export default function Shows({ shows }: { shows: Show[] }) {
               })
             }
           >
-            <Thumbnail style={styles.thumb} thumbnail={show.thumbnail} />
+            <Poster text={show.title} thumbnail={show.thumbnail} />
           </TouchableRipple>
         </GridView.Item>
       ))}
