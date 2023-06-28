@@ -119,7 +119,7 @@ async fn complete_download(state: &PartTransferState) -> Result {
     Ok(())
 }
 
-#[instrument(level = "trace", skip(state), fields(part=state.part.id()))]
+#[instrument(level = "trace", skip(state), fields(video=state.part.id(), part=state.part.index()))]
 async fn download_part(mut state: PartTransferState) {
     if state.part.transfer_state().await != TransferState::Downloading {
         let _permit = if let Some(permit) = state.transcode_permit.take() {

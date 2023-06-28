@@ -352,6 +352,10 @@ impl VideoPart {
         &self.id
     }
 
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
     async fn with_video_state<F, R>(&self, cb: F) -> R
     where
         F: Send + FnOnce(&VideoState) -> R,
@@ -379,6 +383,7 @@ impl VideoPart {
         }
     }
 
+    #[instrument(level = "trace", skip(self), fields(video=self.id, part=self.index))]
     pub async fn verify_download(&self) -> Result {
         let server = self.server.connect().await?;
         let mut download_state = self.download_state().await;
@@ -422,7 +427,7 @@ impl VideoPart {
         !download_state.needs_download()
     }
 
-    #[instrument(level = "trace", skip(self), fields(session_id))]
+    #[instrument(level = "trace", skip(self), fields(session_id, video=self.id, part=self.index))]
     async fn start_transcode(&self) -> Result {
         let (media_id, profile) = self
             .with_video_state(|vs| (vs.media_id.clone(), vs.transcode_profile.clone()))
@@ -503,7 +508,7 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self), fields(video=self.id, part=self.index))]
     async fn enter_downloading_state(&self) -> Result {
         let server = self.server.connect().await?;
         let item = server.item_by_id(&self.id).await?;
@@ -540,7 +545,7 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(self, progress))]
+    #[instrument(level = "trace", skip(self, progress), fields(video=self.id, part=self.index))]
     async fn wait_for_transcode_to_complete<P: Progress + Unpin>(
         &self,
         session_id: &str,
@@ -602,7 +607,7 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace")]
+    #[instrument(level = "trace", fields(video=self.id, part=self.index))]
     pub async fn negotiate_transfer_type(&self) -> Result {
         let mut download_state = self.download_state().await;
 
@@ -640,7 +645,7 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(progress))]
+    #[instrument(level = "trace", skip(progress), fields(video=self.id, part=self.index))]
     pub async fn wait_for_download_to_be_available<P: Progress + Unpin>(
         &self,
         mut progress: P,
@@ -667,7 +672,7 @@ impl VideoPart {
         }
     }
 
-    #[instrument(level = "trace", skip(self, path, progress))]
+    #[instrument(level = "trace", skip(self, path, progress), fields(video=self.id, part=self.index))]
     async fn download_direct<P: Progress + Unpin>(&self, path: &Path, mut progress: P) -> Result {
         let target = { self.inner.path.read().await.join(path) };
         let offset = match metadata(&target).await {
@@ -730,7 +735,7 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(self, session_id, path, progress))]
+    #[instrument(level = "trace", skip(self, path, progress), fields(video=self.id, part=self.index))]
     async fn download_transcode<P: Progress + Unpin>(
         &self,
         session_id: &str,
