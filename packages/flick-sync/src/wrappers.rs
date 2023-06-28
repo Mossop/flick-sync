@@ -568,7 +568,10 @@ impl VideoPart {
                     progress.progress(100, 100);
                     break;
                 }
-                Ok(TranscodeStatus::Error) => return Err(Error::TranscodeFailed),
+                Ok(TranscodeStatus::Error) => {
+                    let _ = session.cancel().await;
+                    return Err(Error::TranscodeFailed);
+                }
                 Ok(TranscodeStatus::Transcoding {
                     remaining,
                     progress: p,

@@ -3,11 +3,14 @@ use std::fmt;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use plex_api::library::{FromMetadata, MediaItem};
 use plex_api::{
     library::{Collection, MetadataItem, Part, Playlist, Season, Show},
     media_container::server::library::{Metadata, MetadataType},
     Server,
+};
+use plex_api::{
+    library::{FromMetadata, MediaItem},
+    transcode::TranscodeStatus,
 };
 use serde::{Deserialize, Serialize};
 use time::{Date, OffsetDateTime};
@@ -351,18 +354,39 @@ impl DownloadState {
             DownloadState::Transcoding { session_id, path } => {
                 let file = root.join(&path);
 
-                if let Err(plex_api::Error::ItemNotFound) =
-                    server.transcode_session(session_id).await
-                {
-                    warn!(?path, "Transcode session is no longer present");
-                    if let Err(e) = fs::remove_file(&file).await {
-                        if e.kind() != ErrorKind::NotFound {
-                            warn!(?path, error=?e, "Failed to remove partial download");
-                        }
-                    }
+                match server.transcode_session(session_id).await {
+                    Ok(session) => {
+                        let status = match session.status().await {
+                            Ok(status) => status,
+                            Err(e) => {
+                                error!(?path, error=?e, "Failed to get transcode status");
+                                return;
+                            }
+                        };
 
-                    *self = DownloadState::None;
+                        if !matches!(status, TranscodeStatus::Error) {
+                            return;
+                        }
+
+                        error!(?path, "Transcode session has failed");
+                        let _ = session.cancel().await;
+                    }
+                    Err(plex_api::Error::ItemNotFound) => {
+                        warn!(?path, "Transcode session is no longer present");
+                    }
+                    Err(e) => {
+                        error!(?path, error=?e, "Failed to get transcode session");
+                        return;
+                    }
                 }
+
+                if let Err(e) = fs::remove_file(&file).await {
+                    if e.kind() != ErrorKind::NotFound {
+                        warn!(?path, error=?e, "Failed to remove partial download");
+                    }
+                }
+
+                *self = DownloadState::None;
 
                 return;
             }
