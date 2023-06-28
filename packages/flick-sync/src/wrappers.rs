@@ -17,7 +17,7 @@ use futures::AsyncWrite;
 use pin_project::pin_project;
 use plex_api::{
     library::{self, Item, MediaItem, MetadataItem},
-    transcode::{TranscodeSession, TranscodeStatus},
+    transcode::TranscodeStatus,
 };
 use tokio::{
     fs::{metadata, remove_file},
@@ -540,12 +540,28 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(self, session, progress), fields(session_id=session.session_id()))]
+    #[instrument(level = "trace", skip(self, progress))]
     async fn wait_for_transcode_to_complete<P: Progress + Unpin>(
         &self,
-        session: TranscodeSession,
+        session_id: &str,
         progress: &mut P,
     ) -> Result {
+        let server = self.server.connect().await?;
+        let session = match server.transcode_session(session_id).await {
+            Ok(session) => session,
+            Err(plex_api::Error::ItemNotFound) => {
+                warn!("Server dropped transcode session");
+                self.update_state(|state| state.download = DownloadState::None)
+                    .await?;
+
+                return Err(Error::TranscodeLost);
+            }
+            Err(e) => {
+                error!(error=?e, "Error getting transcode status");
+                return Err(e.into());
+            }
+        };
+
         loop {
             match session.status().await {
                 Ok(TranscodeStatus::Complete) => {
@@ -585,7 +601,23 @@ impl VideoPart {
 
     #[instrument(level = "trace")]
     pub async fn negotiate_transfer_type(&self) -> Result {
-        let download_state = self.download_state().await;
+        let mut download_state = self.download_state().await;
+
+        if matches!(
+            download_state,
+            DownloadState::Transcoding {
+                session_id: _,
+                path: _
+            }
+        ) {
+            let root = self.inner.path.read().await;
+            download_state
+                .verify(&self.server.connect().await?, &root)
+                .await;
+
+            self.update_state(|state| state.download = download_state.clone())
+                .await?;
+        }
 
         if matches!(download_state, DownloadState::None) {
             match self.start_transcode().await {
@@ -619,10 +651,8 @@ impl VideoPart {
                 path: _,
             } = download_state
             {
-                let server = self.server.connect().await?;
-                let session = server.transcode_session(&session_id).await?;
                 match self
-                    .wait_for_transcode_to_complete(session, &mut progress)
+                    .wait_for_transcode_to_complete(&session_id, &mut progress)
                     .await
                 {
                     Err(Error::TranscodeLost) => continue,

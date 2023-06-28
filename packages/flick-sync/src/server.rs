@@ -411,29 +411,10 @@ impl Server {
     pub async fn verify_downloads(&self) -> Result {
         info!("Verifying downloads");
 
-        for library in self.libraries().await {
-            match library {
-                Library::Movie(l) => {
-                    for video in l.movies().await {
-                        for part in video.parts().await {
-                            if let Err(e) = part.verify_download().await {
-                                warn!(error=?e);
-                            }
-                        }
-                    }
-                }
-                Library::Show(l) => {
-                    for show in l.shows().await {
-                        for season in show.seasons().await {
-                            for video in season.episodes().await {
-                                for part in video.parts().await {
-                                    if let Err(e) = part.verify_download().await {
-                                        warn!(error=?e);
-                                    }
-                                }
-                            }
-                        }
-                    }
+        for video in self.videos().await {
+            for part in video.parts().await {
+                if let Err(e) = part.verify_download().await {
+                    warn!(error=?e);
                 }
             }
         }

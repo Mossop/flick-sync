@@ -142,6 +142,7 @@ async fn download_part(mut state: PartTransferState) {
         if state.part.transfer_state().await == TransferState::Transcoding {
             if let Err(e) = complete_transcode(&state).await {
                 error!(error=?e);
+                return;
             }
         }
     }
