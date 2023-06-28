@@ -849,8 +849,9 @@ impl StateWrapper<VideoPartState> for VideoPart {
 pub struct VideoStats {
     pub downloaded_parts: u32,
     pub total_parts: u32,
-    pub downloaded_bytes: u64,
-    pub total_bytes: u64,
+    pub local_bytes: u64,
+    pub remote_bytes: u64,
+    pub remaining_bytes: u64,
     pub total_duration: Duration,
 }
 
@@ -861,8 +862,9 @@ impl Add for VideoStats {
         Self {
             downloaded_parts: self.downloaded_parts + rhs.downloaded_parts,
             total_parts: self.total_parts + rhs.total_parts,
-            downloaded_bytes: self.downloaded_bytes + rhs.downloaded_bytes,
-            total_bytes: self.total_bytes + rhs.total_bytes,
+            local_bytes: self.local_bytes + rhs.local_bytes,
+            remote_bytes: self.remote_bytes + rhs.remote_bytes,
+            remaining_bytes: self.remaining_bytes + rhs.remaining_bytes,
             total_duration: self.total_duration + rhs.total_duration,
         }
     }
@@ -872,8 +874,9 @@ impl AddAssign for VideoStats {
     fn add_assign(&mut self, rhs: VideoStats) {
         self.downloaded_parts += rhs.downloaded_parts;
         self.total_parts += rhs.total_parts;
-        self.downloaded_bytes += rhs.downloaded_bytes;
-        self.total_bytes += rhs.total_bytes;
+        self.local_bytes += rhs.local_bytes;
+        self.remote_bytes += rhs.remote_bytes;
+        self.remaining_bytes += rhs.remaining_bytes;
         self.total_duration += rhs.total_duration;
     }
 }
@@ -884,24 +887,25 @@ impl VideoStats {
         let media = &media[0];
 
         let mut stats = VideoStats::default();
-        for part in media.parts() {
-            stats.total_parts += 1;
-            stats.total_bytes += part.metadata().size.unwrap();
-        }
 
-        for part in parts {
-            stats.total_duration += part.duration().await;
-            let state = part.download_state().await;
+        for (local_part, remote_part) in parts.into_iter().zip(media.parts()) {
+            stats.total_parts += 1;
+
+            stats.total_duration += local_part.duration().await;
+            let state = local_part.download_state().await;
 
             if let Some(path) = state.file() {
-                let path = part.inner.path.read().await.join(path);
+                let path = local_part.inner.path.read().await.join(path);
                 if let Ok(file_stats) = metadata(path).await {
-                    stats.downloaded_bytes += file_stats.len();
+                    stats.local_bytes += file_stats.len();
                 }
             }
 
             if !state.needs_download() {
                 stats.downloaded_parts += 1;
+                stats.remote_bytes += remote_part.metadata().size.unwrap();
+            } else {
+                stats.remaining_bytes += remote_part.metadata().size.unwrap();
             }
         }
 

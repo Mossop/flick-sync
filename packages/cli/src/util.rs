@@ -38,9 +38,13 @@ impl Runnable for Stats {
             ));
             console.println(format!(
                 "  Downloaded data: {} / {} ({})",
-                DecimalBytes(stats.downloaded_bytes),
-                DecimalBytes(stats.total_bytes),
-                percent(stats.downloaded_bytes, stats.total_bytes)
+                DecimalBytes(stats.local_bytes),
+                DecimalBytes(stats.remote_bytes),
+                percent(stats.local_bytes, stats.remote_bytes)
+            ));
+            console.println(format!(
+                "  Remaining data: {}",
+                DecimalBytes(stats.remaining_bytes),
             ));
             console.println(format!(
                 "  Duration available: {}",
@@ -59,9 +63,13 @@ impl Runnable for Stats {
             ));
             console.println(format!(
                 "Total downloaded data: {} / {} ({})",
-                DecimalBytes(total.downloaded_bytes),
-                DecimalBytes(total.total_bytes),
-                percent(total.downloaded_bytes, total.total_bytes)
+                DecimalBytes(total.local_bytes),
+                DecimalBytes(total.remote_bytes),
+                percent(total.local_bytes, total.remote_bytes)
+            ));
+            console.println(format!(
+                "Total remaining data: {}",
+                DecimalBytes(total.remaining_bytes),
             ));
             console.println(format!(
                 "Total duration available: {}",
