@@ -77,6 +77,10 @@ function plain(st: string): string {
   if (lower.startsWith("the ")) {
     return lower.substring(4);
   }
+  if (lower.startsWith("a ")) {
+    return lower.substring(2);
+  }
+
   return lower;
 }
 

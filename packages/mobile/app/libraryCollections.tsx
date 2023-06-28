@@ -1,14 +1,24 @@
+import { ScrollView } from "react-native";
 import AppView from "../components/AppView";
-import { Collection, Library } from "../state";
-import Collections from "../components/Collections";
-import { byTitle, useMapped } from "../modules/util";
+import { Library } from "../state";
+import { List, ListControls, Type } from "../components/List";
 
 export default function CollectionList({ library }: { library: Library }) {
-  let collections = useMapped<Collection>(library.collections(), byTitle);
-
   return (
-    <AppView title={library.title}>
-      <Collections collections={collections} />
+    <AppView
+      title={library.title}
+      actions={
+        <ListControls id={`${library.id}/collections`} type={Type.Collection} />
+      }
+    >
+      <ScrollView>
+        <List
+          id={`${library.id}/collections`}
+          type={Type.Collection}
+          // @ts-ignore
+          items={library.collections()}
+        />
+      </ScrollView>
     </AppView>
   );
 }

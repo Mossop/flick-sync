@@ -1,39 +1,9 @@
 import { ScrollView } from "react-native";
 import AppView from "../components/AppView";
 import { useMediaState } from "../components/AppState";
-import Movies from "../components/Movies";
-import Shows from "../components/Shows";
-import { MovieCollection, ShowCollection, isMovieCollection } from "../state";
+import { isMovieCollection } from "../state";
 import { AppScreenProps } from "../components/AppNavigator";
-import { moviesByYear, showsByYear, useMapped } from "../modules/util";
-
-function MovieCollectionComponent({
-  collection,
-}: {
-  collection: MovieCollection;
-}) {
-  let movies = useMapped(collection.contents, moviesByYear);
-
-  return (
-    <ScrollView>
-      <Movies movies={movies} />
-    </ScrollView>
-  );
-}
-
-function ShowCollectionComponent({
-  collection,
-}: {
-  collection: ShowCollection;
-}) {
-  let shows = useMapped(collection.contents, showsByYear);
-
-  return (
-    <ScrollView>
-      <Shows shows={shows} />
-    </ScrollView>
-  );
-}
+import { List, ListControls, Type } from "../components/List";
 
 export default function Collection({ route }: AppScreenProps<"collection">) {
   let mediaState = useMediaState();
@@ -48,13 +18,17 @@ export default function Collection({ route }: AppScreenProps<"collection">) {
     throw new Error("Invalid params for collection route");
   }
 
+  let listType = isMovieCollection(collection) ? Type.Movie : Type.Show;
+
   return (
-    <AppView title={collection.title}>
-      {isMovieCollection(collection) ? (
-        <MovieCollectionComponent collection={collection} />
-      ) : (
-        <ShowCollectionComponent collection={collection} />
-      )}
+    <AppView
+      title={collection.title}
+      actions={<ListControls id={collection.id} type={listType} />}
+    >
+      <ScrollView>
+        {/* @ts-ignore */}
+        <List id={collection.id} type={listType} items={collection.contents} />
+      </ScrollView>
     </AppView>
   );
 }

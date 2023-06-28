@@ -393,7 +393,7 @@ export class Season extends ServerItemWrapper<SeasonState> implements ISeason {
   }
 }
 
-abstract class VideoWapper<S extends Omit<VideoState, "detail">>
+abstract class VideoWrapper<S extends Omit<VideoState, "detail">>
   extends ServerItemWrapper<S>
   implements IVideo
 {
@@ -474,7 +474,7 @@ abstract class VideoWapper<S extends Omit<VideoState, "detail">>
 }
 
 export class Episode
-  extends VideoWapper<Replace<VideoState, { detail: EpisodeDetail }>>
+  extends VideoWrapper<Replace<VideoState, { detail: EpisodeDetail }>>
   implements IEpisode
 {
   public get library(): ShowLibrary {
@@ -491,7 +491,7 @@ export class Episode
 }
 
 export class Movie
-  extends VideoWapper<Replace<VideoState, { detail: MovieDetail }>>
+  extends VideoWrapper<Replace<VideoState, { detail: MovieDetail }>>
   implements IMovie
 {
   public get library(): MovieLibrary {
@@ -506,6 +506,18 @@ export class Movie
 export type Video = Episode | Movie;
 export type Library = MovieLibrary | ShowLibrary;
 export type Collection = MovieCollection | ShowCollection;
+
+export function isVideo(item: any): item is Video {
+  return item instanceof VideoWrapper;
+}
+
+export function isLibrary(item: any): item is Library {
+  return item instanceof LibraryWrapper;
+}
+
+export function isCollection(item: any): item is Collection {
+  return item instanceof CollectionWrapper;
+}
 
 function itemGetter<R>(
   key: string,

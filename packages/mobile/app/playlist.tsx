@@ -2,7 +2,7 @@ import { ScrollView } from "react-native";
 import AppView from "../components/AppView";
 import { useMediaState } from "../components/AppState";
 import { AppScreenProps } from "../components/AppNavigator";
-import Videos from "../components/Videos";
+import { List, ListControls, Type } from "../components/List";
 
 export default function Playlist({ route }: AppScreenProps<"playlist">) {
   let mediaState = useMediaState();
@@ -18,9 +18,16 @@ export default function Playlist({ route }: AppScreenProps<"playlist">) {
   }
 
   return (
-    <AppView title={playlist.title}>
+    <AppView
+      title={playlist.title}
+      actions={<ListControls id={playlist.id} type={Type.PlaylistItem} />}
+    >
       <ScrollView>
-        <Videos videos={playlist.videos} />
+        <List
+          id={playlist.id}
+          type={Type.PlaylistItem}
+          items={playlist.videos}
+        />
       </ScrollView>
     </AppView>
   );

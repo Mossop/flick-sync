@@ -13,6 +13,7 @@ import { getInfoAsync, StorageAccessFramework } from "expo-file-system";
 import * as SplashScreen from "expo-splash-screen";
 import { MediaState, StateDecoder } from "../state";
 import { State } from "../state/base";
+import type { ListSetting } from "./List";
 
 const SETTINGS_KEY = "settings";
 const CONTENT_ROOT = "content://com.android.externalstorage.documents/tree/";
@@ -20,6 +21,7 @@ const STATE_FILE = ".flicksync.state.json";
 
 interface SettingsState {
   store: string;
+  listSettings: Record<string, ListSetting>;
 }
 
 interface ContextState {
@@ -51,13 +53,13 @@ async function chooseStore(): Promise<string> {
 async function loadSettings(): Promise<SettingsState> {
   console.log("Loading settings...");
 
-  let settings: SettingsState = { store: "" };
+  let settings: SettingsState = { store: "", listSettings: {} };
 
   try {
     let settingsStr = await AsyncStorage.getItem(SETTINGS_KEY);
     console.log("Got settings", settingsStr);
     if (settingsStr) {
-      settings = JSON.parse(settingsStr);
+      Object.assign(settings, JSON.parse(settingsStr));
     }
   } catch (e) {
     console.error(e);
@@ -83,6 +85,7 @@ async function loadSettings(): Promise<SettingsState> {
       let store = await chooseStore();
       settings = {
         store,
+        listSettings: {},
       };
 
       await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -119,7 +122,7 @@ async function loadMediaState(store: string): Promise<State> {
 
 class Settings {
   public constructor(
-    private state: SettingsState,
+    private state: ContextState,
     private setContextState: Dispatch<SetStateAction<ContextState | undefined>>,
   ) {}
 
@@ -132,17 +135,36 @@ class Settings {
   }
 
   public get store(): string {
-    return this.state.store;
+    return this.state.settings.store;
   }
 
   public path(path: string): string {
     return storagePath(this.store, path);
   }
 
+  public getListSetting(id: string): ListSetting | undefined {
+    return this.state.settings.listSettings[id];
+  }
+
+  public setListSetting(id: string, setting: ListSetting) {
+    let state: ContextState = {
+      state: this.state.state,
+      settings: {
+        ...this.state.settings,
+        listSettings: {
+          ...this.state.settings.listSettings,
+          [id]: setting,
+        },
+      },
+    };
+
+    this.persistSettings(state);
+  }
+
   public async pickStore() {
     let store = await chooseStore();
     let state = await loadMediaState(store);
-    this.persistSettings({ state, settings: { store } });
+    this.persistSettings({ state, settings: { store, listSettings: {} } });
   }
 }
 
@@ -227,8 +249,8 @@ function ProviderInner({
   children: ReactNode;
 }) {
   let settings = useMemo(
-    () => new Settings(contextState.settings, setContextState),
-    [contextState.settings, setContextState],
+    () => new Settings(contextState, setContextState),
+    [contextState, setContextState],
   );
 
   let appState = useMemo(

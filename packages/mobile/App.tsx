@@ -96,6 +96,7 @@ export default function Root() {
               screenOptions={{ headerShown: false }}
             >
               <RootStack.Screen name="app" component={App} />
+              {/* @ts-ignore */}
               <RootStack.Screen name="video" component={Video} />
             </RootStack.Navigator>
           </ThemeProvider>
