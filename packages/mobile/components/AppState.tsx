@@ -123,7 +123,7 @@ async function loadMediaState(store: string): Promise<State> {
 class Settings {
   public constructor(
     private state: ContextState,
-    private setContextState: Dispatch<SetStateAction<ContextState | undefined>>,
+    private setContextState: Dispatch<SetStateAction<ContextState>>,
   ) {}
 
   private async persistSettings(newContextState: ContextState) {
@@ -173,7 +173,7 @@ class AppManager {
 
   private isPersisting: boolean = false;
 
-  constructor(private settings: Settings, private persistedState: State) {
+  constructor(private store: string, private persistedState: State) {
     this.stateToPersist = persistedState;
   }
 
@@ -187,14 +187,14 @@ class AppManager {
     try {
       while (this.persistedState !== this.stateToPersist) {
         await StorageAccessFramework.deleteAsync(
-          this.settings.path(STATE_FILE),
+          storagePath(this.store, STATE_FILE),
           {
             idempotent: true,
           },
         );
 
         let file = await StorageAccessFramework.createFileAsync(
-          this.settings.store,
+          this.store,
           STATE_FILE.substring(0, STATE_FILE.length - 5),
           "application/json",
         );
@@ -245,7 +245,7 @@ function ProviderInner({
   children,
 }: {
   contextState: ContextState;
-  setContextState: Dispatch<SetStateAction<ContextState | undefined>>;
+  setContextState: Dispatch<SetStateAction<ContextState>>;
   children: ReactNode;
 }) {
   let settings = useMemo(
@@ -254,20 +254,19 @@ function ProviderInner({
   );
 
   let appState = useMemo(
-    () => new AppManager(settings, contextState.state),
-    [settings, contextState.state],
+    () => new AppManager(settings.store, contextState.state),
+    [settings.store, contextState.state],
   );
 
-  let mediaState = useMemo(
-    () =>
-      new MediaState(contextState.state, (state) => {
-        setContextState({
-          ...contextState,
-          state,
-        });
-      }),
-    [contextState, setContextState],
-  );
+  let mediaState = useMemo(() => {
+    console.log("Generating media state");
+    return new MediaState(contextState.state, (state) => {
+      setContextState((prev) => ({
+        ...prev,
+        state,
+      }));
+    });
+  }, [contextState.state, setContextState]);
 
   useEffect(() => {
     appState.persistState(contextState.state);
@@ -299,7 +298,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   return (
     <ProviderInner
       contextState={contextState}
-      setContextState={setContextState}
+      setContextState={
+        setContextState as Dispatch<SetStateAction<ContextState>>
+      }
     >
       {children}
     </ProviderInner>
