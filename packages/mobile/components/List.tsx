@@ -1,7 +1,8 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { TouchableRipple, Text, Appbar } from "react-native-paper";
-import { View, StyleSheet } from "react-native";
+import { View, StyleSheet, Image } from "react-native";
 import { NavigationProp, useNavigation } from "@react-navigation/native";
+import { MaterialIcons } from "@expo/vector-icons";
 import {
   Collection,
   Video,
@@ -23,7 +24,6 @@ import {
   POSTER_HEIGHT,
   POSTER_WIDTH,
 } from "../modules/styles";
-import Thumbnail from "./Thumbnail";
 import { AppRoutes } from "./AppNavigator";
 import { byTitle } from "../modules/util";
 
@@ -75,10 +75,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  episodeThumb: {
-    width: EPISODE_WIDTH,
-    height: EPISODE_HEIGHT,
-  },
   listMeta: {
     flex: 1,
     paddingLeft: PADDING,
@@ -95,9 +91,41 @@ const styles = StyleSheet.create({
   posterTitle: {
     textAlign: "center",
   },
+
+  thumbImage: {
+    height: "100%",
+    width: "100%",
+    resizeMode: "contain",
+  },
+  thumbOverlay: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    left: 0,
+    bottom: 0,
+    width: "100%",
+    height: "100%",
+    flexDirection: "column",
+    justifyContent: "space-between",
+    background: "red",
+  },
   posterThumb: {
     width: POSTER_WIDTH,
     height: POSTER_HEIGHT,
+  },
+  videoThumb: {
+    width: EPISODE_WIDTH,
+    height: EPISODE_HEIGHT,
+  },
+  unreadBadge: {
+    alignSelf: "flex-end",
+    paddingTop: 5,
+    paddingEnd: 5,
+  },
+  playbackPosition: {
+    height: 5,
+    backgroundColor: "#e5a00d",
+    alignSelf: "flex-start",
   },
 });
 
@@ -234,21 +262,99 @@ export function ListControls({ id, type }: { id: string; type: Type }) {
   );
 }
 
-function ListThumb({ item }: { item: ChildItem }) {
-  let thumbStyles =
-    item instanceof Episode ? styles.episodeThumb : styles.posterThumb;
-
-  if (item instanceof Playlist || item instanceof Season) {
-    return <View style={thumbStyles} />;
-  }
-  return <Thumbnail style={thumbStyles} thumbnail={item.thumbnail} />;
+enum ThumbnailType {
+  Poster,
+  // eslint-disable-next-line @typescript-eslint/no-shadow
+  Video,
 }
 
-function PosterThumb({ item }: { item: ChildItem }) {
-  if (item instanceof Playlist || item instanceof Season) {
-    return <View style={styles.posterThumb} />;
+function ThumbnailOverlay({
+  item,
+  type,
+  dimensions,
+}: {
+  item: Video;
+  type: ThumbnailType;
+  dimensions: { width: number; height: number };
+}) {
+  let width;
+  let height;
+  if (type == ThumbnailType.Poster) {
+    width = POSTER_WIDTH;
+    height = POSTER_HEIGHT;
+  } else {
+    width = EPISODE_WIDTH;
+    height = EPISODE_HEIGHT;
   }
-  return <Thumbnail style={styles.posterThumb} thumbnail={item.thumbnail} />;
+
+  let paddingHorizontal;
+  let paddingVertical;
+  if (!dimensions) {
+    paddingHorizontal = 0;
+    paddingVertical = 0;
+  } else if (width / height > dimensions.width / dimensions.height) {
+    paddingVertical = 0;
+    paddingHorizontal =
+      (width - (dimensions.width * height) / dimensions.height) / 2;
+  } else {
+    paddingHorizontal = 0;
+    paddingVertical =
+      (height - (dimensions.height * width) / dimensions.width) / 2;
+  }
+
+  let percentComplete = `${Math.floor(
+    (100 * item.playPosition) / item.totalDuration,
+  )}%`;
+
+  return (
+    <View style={[styles.thumbOverlay, { paddingVertical, paddingHorizontal }]}>
+      <View style={styles.unreadBadge}>
+        {item.playbackState.state == "unplayed" && (
+          <MaterialIcons name="stop-circle" size={16} color="#e5a00d" />
+        )}
+      </View>
+      {item.playbackState.state == "inprogress" && (
+        <View style={[styles.playbackPosition, { width: percentComplete }]} />
+      )}
+    </View>
+  );
+}
+
+function Thumbnail({ item, type }: { item: ChildItem; type: ThumbnailType }) {
+  let settings = useSettings();
+  let [dimensions, setDimensions] = useState<{
+    width: number;
+    height: number;
+  }>();
+
+  let uri =
+    !(item instanceof Playlist) && item.thumbnail.state == "downloaded"
+      ? settings.path(item.thumbnail.path)
+      : undefined;
+
+  useEffect(() => {
+    if (uri) {
+      Image.getSize(uri, (width, height) => {
+        setDimensions({ width, height });
+      });
+    }
+  }, [uri]);
+
+  let style =
+    type == ThumbnailType.Poster ? styles.posterThumb : styles.videoThumb;
+
+  if (!uri) {
+    return <View style={style} />;
+  }
+
+  return (
+    <View style={style}>
+      <Image source={{ uri }} style={[styles.thumbImage, style]} />
+      {dimensions && isVideo(item) && (
+        <ThumbnailOverlay item={item} dimensions={dimensions} type={type} />
+      )}
+    </View>
+  );
 }
 
 function ListMeta({ item }: { item: ChildItem }) {
@@ -398,7 +504,7 @@ export function List<T extends ChildItem>({
           <GridView.Item key={item.id}>
             <TouchableRipple onPress={() => itemClick(item)}>
               <View style={styles.poster}>
-                <PosterThumb item={item} />
+                <Thumbnail type={ThumbnailType.Poster} item={item} />
                 <Text
                   variant="labelSmall"
                   style={styles.posterTitle}
@@ -421,7 +527,14 @@ export function List<T extends ChildItem>({
         <TouchableRipple key={item.id} onPress={() => itemClick(item)}>
           <View style={styles.listItem}>
             <View style={styles.listThumbContainer}>
-              <ListThumb item={item} />
+              <Thumbnail
+                type={
+                  item instanceof Episode
+                    ? ThumbnailType.Video
+                    : ThumbnailType.Poster
+                }
+                item={item}
+              />
             </View>
             <ListMeta item={item} />
           </View>
