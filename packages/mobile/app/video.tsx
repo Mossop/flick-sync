@@ -10,7 +10,7 @@ import * as StatusBar from "expo-status-bar";
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as NavigationBar from "expo-navigation-bar";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
-import { IconButton, useTheme } from "react-native-paper";
+import { IconButton } from "react-native-paper";
 import { useNavigation } from "@react-navigation/native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -168,27 +168,26 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let videoRef = useRef<Video | null>(null);
   let [playbackStatus, setPlaybackStatus] =
     useState<AVPlaybackStatusSuccess | null>(null);
-  let theme = useTheme();
   let initialized = useRef(false);
 
   let video = mediaState
     .getServer(route.params.server)
     .getVideo(route.params.video);
 
-  let playbackPosition = useRef<number | undefined>(video.playPosition);
-
   let previousDuration = useRef<number>(0);
   let currentPart = useRef<number>();
   let seek = useCallback(
     async (position: number) => {
+      previousDuration.current = 0;
       let targetPart = 0;
       let partPosition = Math.min(Math.max(position, 0), video.totalDuration);
 
       while (
         targetPart < video.parts.length - 1 &&
-        video.parts[targetPart]!.duration >= position
+        video.parts[targetPart]!.duration >= partPosition
       ) {
         partPosition -= video.parts[targetPart]!.duration;
+        previousDuration.current += video.parts[targetPart]!.duration;
         targetPart++;
       }
 
@@ -223,7 +222,6 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
       StatusBar.setStatusBarHidden(false, "fade");
       NavigationBar.setVisibilityAsync("visible");
       ScreenOrientation.unlockAsync();
-      deactivateKeepAwake();
     };
   }, []);
 
@@ -240,7 +238,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
 
   useEffect(() => {
     if (!initialized.current) {
-      seek(video.playPosition ?? 0);
+      seek(video.playbackState.state == "played" ? 0 : video.playPosition);
       initialized.current = true;
     }
   }, [video, seek]);
@@ -249,7 +247,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     (avStatus: AVPlaybackStatus) => {
       if ("uri" in avStatus) {
         setPlaybackStatus(avStatus);
-        playbackPosition.current =
+        let currentPosition =
           previousDuration.current + avStatus.positionMillis;
 
         if (avStatus.didJustFinish) {
@@ -260,7 +258,6 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
             previousDuration.current +=
               video.parts[currentPart.current!]!.duration;
             currentPart.current = currentPart.current! + 1;
-            playbackPosition.current = previousDuration.current;
             video.playPosition = previousDuration.current;
 
             let { download } = video.parts[currentPart.current!]!;
@@ -273,10 +270,8 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
               { positionMillis: 0, shouldPlay: true },
             );
           }
-        } else if (
-          Math.abs(playbackPosition.current - (video.playPosition ?? 0)) > 5000
-        ) {
-          video.playPosition = playbackPosition.current;
+        } else if (Math.abs(currentPosition - video.playPosition) > 5000) {
+          video.playPosition = currentPosition;
         }
       } else {
         setPlaybackStatus(null);
@@ -286,9 +281,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   );
 
   return (
-    <SafeAreaView
-      style={[styles.container, { backgroundColor: theme.colors.background }]}
-    >
+    <SafeAreaView style={[styles.container, { backgroundColor: "black" }]}>
       <SchemeOverride scheme="dark" />
       <Video
         ref={videoRef}

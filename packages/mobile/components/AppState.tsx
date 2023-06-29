@@ -207,6 +207,8 @@ class AppManager {
         );
         this.persistedState = writingState;
       }
+    } catch (e) {
+      console.error("Failed to persist state", e);
     } finally {
       this.isPersisting = false;
     }
@@ -258,15 +260,16 @@ function ProviderInner({
     [settings.store, contextState.state],
   );
 
-  let mediaState = useMemo(() => {
-    console.log("Generating media state");
-    return new MediaState(contextState.state, (state) => {
-      setContextState((prev) => ({
-        ...prev,
-        state,
-      }));
-    });
-  }, [contextState.state, setContextState]);
+  let mediaState = useMemo(
+    () =>
+      new MediaState(contextState.state, (state) => {
+        setContextState((prev) => ({
+          ...prev,
+          state,
+        }));
+      }),
+    [contextState.state, setContextState],
+  );
 
   useEffect(() => {
     appState.persistState(contextState.state);

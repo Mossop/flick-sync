@@ -170,7 +170,7 @@ type IVideo = WrapperInterface<
   {
     readonly server: Server;
     readonly library: Library;
-    playPosition?: number;
+    playPosition: number;
   }
 >;
 
@@ -451,15 +451,20 @@ abstract class VideoWrapper<S extends Omit<VideoState, "detail">>
     });
   }
 
-  public set playPosition(position: number) {
-    let playbackState: PlaybackState = { state: "inprogress", position };
-    if (position < 30000) {
-      playbackState = { state: "unplayed" };
-    } else if (position / this.totalDuration > 0.9) {
-      playbackState = { state: "played" };
+  public get playPosition(): number {
+    if (this.playbackState.state == "inprogress") {
+      return this.playbackState.position;
     }
 
-    this.playbackState = playbackState;
+    if (this.playbackState.state == "played") {
+      return this.totalDuration;
+    }
+
+    return 0;
+  }
+
+  public set playPosition(position: number) {
+    this.playbackState = { state: "inprogress", position };
   }
 
   public get isDownloaded(): boolean {
