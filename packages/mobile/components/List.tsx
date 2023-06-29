@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { TouchableRipple, Text, Appbar } from "react-native-paper";
+import { TouchableRipple, Text, Appbar, Menu } from "react-native-paper";
 import { View, StyleSheet, Image } from "react-native";
 import { NavigationProp, useNavigation } from "@react-navigation/native";
 import { MaterialIcons } from "@expo/vector-icons";
@@ -232,15 +232,39 @@ function useSorted<T extends ChildItem>(
 
         return a.title.localeCompare(b.title);
       });
+
+      return result;
     }
 
     return items;
   }, [items, ordering]);
 }
 
+function OrderingMenuItem({
+  title,
+  ordering,
+  currentOrdering,
+  setOrdering,
+}: {
+  title: string;
+  ordering: Ordering;
+  currentOrdering: Ordering;
+  setOrdering: (ordering: Ordering) => void;
+}) {
+  return (
+    <Menu.Item
+      leadingIcon={ordering == currentOrdering ? "check" : undefined}
+      onPress={() => setOrdering(ordering)}
+      title={title}
+    />
+  );
+}
+
 export function ListControls({ id, type }: { id: string; type: Type }) {
   let settings = useSettings();
   let listSettings = useListSetting(id, type);
+
+  let [menuVisible, setMenuVisible] = useState(false);
 
   let toggleDisplay = useCallback(() => {
     let newSettings: ListSetting = {
@@ -252,13 +276,59 @@ export function ListControls({ id, type }: { id: string; type: Type }) {
     settings.setListSetting(id, newSettings);
   }, [id, listSettings, settings]);
 
+  let setOrdering = useCallback(
+    (ordering: Ordering) => {
+      let newSettings: ListSetting = {
+        ...listSettings,
+        ordering,
+      };
+
+      settings.setListSetting(id, newSettings);
+      setMenuVisible(false);
+    },
+    [id, listSettings, settings],
+  );
+
   return (
-    <Appbar.Action
-      icon={
-        listSettings.display == Display.Grid ? "view-grid" : "format-list-text"
-      }
-      onPress={toggleDisplay}
-    />
+    <>
+      <Appbar.Action
+        icon={
+          listSettings.display == Display.Grid
+            ? "view-grid"
+            : "format-list-text"
+        }
+        onPress={toggleDisplay}
+      />
+      <Menu
+        visible={menuVisible}
+        onDismiss={() => setMenuVisible(false)}
+        anchor={
+          <Appbar.Action icon="filter" onPress={() => setMenuVisible(true)} />
+        }
+        anchorPosition="bottom"
+      >
+        {(type == Type.PlaylistItem || type == Type.Episode) && (
+          <OrderingMenuItem
+            ordering={Ordering.Index}
+            title="Order"
+            currentOrdering={listSettings.ordering}
+            setOrdering={setOrdering}
+          />
+        )}
+        <OrderingMenuItem
+          ordering={Ordering.Title}
+          title="Title"
+          currentOrdering={listSettings.ordering}
+          setOrdering={setOrdering}
+        />
+        <OrderingMenuItem
+          ordering={Ordering.AirDate}
+          title="Air Date"
+          currentOrdering={listSettings.ordering}
+          setOrdering={setOrdering}
+        />
+      </Menu>
+    </>
   );
 }
 
