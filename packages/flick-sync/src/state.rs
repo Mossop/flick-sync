@@ -15,7 +15,7 @@ use plex_api::{
 use serde::{Deserialize, Serialize};
 use time::{Date, OffsetDateTime};
 use tokio::fs;
-use tracing::{error, info, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 use typeshare::typeshare;
 use uuid::Uuid;
 
@@ -537,7 +537,7 @@ pub(crate) struct VideoState {
     pub(crate) parts: Vec<VideoPartState>,
     pub(crate) transcode_profile: Option<String>,
     pub(crate) playback_state: PlaybackState,
-    #[serde(with = "time::serde::timestamp::option")]
+    #[serde(default, with = "time::serde::timestamp::option")]
     #[typeshare(serialized_as = "Option<number>")]
     pub(crate) last_viewed_at: Option<OffsetDateTime>,
 }
@@ -612,11 +612,19 @@ impl VideoState {
                         // Not going to mark as unplayed on the server for now.
                     }
                     PlaybackState::InProgress { position } => {
+                        debug!(
+                            video = item.rating_key(),
+                            position, "Updating playback position on server"
+                        );
                         if let Err(e) = server.update_timeline(item, position).await {
                             warn!("Failed to update playback position: {e}");
                         }
                     }
                     PlaybackState::Played => {
+                        debug!(
+                            video = item.rating_key(),
+                            "Marking item as watched on server"
+                        );
                         if let Err(e) = server.mark_watched(item).await {
                             warn!("Failed to mark item as watched: {e}");
                         }

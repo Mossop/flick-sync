@@ -168,17 +168,23 @@ class Settings {
   }
 }
 
-class AppManager {
-  private stateToPersist: State;
+class StatePersister {
+  private persistedState: State | undefined = undefined;
+
+  private stateToPersist: State | undefined = undefined;
 
   private isPersisting: boolean = false;
 
-  constructor(private store: string, private persistedState: State) {
-    this.stateToPersist = persistedState;
-  }
+  constructor(private store: string) {}
 
   public async persistState(state: State) {
     this.stateToPersist = state;
+
+    if (!this.persistedState) {
+      this.persistedState = this.stateToPersist;
+      return;
+    }
+
     if (this.isPersisting) {
       return;
     }
@@ -200,7 +206,7 @@ class AppManager {
         );
 
         console.log("Writing new state");
-        let writingState = this.stateToPersist;
+        let writingState: State = this.stateToPersist;
         await StorageAccessFramework.writeAsStringAsync(
           file,
           JSON.stringify(writingState, undefined, 2),
@@ -255,9 +261,9 @@ function ProviderInner({
     [contextState, setContextState],
   );
 
-  let appState = useMemo(
-    () => new AppManager(settings.store, contextState.state),
-    [settings.store, contextState.state],
+  let statePersister = useMemo(
+    () => new StatePersister(settings.store),
+    [settings.store],
   );
 
   let mediaState = useMemo(
@@ -272,8 +278,8 @@ function ProviderInner({
   );
 
   useEffect(() => {
-    appState.persistState(contextState.state);
-  }, [appState, contextState.state]);
+    statePersister.persistState(contextState.state);
+  }, [statePersister, contextState.state]);
 
   let providerValue = useMemo<[MediaState, Settings]>(
     () => [mediaState, settings],
