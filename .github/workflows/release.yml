@@ -76,31 +76,3 @@ jobs:
           file_glob: true
           file: artifacts/*/*.tar.bz2
           tag: ${{ github.ref }}
-
-  release-android:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Setup Node
-        uses: actions/setup-node@v3
-        with:
-          node-version: 19.x
-          cache: npm
-
-      - name: Setup EAS
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          packager: npm
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Install dependencies
-        run: npm install
-        working-directory: ./packages/mobile
-
-      - name: Build
-        run: eas build --profile preview --platform android --non-interactive
-        working-directory: ./packages/mobile
