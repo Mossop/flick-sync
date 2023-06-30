@@ -1,4 +1,4 @@
-name: Release Builds
+name: Release CLI
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-cli:
-    name: Release ${{ matrix.name }}
+    name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
 
     strategy:
@@ -58,7 +58,8 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
 
-  release-cli:
+  upload-cli:
+    name: Upload CLI
     needs: [build-cli]
     runs-on: ubuntu-latest
 
