@@ -138,11 +138,11 @@ impl Server {
         server_config.connection.clone()
     }
 
-    pub async fn update_connection(&self, server: plex_api::Server) -> Result {
+    pub async fn update_connection(&self, auth_token: &str, server: plex_api::Server) -> Result {
         let mut state = self.inner.state.write().await;
 
         let server_state = state.servers.entry(self.id.to_owned()).or_default();
-        server_state.token = server.client().x_plex_token().to_owned();
+        server_state.token = auth_token.to_owned();
         server_state.name = server.media_container.friendly_name;
 
         self.inner.persist_state(&state).await
@@ -237,7 +237,11 @@ impl Server {
         let mut client = self.inner.client().await;
 
         match &server_config.connection {
-            ServerConnection::MyPlex { username: _, id } => {
+            ServerConnection::MyPlex {
+                username: _,
+                user_id,
+                device_id,
+            } => {
                 let token = state
                     .servers
                     .get(&self.id)
@@ -248,26 +252,34 @@ impl Server {
                 let myplex = MyPlexBuilder::default()
                     .set_client(client)
                     .set_token(token)
+                    .set_test_token_auth(false)
                     .build()
                     .await?;
 
-                let manager = myplex.device_manager()?;
-                for device in manager.devices().await? {
-                    if device.identifier() == id {
-                        match device.connect().await? {
-                            DeviceConnection::Server(server) => {
-                                trace!(url=%server.client().api_url,
-                                    "Connected to server"
-                                );
-                                *connection = Some(server.as_ref().clone());
-                                return Ok(*server);
-                            }
-                            _ => panic!("Unexpected client connection"),
-                        }
-                    }
-                }
+                let home = myplex.home()?;
+                let myplex = home.switch_user(myplex, user_id.clone(), None).await?;
 
-                Err(Error::MyPlexServerNotFound)
+                let manager = myplex.device_manager()?;
+                let device = match manager
+                    .resources()
+                    .await?
+                    .into_iter()
+                    .find(|d| d.identifier() == device_id)
+                {
+                    Some(d) => d,
+                    None => return Err(Error::MyPlexServerNotFound),
+                };
+
+                match device.connect().await? {
+                    DeviceConnection::Server(server) => {
+                        trace!(url=%server.client().api_url,
+                            "Connected to server"
+                        );
+                        *connection = Some(server.as_ref().clone());
+                        Ok(*server)
+                    }
+                    _ => panic!("Unexpected client connection"),
+                }
             }
             ServerConnection::Direct { url } => {
                 let token = state

@@ -8,8 +8,14 @@ use crate::util::{derive_list_item, from_list, into_list, ListItem};
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(tag = "type")]
 pub enum ServerConnection {
-    MyPlex { username: String, id: String },
-    Direct { url: String },
+    MyPlex {
+        username: String,
+        user_id: String,
+        device_id: String,
+    },
+    Direct {
+        url: String,
+    },
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]

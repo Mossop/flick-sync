@@ -171,6 +171,7 @@ impl FlickSync {
         &self,
         id: &str,
         server: plex_api::Server,
+        auth_token: &str,
         connection: ServerConnection,
         profile: Option<String>,
     ) -> Result {
@@ -184,7 +185,7 @@ impl FlickSync {
         state.servers.insert(
             id.to_owned(),
             ServerState {
-                token: server.client().x_plex_token().to_owned(),
+                token: auth_token.to_owned(),
                 name: server.media_container.friendly_name,
                 ..Default::default()
             },

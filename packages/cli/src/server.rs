@@ -48,45 +48,61 @@ async fn myplex_auth(console: &Console, client: &HttpClient, username: &str) -> 
         }
     };
 
-    let home = myplex.home()?;
-    let users = home.users().await?;
-
-    let index = if users.len() == 1 {
-        0
-    } else {
-        let names = users
-            .iter()
-            .map(|u| u.title.clone())
-            .collect::<Vec<String>>();
-        console.select("Select user", &names)
-    };
-
-    let user = &users[index];
-    let pin = if user.protected {
-        console.input("Enter PIN")
-    } else {
-        "".to_string()
-    };
-
-    Ok(home.switch_user(myplex, user, Some(&pin)).await?)
+    Ok(myplex)
 }
 
 async fn reconnect_server(server: Server, flick_sync: FlickSync, console: Console) -> Result {
     let connection = server.connection().await;
 
     match connection {
-        ServerConnection::MyPlex { username, id } => {
+        ServerConnection::MyPlex {
+            username,
+            user_id,
+            device_id,
+        } => {
             let client = flick_sync.client().await;
 
             console.println(format!("Username: {username}"));
             let myplex = myplex_auth(&console, &client, &username).await?;
+            let auth_token = myplex.client().x_plex_token().to_owned();
+
+            let home = myplex.home()?;
+            let users = home.users().await?;
+
+            let user = if let Some(user) = users.iter().find(|u| u.uuid == user_id) {
+                console.println(format!("User: {}", user.title));
+                user
+            } else {
+                let index = if users.len() == 1 {
+                    console.println(format!("User: {}", users[0].title));
+                    0
+                } else {
+                    let names = users
+                        .iter()
+                        .map(|u| u.title.clone())
+                        .collect::<Vec<String>>();
+                    console.select("Select user", &names)
+                };
+
+                &users[index]
+            };
+
+            let pin = if user.protected {
+                console.input("Enter PIN")
+            } else {
+                "".to_string()
+            };
+
+            let myplex = home
+                .switch_user(myplex, user.uuid.clone(), Some(&pin))
+                .await?;
 
             let manager = myplex.device_manager()?;
             let device = manager
-                .devices()
+                .resources()
                 .await?
                 .into_iter()
-                .find(|d| d.is_server() && d.identifier() == id);
+                .find(|d| d.is_server() && d.identifier() == device_id);
 
             if let Some(device) = device {
                 let server_connection = match device.connect().await? {
@@ -94,7 +110,9 @@ async fn reconnect_server(server: Server, flick_sync: FlickSync, console: Consol
                     _ => panic!("Unexpected client connection"),
                 };
 
-                server.update_connection(server_connection).await?;
+                server
+                    .update_connection(&auth_token, server_connection)
+                    .await?;
             } else {
                 console.println("Expected server no longer exists.")
             }
@@ -127,17 +145,44 @@ async fn create_server(args: Login, flick_sync: FlickSync, console: Console) -> 
         let server = PlexServer::new(url.clone(), client).await?;
 
         let connection = ServerConnection::Direct { url };
+        let auth_token = server.client().x_plex_token().to_owned();
 
         flick_sync
-            .add_server(&args.id, server, connection, args.profile)
+            .add_server(&args.id, server, &auth_token, connection, args.profile)
             .await?;
     } else {
         let username = console.input("Username");
         let myplex = myplex_auth(&console, &client, &username).await?;
+        let auth_token = myplex.client().x_plex_token().to_owned();
+
+        let home = myplex.home()?;
+        let users = home.users().await?;
+
+        let index = if users.len() == 1 {
+            console.println(format!("User: {}", users[0].title));
+            0
+        } else {
+            let names = users
+                .iter()
+                .map(|u| u.title.clone())
+                .collect::<Vec<String>>();
+            console.select("Select user", &names)
+        };
+
+        let user = &users[index];
+        let pin = if user.protected {
+            console.input("Enter PIN")
+        } else {
+            "".to_string()
+        };
+
+        let myplex = home
+            .switch_user(myplex, user.uuid.clone(), Some(&pin))
+            .await?;
 
         let manager = myplex.device_manager()?;
         let devices: Vec<Device<'_>> = manager
-            .devices()
+            .resources()
             .await?
             .into_iter()
             .filter(|d| d.is_server())
@@ -162,11 +207,12 @@ async fn create_server(args: Login, flick_sync: FlickSync, console: Console) -> 
 
         let connection = ServerConnection::MyPlex {
             username,
-            id: server.machine_identifier().to_owned(),
+            user_id: user.uuid.clone(),
+            device_id: server.machine_identifier().to_owned(),
         };
 
         flick_sync
-            .add_server(&args.id, server, connection, args.profile)
+            .add_server(&args.id, server, &auth_token, connection, args.profile)
             .await?;
     }
 
