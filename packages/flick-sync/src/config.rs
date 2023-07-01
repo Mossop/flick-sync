@@ -25,7 +25,7 @@ pub(crate) struct SyncItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) transcode_profile: Option<String>,
     #[serde(default)]
-    pub(crate) only_unread: bool,
+    pub(crate) only_unplayed: bool,
 }
 
 derive_list_item!(SyncItem);

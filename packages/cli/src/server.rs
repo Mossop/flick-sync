@@ -236,9 +236,9 @@ pub struct Add {
     /// The transcode profile to use for this item.
     #[clap(short, long)]
     profile: Option<String>,
-    /// Only sync unwatched items
+    /// Only sync unplayed items
     #[clap(short, long)]
-    only_unread: bool,
+    only_unplayed: bool,
 }
 
 #[async_trait]
@@ -307,7 +307,7 @@ impl Runnable for Add {
             ));
 
             server
-                .add_sync(&rating_key, self.profile, self.only_unread)
+                .add_sync(&rating_key, self.profile, self.only_unplayed)
                 .await?;
 
             return Ok(());

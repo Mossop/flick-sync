@@ -117,7 +117,7 @@ const styles = StyleSheet.create({
     width: EPISODE_WIDTH,
     height: EPISODE_HEIGHT,
   },
-  unreadBadge: {
+  unplayedBadge: {
     alignSelf: "flex-end",
     paddingTop: 5,
     paddingEnd: 5,
@@ -378,7 +378,7 @@ function ThumbnailOverlay({
 
   return (
     <View style={[styles.thumbOverlay, { paddingVertical, paddingHorizontal }]}>
-      <View style={styles.unreadBadge}>
+      <View style={styles.unplayedBadge}>
         {item.playbackState.state == "unplayed" && (
           <MaterialIcons name="stop-circle" size={16} color="#e5a00d" />
         )}

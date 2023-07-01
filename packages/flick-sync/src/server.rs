@@ -47,7 +47,7 @@ pub struct SyncItemInfo {
     pub item_type: ItemType,
     pub title: String,
     pub transcode_profile: Option<String>,
-    pub only_unread: bool,
+    pub only_unplayed: bool,
 }
 
 #[derive(Clone)]
@@ -172,7 +172,7 @@ impl Server {
                 item_type,
                 title: item.title().to_owned(),
                 transcode_profile: sync.transcode_profile.clone(),
-                only_unread: sync.only_unread,
+                only_unplayed: sync.only_unplayed,
             });
         }
 
@@ -358,7 +358,7 @@ impl Server {
         &self,
         rating_key: &str,
         transcode_profile: Option<String>,
-        only_unread: bool,
+        only_unplayed: bool,
     ) -> Result {
         let mut config = self.inner.config.write().await;
 
@@ -374,7 +374,7 @@ impl Server {
             SyncItem {
                 id: rating_key.to_owned(),
                 transcode_profile,
-                only_unread,
+                only_unplayed,
             },
         );
 
@@ -564,7 +564,7 @@ macro_rules! return_if_seen {
 
 impl<'a> StateSync<'a> {
     async fn add_video<T: MediaItem + FromMetadata>(&mut self, sync: &SyncItem, video: &T) {
-        if sync.only_unread && video.metadata().view_count.unwrap_or_default() > 0 {
+        if sync.only_unplayed && video.metadata().view_count.unwrap_or_default() > 0 {
             return;
         }
 

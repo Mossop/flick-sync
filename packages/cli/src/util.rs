@@ -120,7 +120,11 @@ impl Runnable for List {
                     ItemType::Unknown => "Unknown",
                 };
 
-                let selected = if item.only_unread { "unplayed" } else { "all" };
+                let selected = if item.only_unplayed {
+                    "unplayed"
+                } else {
+                    "all"
+                };
 
                 console.println(format!(
                     "{:10} {:8} {type_name:16}  {:20} {selected:3} {:10}",
