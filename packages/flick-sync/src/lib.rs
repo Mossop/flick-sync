@@ -52,7 +52,7 @@ lazy_static! {
             "1080p".to_string(),
             Some(TranscodeProfile {
                 bitrate: Some(8000),
-                dimensions: Some((1920, 720)),
+                dimensions: Some((1920, 1080)),
             }),
         );
         map
