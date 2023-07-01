@@ -19,7 +19,7 @@ mod sync;
 mod util;
 
 pub use crate::console::Console;
-use server::{Add, Login};
+use server::{Add, Login, Remove};
 use util::{List, Stats};
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
@@ -31,6 +31,8 @@ pub enum Command {
     Login,
     /// Adds an item to sync.
     Add,
+    /// Removes an item from the list to sync.
+    Remove,
     /// Updates the lists of items to sync and then remove any local content no
     /// longer included.
     Prune,

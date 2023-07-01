@@ -108,7 +108,7 @@ impl Runnable for List {
                 console.println("");
             }
 
-            for item in server.items().await? {
+            for item in server.list_syncs().await? {
                 let type_name = match item.item_type {
                     ItemType::Playlist => "Playlist",
                     ItemType::MovieCollection => "Movie Collection",

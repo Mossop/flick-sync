@@ -145,7 +145,7 @@ impl Server {
         &self.id
     }
 
-    pub async fn items(&self) -> Result<Vec<SyncItemInfo>> {
+    pub async fn list_syncs(&self) -> Result<Vec<SyncItemInfo>> {
         let plex_server = self.connect().await?;
 
         let config = self.inner.config.read().await;
@@ -379,6 +379,19 @@ impl Server {
         );
 
         self.inner.persist_config(&config).await
+    }
+
+    /// Removes an item to sync based on its rating key. Returns true if the item existed.
+    pub async fn remove_sync(&self, rating_key: &str) -> Result<bool> {
+        let mut config = self.inner.config.write().await;
+
+        let server_config = config.servers.get_mut(&self.id).unwrap();
+        let contained = server_config.syncs.contains_key(rating_key);
+        server_config.syncs.remove(rating_key);
+
+        self.inner.persist_config(&config).await?;
+
+        Ok(contained)
     }
 
     /// Updates the state for the synced items

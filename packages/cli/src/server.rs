@@ -316,3 +316,37 @@ impl Runnable for Add {
         Err(Error::ErrorMessage("No matching server found".to_string()))
     }
 }
+
+#[derive(Args)]
+pub struct Remove {
+    /// The server to remove from.
+    server: String,
+    /// The id item to remove.
+    id: String,
+}
+
+#[async_trait]
+impl Runnable for Remove {
+    async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
+        let server = if let Some(server) = flick_sync.server(&self.server).await {
+            server
+        } else {
+            console.println(format!("{} is not a known server.", self.server));
+            return Ok(());
+        };
+
+        if server.remove_sync(&self.id).await? {
+            if let Err(e) = server.update_state().await {
+                error!(server=server.id(), error=?e, "Failed to update server");
+                return Ok(());
+            }
+
+            if let Err(e) = server.prune().await {
+                error!(server=server.id(), error=?e, "Failed to prune server directory");
+                return Ok(());
+            }
+        }
+
+        Ok(())
+    }
+}
