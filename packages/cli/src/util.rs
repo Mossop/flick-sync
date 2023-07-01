@@ -9,7 +9,13 @@ use crate::{Console, Result, Runnable};
 pub struct Stats {}
 
 fn percent<T: Into<u64>>(a: T, b: T) -> String {
-    format!("{}%", (a.into() * 100) / b.into())
+    let a = a.into();
+    let b = b.into();
+    if a >= b {
+        "100%".to_string()
+    } else {
+        format!("{}%", (a * 100) / b)
+    }
 }
 
 #[async_trait]
