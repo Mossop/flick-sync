@@ -24,8 +24,8 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::{
     config::{Config, ServerConfig, SyncItem, TranscodeProfile},
     state::{
-        CollectionState, LibraryState, LibraryType, PlaylistState, SeasonState, ServerState,
-        ShowState, VideoDetail, VideoState,
+        CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, SeasonState,
+        ServerState, ShowState, VideoDetail, VideoState,
     },
     util::safe,
     wrappers, Error, Inner, Library, Result, ServerConnection, DEFAULT_PROFILES,
@@ -683,10 +683,16 @@ impl<'a> StateSync<'a> {
 
             let video_state = self.server_state.videos.get_mut(key).unwrap();
             if video_state.transcode_profile != selected_profile {
-                info!(old=?video_state.transcode_profile, new=?selected_profile, "Transcode profile changed, deleting existing downloads.");
+                if video_state
+                    .parts
+                    .iter()
+                    .any(|p| p.download != DownloadState::None)
+                {
+                    info!(item=key, old=?video_state.transcode_profile, new=?selected_profile, "Transcode profile changed, deleting existing downloads.");
 
-                for part in video_state.parts.iter_mut() {
-                    part.download.delete(&self.server, self.root).await;
+                    for part in video_state.parts.iter_mut() {
+                        part.download.delete(&self.server, self.root).await;
+                    }
                 }
 
                 video_state.transcode_profile = selected_profile;
