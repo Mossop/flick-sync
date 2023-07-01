@@ -53,8 +53,12 @@ impl Runnable for Stats {
                 DecimalBytes(stats.remaining_bytes),
             ));
             console.println(format!(
-                "  Duration available: {}",
-                HumanDuration(stats.total_duration)
+                "  Duration available offline: {}",
+                HumanDuration(stats.local_duration)
+            ));
+            console.println(format!(
+                "  Total Duration: {}",
+                HumanDuration(stats.remote_duration)
             ));
 
             total += stats;
@@ -78,8 +82,12 @@ impl Runnable for Stats {
                 DecimalBytes(total.remaining_bytes),
             ));
             console.println(format!(
-                "Total duration available: {}",
-                HumanDuration(total.total_duration)
+                "Total duration available offline: {}",
+                HumanDuration(total.local_duration)
+            ));
+            console.println(format!(
+                "Total Duration: {}",
+                HumanDuration(total.remote_duration)
             ));
         }
 

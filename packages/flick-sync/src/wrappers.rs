@@ -852,7 +852,8 @@ pub struct VideoStats {
     pub local_bytes: u64,
     pub remote_bytes: u64,
     pub remaining_bytes: u64,
-    pub total_duration: Duration,
+    pub local_duration: Duration,
+    pub remote_duration: Duration,
 }
 
 impl Add for VideoStats {
@@ -865,7 +866,8 @@ impl Add for VideoStats {
             local_bytes: self.local_bytes + rhs.local_bytes,
             remote_bytes: self.remote_bytes + rhs.remote_bytes,
             remaining_bytes: self.remaining_bytes + rhs.remaining_bytes,
-            total_duration: self.total_duration + rhs.total_duration,
+            local_duration: self.local_duration + rhs.local_duration,
+            remote_duration: self.remote_duration + rhs.remote_duration,
         }
     }
 }
@@ -877,7 +879,8 @@ impl AddAssign for VideoStats {
         self.local_bytes += rhs.local_bytes;
         self.remote_bytes += rhs.remote_bytes;
         self.remaining_bytes += rhs.remaining_bytes;
-        self.total_duration += rhs.total_duration;
+        self.local_duration += rhs.local_duration;
+        self.remote_duration += rhs.remote_duration;
     }
 }
 
@@ -891,8 +894,13 @@ impl VideoStats {
         for (local_part, remote_part) in parts.into_iter().zip(media.parts()) {
             stats.total_parts += 1;
 
-            stats.total_duration += local_part.duration().await;
+            let part_duration = local_part.duration().await;
+            stats.remote_duration += part_duration;
             let state = local_part.download_state().await;
+
+            if !state.needs_download() {
+                stats.local_duration += part_duration;
+            }
 
             if let Some(path) = state.file() {
                 let path = local_part.inner.path.read().await.join(path);
