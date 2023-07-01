@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use clap::Args;
-use flick_sync::{FlickSync, VideoStats};
+use flick_sync::{FlickSync, ItemType, VideoStats};
 use indicatif::{DecimalBytes, HumanDuration};
 
 use crate::{Console, Result, Runnable};
@@ -65,6 +65,7 @@ impl Runnable for Stats {
         }
 
         if servers.len() > 1 {
+            console.println("");
             console.println(format!(
                 "Total downloaded videos: {} / {} ({})",
                 total.downloaded_parts,
@@ -89,6 +90,46 @@ impl Runnable for Stats {
                 "Total Duration: {}",
                 HumanDuration(total.remote_duration)
             ));
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Args)]
+pub struct List {}
+
+#[async_trait]
+impl Runnable for List {
+    async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
+        let servers = flick_sync.servers().await;
+        for (pos, server) in servers.iter().enumerate() {
+            if pos > 0 {
+                console.println("");
+            }
+
+            for item in server.items().await? {
+                let type_name = match item.item_type {
+                    ItemType::Playlist => "Playlist",
+                    ItemType::MovieCollection => "Movie Collection",
+                    ItemType::ShowCollection => "Show Collection",
+                    ItemType::Show => "Show",
+                    ItemType::Season => "Season",
+                    ItemType::Episode => "Episode",
+                    ItemType::Movie => "Movie",
+                    ItemType::Unknown => "Unknown",
+                };
+
+                let selected = if item.only_unread { "unplayed" } else { "all" };
+
+                console.println(format!(
+                    "{:10} {:8} {type_name:16}  {:20} {selected:3} {:10}",
+                    server.id(),
+                    item.id,
+                    item.title,
+                    item.transcode_profile.unwrap_or_default(),
+                ));
+            }
         }
 
         Ok(())

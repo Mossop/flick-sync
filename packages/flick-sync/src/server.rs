@@ -31,6 +31,25 @@ use crate::{
     wrappers, Error, Inner, Library, Result, ServerConnection, DEFAULT_PROFILES,
 };
 
+pub enum ItemType {
+    Playlist,
+    MovieCollection,
+    ShowCollection,
+    Show,
+    Season,
+    Episode,
+    Movie,
+    Unknown,
+}
+
+pub struct SyncItemInfo {
+    pub id: String,
+    pub item_type: ItemType,
+    pub title: String,
+    pub transcode_profile: Option<String>,
+    pub only_unread: bool,
+}
+
 #[derive(Clone)]
 pub struct Server {
     pub(crate) id: String,
@@ -124,6 +143,40 @@ impl Server {
     /// The FlickSync identifier for this server.
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    pub async fn items(&self) -> Result<Vec<SyncItemInfo>> {
+        let plex_server = self.connect().await?;
+
+        let config = self.inner.config.read().await;
+        let server_config = config.servers.get(&self.id).unwrap();
+
+        let mut results: Vec<SyncItemInfo> = Vec::new();
+
+        for sync in server_config.syncs.values() {
+            let item = plex_server.item_by_id(&sync.id).await?;
+
+            let item_type = match item {
+                Item::Movie(_) => ItemType::Movie,
+                Item::Episode(_) => ItemType::Episode,
+                Item::VideoPlaylist(_) => ItemType::Playlist,
+                Item::MovieCollection(_) => ItemType::MovieCollection,
+                Item::ShowCollection(_) => ItemType::ShowCollection,
+                Item::Show(_) => ItemType::Show,
+                Item::Season(_) => ItemType::Season,
+                _ => ItemType::Unknown,
+            };
+
+            results.push(SyncItemInfo {
+                id: item.rating_key().to_owned(),
+                item_type,
+                title: item.title().to_owned(),
+                transcode_profile: sync.transcode_profile.clone(),
+                only_unread: sync.only_unread,
+            });
+        }
+
+        Ok(results)
     }
 
     pub(crate) async fn profile(&self) -> Option<String> {

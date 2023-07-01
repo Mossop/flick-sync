@@ -20,7 +20,7 @@ mod util;
 
 pub use crate::console::Console;
 use server::{Add, Login};
-use util::Stats;
+use util::{List, Stats};
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
@@ -38,6 +38,8 @@ pub enum Command {
     Sync,
     /// List download statistics.
     Stats,
+    /// Lists sync items.
+    List,
 }
 
 #[async_trait]
