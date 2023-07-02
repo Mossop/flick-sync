@@ -425,7 +425,7 @@ impl Server {
 
                 for item in server_config.syncs.values() {
                     if let Err(e) = state_sync.add_item_by_key(item, &item.id).await {
-                        warn!(error=?e, "Failed to update item");
+                        warn!(item=item.id, error=?e, "Failed to update item. Aborting update.");
                     }
                 }
 
@@ -902,7 +902,10 @@ impl<'a> StateSync<'a> {
     async fn add_item_by_key(&mut self, sync: &SyncItem, key: &str) -> Result {
         match self.server.item_by_id(key).await {
             Ok(i) => self.add_item(sync, i).await,
-            Err(plex_api::Error::ItemNotFound) => Err(Error::ItemNotFound(key.to_owned())),
+            Err(plex_api::Error::ItemNotFound) => {
+                warn!(item = key, "Sync item no longer appears to exist");
+                Ok(())
+            }
             Err(e) => Err(e.into()),
         }
     }
