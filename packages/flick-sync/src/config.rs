@@ -31,6 +31,7 @@ pub(crate) struct SyncItem {
 derive_list_item!(SyncItem);
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ServerConfig {
     pub(crate) connection: ServerConnection,
     #[serde(
@@ -43,7 +44,7 @@ pub(crate) struct ServerConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) max_transcodes: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) profile: Option<String>,
+    pub(crate) transcode_profile: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Default, Clone, Debug, PartialEq)]

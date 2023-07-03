@@ -20,7 +20,7 @@ pub struct Login {
     id: String,
     /// The default transcode profile to use for items.
     #[clap(short, long)]
-    profile: Option<String>,
+    transcode_profile: Option<String>,
 }
 
 async fn myplex_auth(console: &Console, client: &HttpClient, username: &str) -> Result<MyPlex> {
@@ -148,7 +148,13 @@ async fn create_server(args: Login, flick_sync: FlickSync, console: Console) -> 
         let auth_token = server.client().x_plex_token().to_owned();
 
         flick_sync
-            .add_server(&args.id, server, &auth_token, connection, args.profile)
+            .add_server(
+                &args.id,
+                server,
+                &auth_token,
+                connection,
+                args.transcode_profile,
+            )
             .await?;
     } else {
         let username = console.input("Username");
@@ -212,7 +218,13 @@ async fn create_server(args: Login, flick_sync: FlickSync, console: Console) -> 
         };
 
         flick_sync
-            .add_server(&args.id, server, &auth_token, connection, args.profile)
+            .add_server(
+                &args.id,
+                server,
+                &auth_token,
+                connection,
+                args.transcode_profile,
+            )
             .await?;
     }
 

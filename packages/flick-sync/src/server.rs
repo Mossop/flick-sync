@@ -179,10 +179,10 @@ impl Server {
         Ok(results)
     }
 
-    pub(crate) async fn profile(&self) -> Option<String> {
+    pub(crate) async fn transcode_profile(&self) -> Option<String> {
         let config = self.inner.config.read().await;
         let server_config = config.servers.get(&self.id).unwrap();
-        server_config.profile.clone()
+        server_config.transcode_profile.clone()
     }
 
     pub async fn connection(&self) -> ServerConnection {
@@ -595,12 +595,12 @@ impl<'a> StateSync<'a> {
             self.seen_items.insert(key.clone());
         }
 
-        let profile = sync
+        let transcode_profile = sync
             .transcode_profile
             .clone()
-            .or_else(|| self.server_config.profile.clone());
+            .or_else(|| self.server_config.transcode_profile.clone());
 
-        if let Some(ref profile) = profile {
+        if let Some(ref profile) = transcode_profile {
             let profiles = self.transcode_profiles.entry(key).or_default();
             profiles.insert(profile.clone());
         }

@@ -173,7 +173,7 @@ impl FlickSync {
         server: plex_api::Server,
         auth_token: &str,
         connection: ServerConnection,
-        profile: Option<String>,
+        transcode_profile: Option<String>,
     ) -> Result {
         let mut state = self.inner.state.write().await;
         let mut config = self.inner.config.write().await;
@@ -197,7 +197,7 @@ impl FlickSync {
                 connection,
                 syncs: Default::default(),
                 max_transcodes: None,
-                profile,
+                transcode_profile,
             },
         );
 

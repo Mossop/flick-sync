@@ -433,7 +433,7 @@ impl VideoPart {
             .with_video_state(|vs| (vs.media_id.clone(), vs.transcode_profile.clone()))
             .await;
 
-        let server_profile = self.server.profile().await;
+        let server_profile = self.server.transcode_profile().await;
 
         let options = if let Some(options) = self
             .inner
