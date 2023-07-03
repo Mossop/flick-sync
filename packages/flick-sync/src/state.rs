@@ -671,8 +671,18 @@ impl VideoState {
             self.parts = parts.iter().map(VideoPartState::from).collect()
         } else {
             for (part_state, part) in self.parts.iter_mut().zip(parts.iter()) {
+                let metadata = part.metadata();
+
                 if part_state != part {
                     info!(
+                        old_id = part_state.id,
+                        new_id = metadata.id,
+                        old_key = part_state.key,
+                        new_key = metadata.key,
+                        old_size = part_state.size,
+                        new_size = metadata.size,
+                        old_duration = part_state.duration,
+                        new_duration = metadata.duration,
                         part = part_state.id,
                         "Part changed, deleting existing download."
                     );
