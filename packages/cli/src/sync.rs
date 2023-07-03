@@ -5,7 +5,7 @@ use clap::Args;
 use flick_sync::{FlickSync, Progress, TransferState, VideoPart};
 use futures::future::join_all;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tracing::{error, instrument};
+use tracing::{debug, error, instrument};
 
 use crate::{
     console::{Bar, ProgressType},
@@ -55,44 +55,39 @@ impl Progress for DownloadProgress {
 }
 
 struct PartTransferState {
-    transcode_permits: Arc<Semaphore>,
+    transcode_permit: TranscodePermit,
     download_permits: Arc<Semaphore>,
     title: String,
     part: VideoPart,
     console: Console,
-    transcode_permit: Option<PermitHolder>,
 }
 
-struct PermitHolder {
-    permit: Option<OwnedSemaphorePermit>,
-    forget: bool,
+enum TranscodePermit {
+    Waiting(Arc<Semaphore>),
+    Owned(OwnedSemaphorePermit),
+    Unowned,
 }
 
-impl PermitHolder {
-    fn forget(permit: OwnedSemaphorePermit) -> Self {
-        Self {
-            permit: Some(permit),
-            forget: true,
+impl TranscodePermit {
+    fn new(transcode_permits: &Arc<Semaphore>) -> Self {
+        TranscodePermit::Waiting(transcode_permits.clone())
+    }
+
+    fn unowned() -> Self {
+        TranscodePermit::Unowned
+    }
+
+    async fn acquire(&mut self) {
+        if let TranscodePermit::Waiting(semaphore) = self {
+            let permit = semaphore.clone().acquire_owned().await.unwrap();
+            *self = TranscodePermit::Owned(permit);
         }
     }
 }
 
-impl From<OwnedSemaphorePermit> for PermitHolder {
+impl From<OwnedSemaphorePermit> for TranscodePermit {
     fn from(permit: OwnedSemaphorePermit) -> Self {
-        Self {
-            permit: Some(permit),
-            forget: false,
-        }
-    }
-}
-
-impl Drop for PermitHolder {
-    fn drop(&mut self) {
-        if let Some(permit) = self.permit.take() {
-            if self.forget {
-                permit.forget();
-            }
-        }
+        TranscodePermit::Owned(permit)
     }
 }
 
@@ -122,17 +117,7 @@ async fn complete_download(state: &PartTransferState) -> Result {
 #[instrument(level = "trace", skip(state), fields(video=state.part.id(), part=state.part.index()))]
 async fn download_part(mut state: PartTransferState) {
     if state.part.transfer_state().await != TransferState::Downloading {
-        let _permit = if let Some(permit) = state.transcode_permit.take() {
-            permit
-        } else {
-            state
-                .transcode_permits
-                .clone()
-                .acquire_owned()
-                .await
-                .unwrap()
-                .into()
-        };
+        state.transcode_permit.acquire().await;
 
         if let Err(e) = state.part.negotiate_transfer_type().await {
             error!(error=?e);
@@ -164,7 +149,8 @@ impl Runnable for Sync {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let servers = select_servers(&flick_sync, &self.ids).await?;
 
-        let download_permits = Arc::new(Semaphore::new(flick_sync.max_downloads().await));
+        let max_downloads = flick_sync.max_downloads().await;
+        let download_permits = Arc::new(Semaphore::new(max_downloads));
         let mut jobs = Vec::new();
 
         flick_sync.prune_root().await;
@@ -180,8 +166,15 @@ impl Runnable for Sync {
                 continue;
             }
 
+            let max_transcodes = server.max_transcodes().await;
+
             let mut transfers = Vec::new();
-            let transcode_permits = Arc::new(Semaphore::new(server.max_transcodes().await));
+            let transcode_permits = Arc::new(Semaphore::new(max_transcodes));
+
+            debug!(
+                server = server.id(),
+                max_downloads, max_transcodes, "Starting transfer jobs"
+            );
 
             for video in server.videos().await {
                 let title = video.title().await;
@@ -191,28 +184,20 @@ impl Runnable for Sync {
                     }
 
                     let transcode_permit = match part.transfer_state().await {
-                        TransferState::Waiting => None,
                         TransferState::Transcoding => {
-                            // This is only safe because there are no other tasks running at this
-                            // point.
-                            if transcode_permits.available_permits() == 0 {
-                                transcode_permits.add_permits(1);
-                                Some(PermitHolder::forget(
-                                    transcode_permits.clone().acquire_owned().await.unwrap(),
-                                ))
-                            } else {
-                                Some(PermitHolder::from(
-                                    transcode_permits.clone().acquire_owned().await.unwrap(),
-                                ))
+                            match transcode_permits.clone().try_acquire_owned() {
+                                Ok(permit) => TranscodePermit::from(permit),
+                                Err(_) => TranscodePermit::unowned(),
                             }
                         }
-                        TransferState::Downloading => None,
+                        TransferState::Downloading | TransferState::Waiting => {
+                            TranscodePermit::new(&transcode_permits)
+                        }
                         TransferState::Downloaded => continue,
                     };
 
                     transfers.push(PartTransferState {
                         download_permits: download_permits.clone(),
-                        transcode_permits: transcode_permits.clone(),
                         part,
                         title: title.clone(),
                         console: console.clone(),
