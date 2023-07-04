@@ -1,7 +1,11 @@
 use std::{cmp::Ordering, collections::HashMap};
 
-use plex_api::transcode::VideoTranscodeOptions;
+use plex_api::{
+    media_container::server::library::{AudioCodec, ContainerFormat, VideoCodec},
+    transcode::{AudioSetting, Constraint, Limitation, VideoSetting, VideoTranscodeOptions},
+};
 use serde::{Deserialize, Serialize};
+use serde_plain::derive_display_from_serialize;
 
 use crate::util::{derive_list_item, from_list, into_list, ListItem};
 
@@ -47,28 +51,83 @@ pub(crate) struct ServerConfig {
     pub(crate) transcode_profile: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum H264Profile {
+    Baseline,
+    Main,
+    High,
+}
+
+derive_display_from_serialize!(H264Profile);
+
 #[derive(Deserialize, Serialize, Default, Clone, Debug, PartialEq)]
 pub(crate) struct TranscodeProfile {
     /// Maximum bitrate in kbps.
     pub(crate) bitrate: Option<u32>,
     /// width, height.
     pub(crate) dimensions: Option<(u32, u32)>,
+    /// Valid video container formats.
+    pub(crate) containers: Option<Vec<ContainerFormat>>,
+    /// Valid video codecs.
+    pub(crate) video_codecs: Option<Vec<VideoCodec>>,
+    /// Valid audio codecs.
+    pub(crate) audio_codecs: Option<Vec<AudioCodec>>,
+    /// Audio channels
+    pub(crate) audio_channels: Option<u16>,
+    /// Allowable h264 profiles (baseline, main, high)
+    pub(crate) h264_profiles: Option<Vec<H264Profile>>,
 }
 
 impl TranscodeProfile {
     pub(crate) fn options(&self) -> VideoTranscodeOptions {
-        let mut options = VideoTranscodeOptions::default();
+        let mut video_limitations: Vec<Limitation<VideoCodec, VideoSetting>> = Vec::new();
+        let mut audio_limitations: Vec<Limitation<AudioCodec, AudioSetting>> = Vec::new();
 
-        if let Some(br) = self.bitrate {
-            options.bitrate = br;
+        if let Some(channels) = self.audio_channels {
+            audio_limitations.push(
+                (
+                    AudioSetting::Channels,
+                    Constraint::Max(channels.to_string()),
+                )
+                    .into(),
+            );
         }
 
-        if let Some(dim) = self.dimensions {
-            options.width = dim.0;
-            options.height = dim.1;
+        if let Some(ref profiles) = self.h264_profiles {
+            video_limitations.push(
+                (
+                    VideoCodec::H264,
+                    VideoSetting::Profile,
+                    Constraint::Match(profiles.iter().map(|p| p.to_string()).collect()),
+                )
+                    .into(),
+            );
         }
 
-        options
+        let (width, height) = self.dimensions.unwrap_or((1280, 720));
+
+        VideoTranscodeOptions {
+            bitrate: self.bitrate.unwrap_or(2000),
+            width,
+            height,
+            audio_boost: None,
+            burn_subtitles: true,
+            containers: self
+                .containers
+                .clone()
+                .unwrap_or_else(|| vec![ContainerFormat::Mkv, ContainerFormat::Mp4]),
+            video_codecs: self
+                .video_codecs
+                .clone()
+                .unwrap_or_else(|| vec![VideoCodec::H264]),
+            video_limitations,
+            audio_codecs: self
+                .audio_codecs
+                .clone()
+                .unwrap_or_else(|| vec![AudioCodec::Aac, AudioCodec::Mp3]),
+            audio_limitations,
+        }
     }
 }
 

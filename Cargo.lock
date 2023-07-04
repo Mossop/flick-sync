@@ -521,6 +521,7 @@ dependencies = [
  "plex-api",
  "serde",
  "serde_json",
+ "serde_plain",
  "thiserror",
  "time",
  "tokio",

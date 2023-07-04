@@ -32,6 +32,8 @@ use tracing::{debug, info, warn};
 
 pub use wrappers::*;
 
+use crate::config::H264Profile;
+
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
 pub const STATE_FILE: &str = ".flicksync.state.json";
@@ -46,6 +48,13 @@ lazy_static! {
             Some(TranscodeProfile {
                 bitrate: Some(2000),
                 dimensions: Some((1280, 720)),
+                audio_channels: Some(2),
+                h264_profiles: Some(vec![
+                    H264Profile::Baseline,
+                    H264Profile::Main,
+                    H264Profile::High,
+                ]),
+                ..Default::default()
             }),
         );
         map.insert(
@@ -53,6 +62,13 @@ lazy_static! {
             Some(TranscodeProfile {
                 bitrate: Some(8000),
                 dimensions: Some((1920, 1080)),
+                audio_channels: Some(2),
+                h264_profiles: Some(vec![
+                    H264Profile::Baseline,
+                    H264Profile::Main,
+                    H264Profile::High,
+                ]),
+                ..Default::default()
             }),
         );
         map
