@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{mem, sync::Arc};
 
 use async_trait::async_trait;
 use clap::Args;
@@ -55,39 +55,56 @@ impl Progress for DownloadProgress {
 }
 
 struct PartTransferState {
-    transcode_permit: TranscodePermit,
+    transcode_permit: PendingPermit,
     download_permits: Arc<Semaphore>,
     title: String,
     part: VideoPart,
     console: Console,
 }
 
-enum TranscodePermit {
-    Waiting(Arc<Semaphore>),
+enum PermitState {
+    Waiting,
     Owned(OwnedSemaphorePermit),
-    Unowned,
+    Granted,
 }
 
-impl TranscodePermit {
-    fn new(transcode_permits: &Arc<Semaphore>) -> Self {
-        TranscodePermit::Waiting(transcode_permits.clone())
-    }
+struct PendingPermit {
+    permits: Arc<Semaphore>,
+    state: PermitState,
+}
 
-    fn unowned() -> Self {
-        TranscodePermit::Unowned
-    }
-
-    async fn acquire(&mut self) {
-        if let TranscodePermit::Waiting(semaphore) = self {
-            let permit = semaphore.clone().acquire_owned().await.unwrap();
-            *self = TranscodePermit::Owned(permit);
+impl PendingPermit {
+    fn waiting(permits: Arc<Semaphore>) -> Self {
+        PendingPermit {
+            permits,
+            state: PermitState::Waiting,
         }
     }
-}
 
-impl From<OwnedSemaphorePermit> for TranscodePermit {
-    fn from(permit: OwnedSemaphorePermit) -> Self {
-        TranscodePermit::Owned(permit)
+    fn owned(permits: Arc<Semaphore>, permit: OwnedSemaphorePermit) -> Self {
+        PendingPermit {
+            permits,
+            state: PermitState::Owned(permit),
+        }
+    }
+
+    fn granted(permits: Arc<Semaphore>) -> Self {
+        PendingPermit {
+            permits,
+            state: PermitState::Granted,
+        }
+    }
+
+    #[must_use]
+    async fn acquire(&mut self) -> PermitState {
+        let state = mem::replace(&mut self.state, PermitState::Waiting);
+
+        if let PermitState::Waiting = state {
+            let permit = self.permits.clone().acquire_owned().await.unwrap();
+            PermitState::Owned(permit)
+        } else {
+            state
+        }
     }
 }
 
@@ -117,7 +134,7 @@ async fn complete_download(state: &PartTransferState) -> Result {
 #[instrument(level = "trace", skip(state), fields(video=state.part.id(), part=state.part.index()))]
 async fn download_part(mut state: PartTransferState) {
     if state.part.transfer_state().await != TransferState::Downloading {
-        state.transcode_permit.acquire().await;
+        let _permit = state.transcode_permit.acquire().await;
 
         if let Err(e) = state.part.negotiate_transfer_type().await {
             error!(error=?e);
@@ -186,12 +203,14 @@ impl Runnable for Sync {
                     let transcode_permit = match part.transfer_state().await {
                         TransferState::Transcoding => {
                             match transcode_permits.clone().try_acquire_owned() {
-                                Ok(permit) => TranscodePermit::from(permit),
-                                Err(_) => TranscodePermit::unowned(),
+                                Ok(permit) => {
+                                    PendingPermit::owned(transcode_permits.clone(), permit)
+                                }
+                                Err(_) => PendingPermit::granted(transcode_permits.clone()),
                             }
                         }
                         TransferState::Downloading | TransferState::Waiting => {
-                            TranscodePermit::new(&transcode_permits)
+                            PendingPermit::waiting(transcode_permits.clone())
                         }
                         TransferState::Downloaded => continue,
                     };
