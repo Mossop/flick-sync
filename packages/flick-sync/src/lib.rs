@@ -14,6 +14,14 @@ mod state;
 mod util;
 mod wrappers;
 
+use async_std::{
+    fs::{read_dir, read_to_string, remove_dir_all, remove_file, write},
+    sync::RwLockReadGuard,
+};
+use async_std::{
+    stream::StreamExt,
+    sync::{Mutex, RwLock, RwLockWriteGuard},
+};
 pub use config::ServerConnection;
 use config::{Config, ServerConfig, TranscodeProfile};
 pub use error::Error;
@@ -24,10 +32,6 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{from_str, to_string_pretty};
 pub use server::{ItemType, Server, SyncItemInfo};
 use state::{ServerState, State};
-use tokio::{
-    fs::{read_dir, read_to_string, remove_dir_all, remove_file, write},
-    sync::{Mutex, RwLock, RwLockWriteGuard},
-};
 use tracing::{debug, info, warn};
 
 pub use wrappers::*;
@@ -60,7 +64,7 @@ lazy_static! {
         map.insert(
             "1080p".to_string(),
             Some(TranscodeProfile {
-                bitrate: Some(6000),
+                bitrate: Some(000),
                 dimensions: Some((1920, 1080)),
                 audio_channels: Some(2),
                 h264_profiles: Some(vec![
@@ -261,7 +265,7 @@ impl FlickSync {
         info!("Pruning root filesystem");
 
         let servers: HashSet<String> = {
-            let config: tokio::sync::RwLockReadGuard<'_, Config> = self.inner.config.read().await;
+            let config: RwLockReadGuard<'_, Config> = self.inner.config.read().await;
 
             config.servers.keys().cloned().collect()
         };
@@ -277,8 +281,8 @@ impl FlickSync {
         };
 
         loop {
-            match reader.next_entry().await {
-                Ok(Some(entry)) => {
+            match reader.next().await {
+                Some(Ok(entry)) => {
                     if let Some(str) = entry.file_name().to_str() {
                         if str == STATE_FILE || str == CONFIG_FILE || servers.contains(str) {
                             continue;
@@ -313,10 +317,10 @@ impl FlickSync {
                         }
                     }
                 }
-                Ok(None) => {
+                None => {
                     break;
                 }
-                Err(e) => {
+                Some(Err(e)) => {
                     tracing::error!(error=?e, path=%root.display(), "Failed to read directory");
                     break;
                 }

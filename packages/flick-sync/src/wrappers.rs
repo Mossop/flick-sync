@@ -12,16 +12,16 @@ use std::{
 };
 
 use async_std::fs::{create_dir_all, File, OpenOptions};
+use async_std::{
+    fs::{metadata, remove_file},
+    task::sleep,
+};
 use async_trait::async_trait;
 use futures::AsyncWrite;
 use pin_project::pin_project;
 use plex_api::{
     library::{self, Item, MediaItem, MetadataItem},
     transcode::TranscodeStatus,
-};
-use tokio::{
-    fs::{metadata, remove_file},
-    time::sleep,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
 

@@ -11,7 +11,6 @@ path = "src/main.rs"
 futures = "0.3.28"
 flick-sync = { path = "../flick-sync" }
 clap = { version = "4.1.13", features = ["derive", "env"] }
-tokio = { version = "1.26.0", features = ["full"] }
 console = "0.15.5"
 dialoguer = "0.10.3"
 indicatif = "0.17.3"
@@ -21,3 +20,5 @@ thiserror = "1.0.40"
 url = "2.3.1"
 tracing-subscriber = {version = "0.3.16", features = ["env-filter"] }
 enum_dispatch = "0.3.11"
+async-std = { version = "1.12.0", features = ["attributes"] }
+tokio = { version = "1.29.1", features = ["sync"] }

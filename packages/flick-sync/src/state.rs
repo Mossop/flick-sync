@@ -3,6 +3,7 @@ use std::fmt;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
+use async_std::fs;
 use plex_api::{
     library::{Collection, MetadataItem, Part, Playlist, Season, Show},
     media_container::server::library::{Metadata, MetadataType},
@@ -14,7 +15,6 @@ use plex_api::{
 };
 use serde::{Deserialize, Serialize};
 use time::{Date, OffsetDateTime};
-use tokio::fs;
 use tracing::{debug, error, info, instrument, trace, warn};
 use typeshare::typeshare;
 use uuid::Uuid;
