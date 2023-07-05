@@ -497,13 +497,22 @@ impl VideoPart {
 
         let path = self.file_path(&session.container().to_string()).await;
 
-        self.update_state(|state| {
-            state.download = DownloadState::Transcoding {
-                session_id: session.session_id().to_string(),
-                path,
+        if let Err(e) = self
+            .update_state(|state| {
+                state.download = DownloadState::Transcoding {
+                    session_id: session.session_id().to_string(),
+                    path,
+                }
+            })
+            .await
+        {
+            warn!("Failed to store download state, abandoning transcode.");
+            if let Err(e) = session.cancel().await {
+                error!(error=?e, "Failed to cancel transcode.");
             }
-        })
-        .await?;
+
+            return Err(e);
+        }
 
         Ok(())
     }
