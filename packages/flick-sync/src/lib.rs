@@ -60,7 +60,7 @@ lazy_static! {
         map.insert(
             "1080p".to_string(),
             Some(TranscodeProfile {
-                bitrate: Some(8000),
+                bitrate: Some(6000),
                 dimensions: Some((1920, 1080)),
                 audio_channels: Some(2),
                 h264_profiles: Some(vec![
