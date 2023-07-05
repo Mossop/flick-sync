@@ -169,7 +169,7 @@ where
 impl FlickSync {
     pub async fn max_downloads(&self) -> usize {
         let config = self.inner.config.read().await;
-        config.max_downloads.unwrap_or(4)
+        config.max_downloads.unwrap_or(2)
     }
 
     pub async fn new(path: &Path) -> Result<Self> {
