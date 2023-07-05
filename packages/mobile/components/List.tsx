@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { TouchableRipple, Text, Appbar, Menu } from "react-native-paper";
-import { View, StyleSheet, Image } from "react-native";
+import {
+  TouchableRipple,
+  Text,
+  Appbar,
+  Menu,
+  TextProps,
+} from "react-native-paper";
+import {
+  View,
+  StyleSheet,
+  Image,
+  LayoutChangeEvent,
+  FlatList,
+  StyleProp,
+  ViewStyle,
+} from "react-native";
 import { NavigationProp, useNavigation } from "@react-navigation/native";
 import { MaterialIcons } from "@expo/vector-icons";
 import {
@@ -16,7 +30,6 @@ import {
   isVideo,
 } from "../state";
 import { useSettings } from "./AppState";
-import GridView from "./GridView";
 import {
   EPISODE_HEIGHT,
   EPISODE_WIDTH,
@@ -61,19 +74,20 @@ export interface ListSetting {
 }
 
 const styles = StyleSheet.create({
-  list: {
-    alignItems: "stretch",
-    padding: PADDING,
+  root: {
+    paddingHorizontal: PADDING / 2,
   },
+  base: {
+    height: "100%",
+    width: "100%",
+    flex: 1,
+  },
+
   listItem: {
+    width: "100%",
     flexDirection: "row",
     alignItems: "center",
-    paddingBottom: PADDING,
-  },
-  listThumbContainer: {
-    width: Math.max(EPISODE_WIDTH, POSTER_WIDTH),
-    alignItems: "center",
-    justifyContent: "center",
+    padding: PADDING / 2,
   },
   listMeta: {
     flex: 1,
@@ -86,7 +100,7 @@ const styles = StyleSheet.create({
   poster: {
     flexDirection: "column",
     alignItems: "center",
-    gap: PADDING,
+    padding: PADDING / 2,
   },
   posterTitle: {
     textAlign: "center",
@@ -427,15 +441,41 @@ function Thumbnail({ item, type }: { item: ChildItem; type: ThumbnailType }) {
   );
 }
 
+function MetaTitle(props: TextProps<never>) {
+  return <Text variant="titleMedium" {...props} />;
+}
+
+function MetaSub(props: TextProps<never>) {
+  return (
+    <Text
+      variant="labelMedium"
+      numberOfLines={1}
+      ellipsizeMode="tail"
+      {...props}
+    />
+  );
+}
+
+function MetaInfo(props: TextProps<never>) {
+  return (
+    <Text
+      variant="labelSmall"
+      numberOfLines={1}
+      ellipsizeMode="tail"
+      {...props}
+    />
+  );
+}
+
 function ListMeta({ item }: { item: ChildItem }) {
   if (item instanceof Episode) {
     return (
       <View style={styles.listMeta}>
-        <Text variant="titleMedium">{item.title}</Text>
-        <Text variant="labelMedium" numberOfLines={1} ellipsizeMode="tail">
+        <MetaTitle>{item.title}</MetaTitle>
+        <MetaSub>
           s{pad(item.season.index)}e{pad(item.index)} - {item.season.show.title}
-        </Text>
-        <Text variant="labelSmall">{duration(item)}</Text>
+        </MetaSub>
+        <MetaInfo>{duration(item)}</MetaInfo>
       </View>
     );
   }
@@ -449,11 +489,11 @@ function ListMeta({ item }: { item: ChildItem }) {
 
     return (
       <View style={styles.listMeta}>
-        <Text variant="titleMedium">{item.title}</Text>
-        <Text variant="labelMedium" numberOfLines={1} ellipsizeMode="tail">
+        <MetaTitle>{item.title}</MetaTitle>
+        <MetaSub>
           {seasons.length} seasons, {episodes} episodes
-        </Text>
-        <Text variant="labelSmall">{duration(item)}</Text>
+        </MetaSub>
+        <MetaInfo>{duration(item)}</MetaInfo>
       </View>
     );
   }
@@ -461,11 +501,9 @@ function ListMeta({ item }: { item: ChildItem }) {
   if (item instanceof Season) {
     return (
       <View style={styles.listMeta}>
-        <Text variant="titleMedium">{item.title}</Text>
-        <Text variant="labelMedium" numberOfLines={1} ellipsizeMode="tail">
-          {item.episodes.length} episodes
-        </Text>
-        <Text variant="labelSmall">{duration(item)}</Text>
+        <MetaTitle>{item.title}</MetaTitle>
+        <MetaSub>{item.episodes.length} episodes</MetaSub>
+        <MetaInfo>{duration(item)}</MetaInfo>
       </View>
     );
   }
@@ -473,11 +511,9 @@ function ListMeta({ item }: { item: ChildItem }) {
   if (item instanceof ShowCollection) {
     return (
       <View style={styles.listMeta}>
-        <Text variant="titleMedium">{item.title}</Text>
-        <Text variant="labelMedium" numberOfLines={1} ellipsizeMode="tail">
-          {item.contents.length} shows
-        </Text>
-        <Text variant="labelSmall">{duration(item)}</Text>
+        <MetaTitle>{item.title}</MetaTitle>
+        <MetaSub>{item.contents.length} shows</MetaSub>
+        <MetaInfo>{duration(item)}</MetaInfo>
       </View>
     );
   }
@@ -485,11 +521,9 @@ function ListMeta({ item }: { item: ChildItem }) {
   if (item instanceof MovieCollection) {
     return (
       <View style={styles.listMeta}>
-        <Text variant="titleMedium">{item.title}</Text>
-        <Text variant="labelMedium" numberOfLines={1} ellipsizeMode="tail">
-          {item.contents.length} movies
-        </Text>
-        <Text variant="labelSmall">{duration(item)}</Text>
+        <MetaTitle>{item.title}</MetaTitle>
+        <MetaSub>{item.contents.length} movies</MetaSub>
+        <MetaInfo>{duration(item)}</MetaInfo>
       </View>
     );
   }
@@ -497,20 +531,66 @@ function ListMeta({ item }: { item: ChildItem }) {
   if (item instanceof Playlist) {
     return (
       <View style={styles.listMeta}>
-        <Text variant="titleMedium">{item.title}</Text>
-        <Text variant="labelMedium" numberOfLines={1} ellipsizeMode="tail">
-          {item.videos.length} videos
-        </Text>
-        <Text variant="labelSmall">{duration(item)}</Text>
+        <MetaTitle>{item.title}</MetaTitle>
+        <MetaSub>{item.videos.length} videos</MetaSub>
+        <MetaInfo>{duration(item)}</MetaInfo>
       </View>
     );
   }
 
   return (
     <View style={styles.listMeta}>
-      <Text variant="titleMedium">{item.title}</Text>
-      <Text variant="labelSmall">{duration(item)}</Text>
+      <MetaTitle>{item.title}</MetaTitle>
+      <MetaInfo>{duration(item)}</MetaInfo>
     </View>
+  );
+}
+
+function GridItem<T extends ChildItem>({
+  item,
+  width,
+  onClick,
+}: {
+  item: T;
+  width: number;
+  onClick: (item: T) => void;
+}) {
+  return (
+    <TouchableRipple onPress={() => onClick(item)}>
+      <View style={[styles.poster, { width }]}>
+        <Thumbnail type={ThumbnailType.Poster} item={item} />
+        <Text
+          variant="labelSmall"
+          style={styles.posterTitle}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
+          {item.title}
+        </Text>
+      </View>
+    </TouchableRipple>
+  );
+}
+
+function ListItem<T extends ChildItem>({
+  item,
+  onClick,
+}: {
+  item: T;
+  onClick: (item: T) => void;
+}) {
+  return (
+    <TouchableRipple key={item.id} onPress={() => onClick(item)}>
+      <View style={styles.listItem}>
+        <Thumbnail
+          type={
+            item instanceof Episode ? ThumbnailType.Video : ThumbnailType.Poster
+          }
+          item={item}
+        />
+        <ListMeta item={item} />
+      </View>
+    </TouchableRipple>
   );
 }
 
@@ -518,16 +598,22 @@ export function List<T extends ChildItem>({
   id,
   type,
   items,
+  style,
   onClick,
 }: {
   id: string;
   type: Type;
+  style?: StyleProp<ViewStyle>;
   items: readonly T[];
   onClick?: (item: T) => void;
 }) {
   let listSettings = useListSetting(id, type);
   let sorted = useSorted(items, listSettings.ordering);
   let navigation = useNavigation<NavigationProp<AppRoutes>>();
+  let [dimensions, setDimensions] = useState<{
+    width: number;
+    height: number;
+  }>();
 
   let itemClick = useCallback(
     (item: T) => {
@@ -567,49 +653,60 @@ export function List<T extends ChildItem>({
     [onClick, navigation],
   );
 
-  if (listSettings.display == Display.Grid) {
-    return (
-      <GridView itemWidth={POSTER_WIDTH}>
-        {sorted.map((item) => (
-          <GridView.Item key={item.id}>
-            <TouchableRipple onPress={() => itemClick(item)}>
-              <View style={styles.poster}>
-                <Thumbnail type={ThumbnailType.Poster} item={item} />
-                <Text
-                  variant="labelSmall"
-                  style={styles.posterTitle}
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
-                >
-                  {item.title}
-                </Text>
-              </View>
-            </TouchableRipple>
-          </GridView.Item>
-        ))}
-      </GridView>
-    );
-  }
+  let updateDimensions = useCallback(
+    (event: LayoutChangeEvent) => {
+      if (
+        event.nativeEvent.layout.width != dimensions?.width ||
+        event.nativeEvent.layout.height != dimensions?.height
+      ) {
+        setDimensions(event.nativeEvent.layout);
+      }
+    },
+    [dimensions],
+  );
+
+  let [numColumns, width, initialNumToRender] = useMemo(() => {
+    if (!dimensions) {
+      return [0, 0, 0];
+    }
+
+    let availWidth = dimensions.width - PADDING;
+    let rows = Math.ceil(dimensions.height / POSTER_HEIGHT);
+    let columns = 1;
+
+    if (listSettings.display == Display.Grid) {
+      columns = Math.floor(availWidth / (POSTER_WIDTH + PADDING));
+    }
+
+    return [columns, availWidth / columns, columns * rows];
+  }, [listSettings.display, dimensions]);
+
+  let renderItem = useCallback(
+    // eslint-disable-next-line react/no-unused-prop-types
+    ({ item }: { item: T }) => {
+      if (listSettings.display == Display.Grid) {
+        return <GridItem item={item} width={width} onClick={itemClick} />;
+      }
+      return <ListItem item={item} onClick={itemClick} />;
+    },
+    [itemClick, width, listSettings.display],
+  );
 
   return (
-    <View style={styles.list}>
-      {sorted.map((item) => (
-        <TouchableRipple key={item.id} onPress={() => itemClick(item)}>
-          <View style={styles.listItem}>
-            <View style={styles.listThumbContainer}>
-              <Thumbnail
-                type={
-                  item instanceof Episode
-                    ? ThumbnailType.Video
-                    : ThumbnailType.Poster
-                }
-                item={item}
-              />
-            </View>
-            <ListMeta item={item} />
-          </View>
-        </TouchableRipple>
-      ))}
+    <View
+      onLayout={updateDimensions}
+      style={[styles.root, style ?? styles.base]}
+    >
+      {dimensions && (
+        <FlatList
+          key={`${listSettings.display}${numColumns}`}
+          data={sorted}
+          numColumns={numColumns}
+          initialNumToRender={initialNumToRender}
+          keyExtractor={(item) => item.id}
+          renderItem={renderItem}
+        />
+      )}
     </View>
   );
 }

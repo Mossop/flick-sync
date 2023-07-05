@@ -1,4 +1,3 @@
-import { ScrollView } from "react-native";
 import AppView from "../components/AppView";
 import { Library, isMovieLibrary } from "../state";
 import { List, ListControls, Type } from "../components/List";
@@ -11,10 +10,8 @@ export default function LibraryContents({ library }: { library: Library }) {
       title={library.title}
       actions={<ListControls id={library.id} type={listType} />}
     >
-      <ScrollView>
-        {/* @ts-ignore */}
-        <List id={library.id} type={listType} items={library.contents} />
-      </ScrollView>
+      {/* @ts-ignore */}
+      <List id={library.id} type={listType} items={library.contents} />
     </AppView>
   );
 }

@@ -1,4 +1,3 @@
-import { ScrollView } from "react-native";
 import AppView from "../components/AppView";
 import { useMediaState } from "../components/AppState";
 import { isMovieCollection } from "../state";
@@ -25,10 +24,8 @@ export default function Collection({ route }: AppScreenProps<"collection">) {
       title={collection.title}
       actions={<ListControls id={collection.id} type={listType} />}
     >
-      <ScrollView>
-        {/* @ts-ignore */}
-        <List id={collection.id} type={listType} items={collection.contents} />
-      </ScrollView>
+      {/* @ts-ignore */}
+      <List id={collection.id} type={listType} items={collection.contents} />
     </AppView>
   );
 }

@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { ScrollView } from "react-native";
 import AppView from "../components/AppView";
 import { useMediaState } from "../components/AppState";
 import { AppScreenProps } from "../components/AppNavigator";
@@ -26,9 +25,7 @@ export default function Show({ route }: AppScreenProps<"show">) {
       title={show.title}
       actions={<ListControls id={show.id} type={Type.Episode} />}
     >
-      <ScrollView>
-        <List id={show.id} type={Type.Episode} items={episodes} />
-      </ScrollView>
+      <List id={show.id} type={Type.Episode} items={episodes} />
     </AppView>
   );
 }

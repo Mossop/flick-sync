@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-plex-api = { git = "https://github.com/Mossop/plex-api.rs.git", branch = "field_fixes" }
+plex-api = { git = "https://github.com/Mossop/plex-api.rs.git", branch = "main" }
 thiserror = "1.0.40"
 tracing = { version = "^0.1.37", features = ["attributes"] }
 serde = { version = "1.0.158", features = ["derive"] }
