@@ -53,6 +53,7 @@ interface ShowParams {
 interface VideoParams {
   server: string;
   video: string;
+  restart?: boolean;
 }
 
 export interface AppRoutes {

@@ -5,6 +5,8 @@ import {
   Appbar,
   Menu,
   TextProps,
+  Modal,
+  Portal,
 } from "react-native-paper";
 import {
   View,
@@ -140,6 +142,22 @@ const styles = StyleSheet.create({
     height: 5,
     backgroundColor: "#e5a00d",
     alignSelf: "flex-start",
+  },
+
+  videoModal: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    justifyContent: "center",
+    backgroundColor: "white",
+    padding: PADDING,
+    gap: PADDING * 3,
+    marginLeft: "auto",
+    marginRight: "auto",
+  },
+  modalButton: {},
+  modalOption: {
+    flexDirection: "column",
+    alignItems: "center",
   },
 });
 
@@ -594,6 +612,60 @@ function ListItem<T extends ChildItem>({
   );
 }
 
+function VideoStartModal({
+  video,
+  onDismiss,
+}: {
+  video: Movie | Episode;
+  onDismiss: () => void;
+}) {
+  let navigation = useNavigation<NavigationProp<AppRoutes>>();
+
+  let onPlay = useCallback(() => {
+    navigation.navigate("video", {
+      server: video.library.server.id,
+      video: video.id,
+    });
+    onDismiss();
+  }, [video, navigation, onDismiss]);
+
+  let onRestart = useCallback(() => {
+    navigation.navigate("video", {
+      server: video.library.server.id,
+      video: video.id,
+      restart: true,
+    });
+    onDismiss();
+  }, [video, navigation, onDismiss]);
+
+  return (
+    <Portal>
+      <Modal
+        visible
+        onDismiss={onDismiss}
+        contentContainerStyle={styles.videoModal}
+      >
+        <TouchableRipple onPress={onPlay} style={styles.modalButton}>
+          <View style={styles.modalOption}>
+            <MaterialIcons name="play-arrow" size={80} />
+            <Text variant="labelMedium" numberOfLines={1}>
+              Play
+            </Text>
+          </View>
+        </TouchableRipple>
+        <TouchableRipple onPress={onRestart} style={styles.modalButton}>
+          <View style={styles.modalOption}>
+            <MaterialIcons name="replay" size={80} />
+            <Text variant="labelMedium" numberOfLines={1}>
+              Restart
+            </Text>
+          </View>
+        </TouchableRipple>
+      </Modal>
+    </Portal>
+  );
+}
+
 export function List<T extends ChildItem>({
   id,
   type,
@@ -614,6 +686,7 @@ export function List<T extends ChildItem>({
     width: number;
     height: number;
   }>();
+  let [startingVideo, setStartingVideo] = useState<Movie | Episode>();
 
   let itemClick = useCallback(
     (item: T) => {
@@ -637,10 +710,14 @@ export function List<T extends ChildItem>({
       }
 
       if (item instanceof Movie || item instanceof Episode) {
-        navigation.navigate("video", {
-          server: item.library.server.id,
-          video: item.id,
-        });
+        if (item.playPosition > 0) {
+          setStartingVideo(item);
+        } else {
+          navigation.navigate("video", {
+            server: item.library.server.id,
+            video: item.id,
+          });
+        }
       }
 
       if (item instanceof ShowCollection || item instanceof MovieCollection) {
@@ -697,6 +774,12 @@ export function List<T extends ChildItem>({
       onLayout={updateDimensions}
       style={[styles.root, style ?? styles.base]}
     >
+      {startingVideo && (
+        <VideoStartModal
+          video={startingVideo}
+          onDismiss={() => setStartingVideo(undefined)}
+        />
+      )}
       {dimensions && (
         <FlatList
           key={`${listSettings.display}${numColumns}`}

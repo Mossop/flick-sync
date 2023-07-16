@@ -52,7 +52,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     alignItems: "flex-start",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
   },
   controls: {
     flexDirection: "row",
@@ -117,6 +117,7 @@ function Overlay({
           exiting={FadeOut}
         >
           <View style={styles.buttons}>
+            <IconButton icon="replay" onPress={() => seek(0)} size={40} />
             <IconButton
               icon="close"
               onPress={() => navigation.goBack()}
@@ -173,6 +174,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let video = mediaState
     .getServer(route.params.server)
     .getVideo(route.params.video);
+  let { restart } = route.params;
 
   let previousDuration = useRef<number>(0);
   let currentPart = useRef<number>();
@@ -238,10 +240,14 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
 
   useEffect(() => {
     if (!initialized.current) {
-      seek(video.playbackState.state == "played" ? 0 : video.playPosition);
+      seek(
+        video.playbackState.state == "played" || restart
+          ? 0
+          : video.playPosition,
+      );
       initialized.current = true;
     }
-  }, [video, seek]);
+  }, [video, seek, restart]);
 
   let onStatus = useCallback(
     (avStatus: AVPlaybackStatus) => {
