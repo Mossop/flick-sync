@@ -616,8 +616,12 @@ impl VideoState {
                             video = item.rating_key(),
                             position, "Updating playback position on server"
                         );
-                        if let Err(e) = server.update_timeline(item, position).await {
-                            warn!("Failed to update playback position: {e}");
+                        match server.update_timeline(item, position).await {
+                            Ok(item) => {
+                                let metadata = item.metadata();
+                                self.playback_state = playback_state_from_metadata(metadata);
+                            }
+                            Err(e) => warn!("Failed to update playback position: {e}"),
                         }
                     }
                     PlaybackState::Played => {
@@ -625,8 +629,12 @@ impl VideoState {
                             video = item.rating_key(),
                             "Marking item as watched on server"
                         );
-                        if let Err(e) = server.mark_watched(item).await {
-                            warn!("Failed to mark item as watched: {e}");
+                        match server.mark_watched(item).await {
+                            Ok(item) => {
+                                let metadata = item.metadata();
+                                self.playback_state = playback_state_from_metadata(metadata);
+                            }
+                            Err(e) => warn!("Failed to mark item as watched: {e}"),
                         }
                     }
                 }
@@ -635,16 +643,6 @@ impl VideoState {
             // Viewed on the server, just take the server's state.
             self.last_viewed_at = metadata.last_viewed_at;
             self.playback_state = server_state;
-        }
-
-        if self.last_viewed_at != metadata.last_viewed_at {
-            self.playback_state = if let Some(position) = metadata.view_offset {
-                PlaybackState::InProgress { position }
-            } else if metadata.view_count.is_some() {
-                PlaybackState::Played
-            } else {
-                PlaybackState::Unplayed
-            };
         }
 
         match self.detail {
