@@ -5,6 +5,7 @@ import { useEffect, useMemo } from "react";
 import * as NavigationBar from "expo-navigation-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AppStateProvider } from "./components/AppState";
+import Notification from "./components/Notification";
 import Video from "./app/video";
 import createAppNavigator, {
   AppScreenProps,
@@ -99,6 +100,7 @@ export default function Root() {
               {/* @ts-ignore */}
               <RootStack.Screen name="video" component={Video} />
             </RootStack.Navigator>
+            <Notification />
           </ThemeProvider>
         </NavigationContainer>
       </AppStateProvider>

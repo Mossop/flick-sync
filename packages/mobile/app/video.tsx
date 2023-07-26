@@ -286,6 +286,15 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     [video, previousDuration, navigation, settings],
   );
 
+  let onError = useCallback(
+    (message: string) => {
+      console.error(message);
+      settings.notificationMessage = "Video playback failed";
+      navigation.goBack();
+    },
+    [settings, navigation],
+  );
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: "black" }]}>
       <SchemeOverride scheme="dark" />
@@ -294,6 +303,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
         style={styles.video}
         resizeMode={ResizeMode.CONTAIN}
         onPlaybackStatusUpdate={onStatus}
+        onError={onError}
       />
       {videoRef.current && playbackStatus && (
         <Overlay

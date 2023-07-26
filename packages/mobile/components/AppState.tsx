@@ -27,6 +27,7 @@ interface SettingsState {
 interface ContextState {
   state: State;
   settings: SettingsState;
+  notificationMessage?: string;
 }
 
 function storagePath(store: string, path: string): string {
@@ -165,6 +166,17 @@ class Settings {
     let store = await chooseStore();
     let state = await loadMediaState(store);
     this.persistSettings({ state, settings: { store, listSettings: {} } });
+  }
+
+  public get notificationMessage(): string | undefined {
+    return this.state.notificationMessage;
+  }
+
+  public set notificationMessage(notificationMessage: string | undefined) {
+    this.setContextState({
+      ...this.state,
+      notificationMessage,
+    });
   }
 }
 
