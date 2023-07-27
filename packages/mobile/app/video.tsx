@@ -75,10 +75,10 @@ function useOverlayState(): [boolean, () => void] {
       if (visible) {
         setVisible(false);
       } else {
-        // timeout.current = setTimeout(() => {
-        //   timeout.current = null;
-        //   setVisible(false);
-        // }, 5000);
+        timeout.current = setTimeout(() => {
+          timeout.current = null;
+          setVisible(false);
+        }, 10000);
         setVisible(true);
       }
     },
