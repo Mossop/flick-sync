@@ -2,7 +2,7 @@ import AppView from "../components/AppView";
 import { useMediaState } from "../components/AppState";
 import { isMovieCollection } from "../state";
 import { AppScreenProps } from "../components/AppNavigator";
-import { List, ListControls, Type } from "../components/List";
+import { ContainerType, List, ListControls } from "../components/List";
 
 export default function Collection({ route }: AppScreenProps<"collection">) {
   let mediaState = useMediaState();
@@ -17,15 +17,21 @@ export default function Collection({ route }: AppScreenProps<"collection">) {
     throw new Error("Invalid params for collection route");
   }
 
-  let listType = isMovieCollection(collection) ? Type.Movie : Type.Show;
+  let container = isMovieCollection(collection)
+    ? ContainerType.MovieCollection
+    : ContainerType.ShowCollection;
 
   return (
     <AppView
       title={collection.title}
-      actions={<ListControls id={collection.id} type={listType} />}
+      actions={<ListControls id={collection.id} container={container} />}
     >
-      {/* @ts-ignore */}
-      <List id={collection.id} type={listType} items={collection.contents} />
+      <List
+        id={collection.id}
+        container={container}
+        // @ts-ignore
+        items={collection.contents}
+      />
     </AppView>
   );
 }

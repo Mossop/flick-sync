@@ -42,18 +42,16 @@ import {
 import { AppRoutes } from "./AppNavigator";
 import { byTitle } from "../modules/util";
 
-export enum Type {
+export enum ContainerType {
   // eslint-disable-next-line @typescript-eslint/no-shadow
-  Collection,
+  MovieCollection,
+  // eslint-disable-next-line @typescript-eslint/no-shadow
+  ShowCollection,
   // eslint-disable-next-line @typescript-eslint/no-shadow
   Playlist,
   // eslint-disable-next-line @typescript-eslint/no-shadow
-  Movie,
-  // eslint-disable-next-line @typescript-eslint/no-shadow
-  Episode,
-  // eslint-disable-next-line @typescript-eslint/no-shadow
   Show,
-  PlaylistItem,
+  Library,
 }
 
 export enum Display {
@@ -217,17 +215,32 @@ function duration(item: ChildItem) {
   return result;
 }
 
-function defaultSetting(type: Type): ListSetting {
-  switch (type) {
-    case Type.Episode:
-      return {
-        display: Display.List,
-        ordering: Ordering.AirDate,
-      };
-    case Type.PlaylistItem:
+function defaultSetting(container: ContainerType): ListSetting {
+  switch (container) {
+    case ContainerType.Show:
       return {
         display: Display.List,
         ordering: Ordering.Index,
+      };
+    case ContainerType.Playlist:
+      return {
+        display: Display.List,
+        ordering: Ordering.Index,
+      };
+    case ContainerType.MovieCollection:
+      return {
+        display: Display.Grid,
+        ordering: Ordering.Index,
+      };
+    case ContainerType.ShowCollection:
+      return {
+        display: Display.Grid,
+        ordering: Ordering.Index,
+      };
+    case ContainerType.Library:
+      return {
+        display: Display.Grid,
+        ordering: Ordering.Title,
       };
     default:
       return {
@@ -237,9 +250,9 @@ function defaultSetting(type: Type): ListSetting {
   }
 }
 
-function useListSetting(id: string, type: Type) {
+function useListSetting(id: string, container: ContainerType) {
   let settings = useSettings();
-  return settings.getListSetting(id) ?? defaultSetting(type);
+  return settings.getListSetting(id) ?? defaultSetting(container);
 }
 
 function useSorted<T extends ChildItem>(
@@ -292,9 +305,15 @@ function OrderingMenuItem({
   );
 }
 
-export function ListControls({ id, type }: { id: string; type: Type }) {
+export function ListControls({
+  id,
+  container,
+}: {
+  id: string;
+  container: ContainerType;
+}) {
   let settings = useSettings();
-  let listSettings = useListSetting(id, type);
+  let listSettings = useListSetting(id, container);
 
   let [menuVisible, setMenuVisible] = useState(false);
 
@@ -339,7 +358,7 @@ export function ListControls({ id, type }: { id: string; type: Type }) {
         }
         anchorPosition="bottom"
       >
-        {(type == Type.PlaylistItem || type == Type.Episode) && (
+        {container != ContainerType.Library && (
           <OrderingMenuItem
             ordering={Ordering.Index}
             title="Order"
@@ -404,9 +423,9 @@ function ThumbnailOverlay({
       (height - (dimensions.height * width) / dimensions.width) / 2;
   }
 
-  let percentComplete = `${Math.floor(
+  let percentComplete = Math.floor(
     (100 * item.playPosition) / item.totalDuration,
-  )}%`;
+  );
 
   return (
     <View style={[styles.thumbOverlay, { paddingVertical, paddingHorizontal }]}>
@@ -416,7 +435,9 @@ function ThumbnailOverlay({
         )}
       </View>
       {item.playbackState.state == "inprogress" && (
-        <View style={[styles.playbackPosition, { width: percentComplete }]} />
+        <View
+          style={[styles.playbackPosition, { width: `${percentComplete}%` }]}
+        />
       )}
     </View>
   );
@@ -668,18 +689,18 @@ function VideoStartModal({
 
 export function List<T extends ChildItem>({
   id,
-  type,
+  container,
   items,
   style,
   onClick,
 }: {
   id: string;
-  type: Type;
+  container: ContainerType;
   style?: StyleProp<ViewStyle>;
   items: readonly T[];
   onClick?: (item: T) => void;
 }) {
-  let listSettings = useListSetting(id, type);
+  let listSettings = useListSetting(id, container);
   let sorted = useSorted(items, listSettings.ordering);
   let navigation = useNavigation<NavigationProp<AppRoutes>>();
   let [dimensions, setDimensions] = useState<{

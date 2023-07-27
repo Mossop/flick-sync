@@ -1,7 +1,7 @@
 import AppView from "../components/AppView";
 import { useMediaState } from "../components/AppState";
 import { AppScreenProps } from "../components/AppNavigator";
-import { List, ListControls, Type } from "../components/List";
+import { List, ListControls, ContainerType } from "../components/List";
 
 export default function Playlist({ route }: AppScreenProps<"playlist">) {
   let mediaState = useMediaState();
@@ -19,9 +19,15 @@ export default function Playlist({ route }: AppScreenProps<"playlist">) {
   return (
     <AppView
       title={playlist.title}
-      actions={<ListControls id={playlist.id} type={Type.PlaylistItem} />}
+      actions={
+        <ListControls id={playlist.id} container={ContainerType.Playlist} />
+      }
     >
-      <List id={playlist.id} type={Type.PlaylistItem} items={playlist.videos} />
+      <List
+        id={playlist.id}
+        container={ContainerType.Playlist}
+        items={playlist.videos}
+      />
     </AppView>
   );
 }

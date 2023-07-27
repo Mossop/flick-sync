@@ -1,17 +1,21 @@
 import AppView from "../components/AppView";
-import { Library, isMovieLibrary } from "../state";
-import { List, ListControls, Type } from "../components/List";
+import { Library } from "../state";
+import { ContainerType, List, ListControls } from "../components/List";
 
 export default function LibraryContents({ library }: { library: Library }) {
-  let listType = isMovieLibrary(library) ? Type.Movie : Type.Show;
-
   return (
     <AppView
       title={library.title}
-      actions={<ListControls id={library.id} type={listType} />}
+      actions={
+        <ListControls id={library.id} container={ContainerType.Library} />
+      }
     >
-      {/* @ts-ignore */}
-      <List id={library.id} type={listType} items={library.contents} />
+      <List
+        id={library.id}
+        container={ContainerType.Library}
+        // @ts-ignore
+        items={library.contents}
+      />
     </AppView>
   );
 }

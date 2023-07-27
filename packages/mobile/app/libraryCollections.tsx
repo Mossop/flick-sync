@@ -1,18 +1,21 @@
 import AppView from "../components/AppView";
 import { Library } from "../state";
-import { List, ListControls, Type } from "../components/List";
+import { List, ListControls, ContainerType } from "../components/List";
 
 export default function CollectionList({ library }: { library: Library }) {
   return (
     <AppView
       title={library.title}
       actions={
-        <ListControls id={`${library.id}/collections`} type={Type.Collection} />
+        <ListControls
+          id={`${library.id}/collections`}
+          container={ContainerType.Library}
+        />
       }
     >
       <List
         id={`${library.id}/collections`}
-        type={Type.Collection}
+        container={ContainerType.Library}
         // @ts-ignore
         items={library.collections()}
       />
