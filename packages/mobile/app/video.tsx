@@ -208,7 +208,11 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
         console.log(`Loading ${download.path} at position ${partPosition}`);
         await videoRef.current!.loadAsync(
           { uri: settings.path(download.path) },
-          { positionMillis: partPosition, shouldPlay: true },
+          {
+            positionMillis: partPosition,
+            shouldPlay: true,
+            androidImplementation: "MediaPlayer",
+          },
         );
       }
     },
