@@ -40,7 +40,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: "100%",
     height: "100%",
-    backgroundColor: "#000000A0",
   },
   overlay: {
     flex: 1,
@@ -48,6 +47,7 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
     justifyContent: "flex-start",
     padding: PADDING,
+    backgroundColor: "#00000050",
   },
   buttons: {
     flex: 1,
@@ -62,9 +62,16 @@ const styles = StyleSheet.create({
   },
 });
 
-function useOverlayState(): [boolean, () => void] {
+function useOverlayState(): [boolean, () => void, () => void] {
   let [visible, setVisible] = useState(false);
   let timeout = useRef<NodeJS.Timeout | null>(null);
+
+  let initTimeout = () => {
+    timeout.current = setTimeout(() => {
+      timeout.current = null;
+      setVisible(false);
+    }, 10000);
+  };
 
   return [
     visible,
@@ -76,11 +83,14 @@ function useOverlayState(): [boolean, () => void] {
       if (visible) {
         setVisible(false);
       } else {
-        timeout.current = setTimeout(() => {
-          timeout.current = null;
-          setVisible(false);
-        }, 10000);
+        initTimeout();
         setVisible(true);
+      }
+    },
+    () => {
+      if (timeout.current) {
+        clearTimeout(timeout.current);
+        initTimeout();
       }
     },
   ];
@@ -100,14 +110,30 @@ function Overlay({
   totalDuration: number;
 }) {
   let navigation = useNavigation();
-  let [visible, toggle] = useOverlayState();
+  let [visible, toggle, keepAlive] = useOverlayState();
   let position = previousDuration + status.positionMillis;
 
-  let togglePlayback = () => {
+  let togglePlayback = useCallback(() => {
     video.setStatusAsync({ shouldPlay: !status.isPlaying });
-  };
+    keepAlive();
+  }, [video, status, keepAlive]);
 
-  let skip = (delta: number) => seek(position + delta);
+  let skip = useCallback(
+    (delta: number) => {
+      seek(position + delta);
+      keepAlive();
+    },
+    [seek, position, keepAlive],
+  );
+
+  let restart = useCallback(() => {
+    seek(0);
+    keepAlive();
+  }, [seek, keepAlive]);
+
+  let goBack = useCallback(() => {
+    navigation.goBack();
+  }, [navigation]);
 
   return (
     <Pressable style={styles.overlayContainer} onPress={toggle}>
@@ -118,12 +144,8 @@ function Overlay({
           exiting={FadeOut}
         >
           <View style={styles.buttons}>
-            <IconButton icon="replay" onPress={() => seek(0)} size={40} />
-            <IconButton
-              icon="close"
-              onPress={() => navigation.goBack()}
-              size={40}
-            />
+            <IconButton icon="replay" onPress={restart} size={40} />
+            <IconButton icon="close" onPress={goBack} size={40} />
           </View>
           <View style={styles.controls}>
             <IconButton
@@ -155,6 +177,7 @@ function Overlay({
           <Scrubber
             position={position}
             totalDuration={totalDuration}
+            onScrubbing={keepAlive}
             onScrubbingComplete={seek}
           />
         </Animated.View>

@@ -47,6 +47,7 @@ const styles = StyleSheet.create({
 export interface ScrubberProps {
   position: number;
   totalDuration: number;
+  onScrubbing: () => void;
   onScrubbingComplete: (position: number) => Promise<void>;
 }
 
@@ -86,6 +87,7 @@ function Time({ value }: { value: number }) {
 export default function Scrubber({
   position,
   totalDuration,
+  onScrubbing,
   onScrubbingComplete,
 }: ScrubberProps) {
   let theme = useTheme();
@@ -126,13 +128,14 @@ export default function Scrubber({
           selectedPosition.value = Math.round(
             (totalDuration * event.x) / fullWidth,
           );
+          runOnJS(onScrubbing)();
         })
         .onEnd(() => {
           if (selectedPosition.value !== null) {
             runOnJS(finishScrubbing)(selectedPosition.value);
           }
         }),
-    [fullWidth, totalDuration, finishScrubbing, selectedPosition],
+    [fullWidth, totalDuration, onScrubbing, finishScrubbing, selectedPosition],
   );
 
   let animatedStyle = useAnimatedStyle(() => ({
