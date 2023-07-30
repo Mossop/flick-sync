@@ -50,9 +50,10 @@ interface ShowParams {
   show: string;
 }
 
-interface VideoParams {
+export interface VideoParams {
   server: string;
-  video: string;
+  queue: string[];
+  index: number;
   restart?: boolean;
 }
 

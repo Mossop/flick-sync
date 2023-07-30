@@ -45,6 +45,10 @@ export function usePlaylists(): Playlist[] {
   }, [mediaState]);
 }
 
+export function pad(val: number) {
+  return val >= 10 ? `${val}` : `0${val}`;
+}
+
 function sorted<T>(
   list: readonly T[],
   comparator: (a: T, b: T) => number,

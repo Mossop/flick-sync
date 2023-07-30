@@ -39,8 +39,11 @@ import {
   POSTER_HEIGHT,
   POSTER_WIDTH,
 } from "../modules/styles";
-import { AppRoutes } from "./AppNavigator";
-import { byTitle } from "../modules/util";
+import { AppRoutes, VideoParams } from "./AppNavigator";
+import { byTitle, pad } from "../modules/util";
+
+// Offer to start from the current position as long as it is larger than this.
+const START_SLOP = 15000;
 
 export enum ContainerType {
   // eslint-disable-next-line @typescript-eslint/no-shadow
@@ -159,8 +162,14 @@ const styles = StyleSheet.create({
   },
 });
 
-function pad(val: number) {
-  return val >= 10 ? `${val}` : `0${val}`;
+function shouldQueue(container: ContainerType): boolean {
+  switch (container) {
+    case ContainerType.Playlist:
+    case ContainerType.Show:
+      return true;
+    default:
+      return false;
+  }
 }
 
 function itemDuration(item: ChildItem | Season): number {
@@ -587,15 +596,17 @@ function ListMeta({ item }: { item: ChildItem }) {
 
 function GridItem<T extends ChildItem>({
   item,
+  index,
   width,
   onClick,
 }: {
   item: T;
+  index: number;
   width: number;
-  onClick: (item: T) => void;
+  onClick: (item: T, index: number) => void;
 }) {
   return (
-    <TouchableRipple onPress={() => onClick(item)}>
+    <TouchableRipple onPress={() => onClick(item, index)}>
       <View style={[styles.poster, { width }]}>
         <Thumbnail type={ThumbnailType.Poster} item={item} />
         <Text
@@ -613,13 +624,15 @@ function GridItem<T extends ChildItem>({
 
 function ListItem<T extends ChildItem>({
   item,
+  index,
   onClick,
 }: {
   item: T;
-  onClick: (item: T) => void;
+  index: number;
+  onClick: (item: T, index: number) => void;
 }) {
   return (
-    <TouchableRipple key={item.id} onPress={() => onClick(item)}>
+    <TouchableRipple key={item.id} onPress={() => onClick(item, index)}>
       <View style={styles.listItem}>
         <Thumbnail
           type={
@@ -635,29 +648,40 @@ function ListItem<T extends ChildItem>({
 
 function VideoStartModal({
   video,
+  container,
+  queue,
+  index,
   onDismiss,
 }: {
   video: Movie | Episode;
+  container: ContainerType;
+  queue: string[];
+  index: number;
   onDismiss: () => void;
 }) {
   let navigation = useNavigation<NavigationProp<AppRoutes>>();
 
-  let onPlay = useCallback(() => {
-    navigation.navigate("video", {
+  let params: VideoParams = useMemo(() => {
+    let willQueue = shouldQueue(container);
+    return {
       server: video.library.server.id,
-      video: video.id,
-    });
+      queue: willQueue ? queue : [video.id],
+      index: willQueue ? index : 0,
+    };
+  }, [video, queue, index, container]);
+
+  let onPlay = useCallback(() => {
+    navigation.navigate("video", params);
     onDismiss();
-  }, [video, navigation, onDismiss]);
+  }, [params, navigation, onDismiss]);
 
   let onRestart = useCallback(() => {
     navigation.navigate("video", {
-      server: video.library.server.id,
-      video: video.id,
+      ...params,
       restart: true,
     });
     onDismiss();
-  }, [video, navigation, onDismiss]);
+  }, [params, navigation, onDismiss]);
 
   return (
     <Portal>
@@ -707,10 +731,11 @@ export function List<T extends ChildItem>({
     width: number;
     height: number;
   }>();
-  let [startingVideo, setStartingVideo] = useState<Movie | Episode>();
+  let [startingVideo, setStartingVideo] = useState<[Movie | Episode, number]>();
+  let queue = useMemo(() => sorted.map((i) => i.id), [sorted]);
 
   let itemClick = useCallback(
-    (item: T) => {
+    (item: T, index: number) => {
       if (onClick) {
         onClick(item);
         return;
@@ -731,12 +756,15 @@ export function List<T extends ChildItem>({
       }
 
       if (item instanceof Movie || item instanceof Episode) {
-        if (item.playPosition > 0) {
-          setStartingVideo(item);
+        if (item.playPosition > START_SLOP) {
+          setStartingVideo([item, index]);
         } else {
+          let willQueue = shouldQueue(container);
+
           navigation.navigate("video", {
             server: item.library.server.id,
-            video: item.id,
+            queue: willQueue ? queue : [item.id],
+            index: willQueue ? index : 0,
           });
         }
       }
@@ -748,7 +776,7 @@ export function List<T extends ChildItem>({
         });
       }
     },
-    [onClick, navigation],
+    [onClick, queue, container, navigation],
   );
 
   let updateDimensions = useCallback(
@@ -781,11 +809,18 @@ export function List<T extends ChildItem>({
 
   let renderItem = useCallback(
     // eslint-disable-next-line react/no-unused-prop-types
-    ({ item }: { item: T }) => {
+    ({ item, index }: { item: T; index: number }) => {
       if (listSettings.display == Display.Grid) {
-        return <GridItem item={item} width={width} onClick={itemClick} />;
+        return (
+          <GridItem
+            item={item}
+            index={index}
+            width={width}
+            onClick={itemClick}
+          />
+        );
       }
-      return <ListItem item={item} onClick={itemClick} />;
+      return <ListItem item={item} index={index} onClick={itemClick} />;
     },
     [itemClick, width, listSettings.display],
   );
@@ -797,7 +832,10 @@ export function List<T extends ChildItem>({
     >
       {startingVideo && (
         <VideoStartModal
-          video={startingVideo}
+          container={container}
+          video={startingVideo[0]}
+          queue={queue}
+          index={startingVideo[1]}
           onDismiss={() => setStartingVideo(undefined)}
         />
       )}
