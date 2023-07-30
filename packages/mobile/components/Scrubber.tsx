@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { LayoutChangeEvent, StyleSheet, View } from "react-native";
 import { Text, useTheme } from "react-native-paper";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -19,7 +19,8 @@ const styles = StyleSheet.create({
     flexDirection: "column",
     alignItems: "stretch",
     justifyContent: "flex-start",
-    margin: PADDING,
+    marginHorizontal: PADDING,
+    paddingVertical: PADDING,
   },
   labels: {
     flexDirection: "row",
@@ -35,7 +36,7 @@ const styles = StyleSheet.create({
   },
   scrubber: {
     position: "absolute",
-    top: 0,
+    top: PADDING,
     borderRadius: SCRUBBER_SIZE / 2,
     width: SCRUBBER_SIZE,
     height: SCRUBBER_SIZE,
@@ -46,7 +47,7 @@ const styles = StyleSheet.create({
 export interface ScrubberProps {
   position: number;
   totalDuration: number;
-  onScrubbingComplete: (position: number) => void;
+  onScrubbingComplete: (position: number) => Promise<void>;
 }
 
 function pad(val: number): string {
@@ -102,6 +103,15 @@ export default function Scrubber({
   let selectedPosition = useSharedValue<number | null>(null);
   let displayPosition = useDerivedValue(
     () => selectedPosition.value ?? position,
+    [position],
+  );
+
+  let finishScrubbing = useCallback(
+    async (value: number) => {
+      await onScrubbingComplete(value);
+      selectedPosition.value = null;
+    },
+    [selectedPosition, onScrubbingComplete],
   );
 
   let panGesture = useMemo(
@@ -119,11 +129,10 @@ export default function Scrubber({
         })
         .onEnd(() => {
           if (selectedPosition.value !== null) {
-            runOnJS(onScrubbingComplete)(selectedPosition.value);
+            runOnJS(finishScrubbing)(selectedPosition.value);
           }
-          selectedPosition.value = null;
         }),
-    [fullWidth, totalDuration, onScrubbingComplete, selectedPosition],
+    [fullWidth, totalDuration, finishScrubbing, selectedPosition],
   );
 
   let animatedStyle = useAnimatedStyle(() => ({

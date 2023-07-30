@@ -40,6 +40,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: "100%",
     height: "100%",
+    backgroundColor: "#000000A0",
   },
   overlay: {
     flex: 1,
@@ -92,7 +93,7 @@ function Overlay({
   previousDuration,
   totalDuration,
 }: {
-  seek: (position: number) => void;
+  seek: (position: number) => Promise<void>;
   video: Video;
   status: AVPlaybackStatusSuccess;
   previousDuration: number;
@@ -179,7 +180,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let previousDuration = useRef<number>(0);
   let currentPart = useRef<number>();
   let seek = useCallback(
-    async (position: number) => {
+    async (position: number): Promise<void> => {
       previousDuration.current = 0;
       let targetPart = 0;
       let partPosition = Math.min(Math.max(position, 0), video.totalDuration);
@@ -194,7 +195,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
       }
 
       if (targetPart === currentPart.current) {
-        videoRef.current!.playFromPositionAsync(partPosition);
+        await videoRef.current!.playFromPositionAsync(partPosition);
       } else {
         await videoRef.current!.unloadAsync();
 
