@@ -22,7 +22,7 @@ mod sync;
 mod util;
 
 pub use crate::console::Console;
-use server::{Add, Login, Remove};
+use server::{Add, Login, Rebuild, Remove};
 use util::{List, Stats};
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
@@ -45,6 +45,8 @@ pub enum Command {
     Stats,
     /// Lists sync items.
     List,
+    /// Attempts to rebuild a corrupt state file.
+    Rebuild,
 }
 
 #[async_trait]

@@ -32,7 +32,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{from_str, to_string_pretty};
 pub use server::{ItemType, Server, SyncItemInfo};
 use state::{ServerState, State};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 pub use wrappers::*;
 
@@ -152,7 +152,13 @@ where
     S: Serialize + DeserializeOwned + Default,
 {
     match read_to_string(path).await {
-        Ok(str) => Ok(from_str(&str)?),
+        Ok(str) => match from_str::<S>(&str) {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                error!(error = ?e);
+                Ok(Default::default())
+            }
+        },
         Err(e) => {
             if e.kind() == ErrorKind::NotFound {
                 let val = S::default();
@@ -160,7 +166,8 @@ where
                 write(path, str).await?;
                 Ok(val)
             } else {
-                Err(Error::from(e))
+                error!(error = ?e);
+                Ok(Default::default())
             }
         }
     }

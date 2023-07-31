@@ -9,7 +9,7 @@ use flick_sync::{
     },
     FlickSync, Server, ServerConnection,
 };
-use tracing::error;
+use tracing::{error, warn};
 use url::Url;
 
 use crate::{error::err, Console, Error, Result, Runnable};
@@ -51,7 +51,7 @@ async fn myplex_auth(console: &Console, client: &HttpClient, username: &str) -> 
     Ok(myplex)
 }
 
-async fn reconnect_server(server: Server, flick_sync: FlickSync, console: Console) -> Result {
+async fn reconnect_server(server: &Server, flick_sync: &FlickSync, console: &Console) -> Result {
     let connection = server.connection().await;
 
     match connection {
@@ -63,7 +63,7 @@ async fn reconnect_server(server: Server, flick_sync: FlickSync, console: Consol
             let client = flick_sync.client().await;
 
             console.println(format!("Username: {username}"));
-            let myplex = myplex_auth(&console, &client, &username).await?;
+            let myplex = myplex_auth(console, &client, &username).await?;
             let auth_token = myplex.client().x_plex_token().to_owned();
 
             let home = myplex.home()?;
@@ -235,7 +235,7 @@ async fn create_server(args: Login, flick_sync: FlickSync, console: Console) -> 
 impl Runnable for Login {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         match flick_sync.server(&self.id).await {
-            Some(server) => reconnect_server(server, flick_sync, console).await,
+            Some(server) => reconnect_server(&server, &flick_sync, &console).await,
             None => create_server(self, flick_sync, console).await,
         }
     }
@@ -356,6 +356,40 @@ impl Runnable for Remove {
             if let Err(e) = server.prune().await {
                 error!(server=server.id(), error=?e, "Failed to prune server directory");
                 return Ok(());
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Args)]
+pub struct Rebuild {}
+
+#[async_trait]
+impl Runnable for Rebuild {
+    async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
+        for server in flick_sync.servers().await {
+            if let Err(e) = reconnect_server(&server, &flick_sync, &console).await {
+                error!(server=server.id(), error=?e, "Failed to reconnect server");
+                continue;
+            }
+
+            if let Err(e) = server.update_state().await {
+                error!(server=server.id(), error=?e, "Failed to update server");
+                continue;
+            }
+
+            for video in server.videos().await {
+                for part in video.parts().await {
+                    if part.is_downloaded().await {
+                        continue;
+                    }
+
+                    if let Err(e) = part.rebuild_download().await {
+                        warn!(error=?e, "Failed to relocate video part");
+                    }
+                }
             }
         }
 

@@ -21,6 +21,7 @@ use futures::AsyncWrite;
 use pin_project::pin_project;
 use plex_api::{
     library::{self, Item, MediaItem, MetadataItem},
+    media_container::server::library::ContainerFormat,
     transcode::TranscodeStatus,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -420,6 +421,35 @@ impl VideoPart {
         video
             .file_path(FileType::Video(self.index), extension)
             .await
+    }
+
+    pub async fn rebuild_download(&self) -> Result {
+        let root = self.inner.path.read().await;
+        let title = self.with_video_state(|vs| vs.title.clone()).await;
+
+        for container in [
+            ContainerFormat::Avi,
+            ContainerFormat::Mpeg,
+            ContainerFormat::MpegTs,
+            ContainerFormat::M4v,
+            ContainerFormat::Mp4,
+            ContainerFormat::Mkv,
+        ] {
+            let path = self.file_path(&container.to_string()).await;
+            let target = root.join(&path);
+
+            if let Ok(stats) = metadata(target).await {
+                if stats.is_file() {
+                    info!(path=?path.display(), "Recovered download for {title}");
+
+                    return self
+                        .update_state(|state| state.download = DownloadState::Downloaded { path })
+                        .await;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn is_downloaded(&self) -> bool {
