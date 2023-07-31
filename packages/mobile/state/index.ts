@@ -9,3 +9,15 @@ export function isDownloaded(
 ): ds is { state: "downloaded" | "transcoded"; path: string } {
   return ds.state == "downloaded" || ds.state == "transcoded";
 }
+
+export enum ContainerType {
+  // eslint-disable-next-line @typescript-eslint/no-shadow
+  MovieCollection,
+  // eslint-disable-next-line @typescript-eslint/no-shadow
+  ShowCollection,
+  // eslint-disable-next-line @typescript-eslint/no-shadow
+  Playlist,
+  // eslint-disable-next-line @typescript-eslint/no-shadow
+  Show,
+  Library,
+}

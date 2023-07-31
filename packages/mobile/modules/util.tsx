@@ -6,8 +6,9 @@ import {
 } from "@react-navigation/native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { TextProps } from "react-native";
-import { useMediaState } from "../components/AppState";
-import { Episode, Library, Movie, Playlist, Show } from "../state";
+import { createSelector } from "@reduxjs/toolkit";
+import { Episode, Library, MediaState, Movie, Playlist, Show } from "../state";
+import { StoreState, useSelector } from "../components/Store";
 
 export interface ScreenProps<
   Params extends ParamListBase = ParamListBase,
@@ -16,6 +17,14 @@ export interface ScreenProps<
   route: RouteProp<Params, Screen>;
   navigation: NavigationProp<Params, Screen>;
 }
+
+const selectState = (storeState: StoreState) => storeState.state;
+const selectMediaState = createSelector(
+  selectState,
+  (state) => new MediaState(state),
+);
+
+export const useMediaState = () => useSelector(selectMediaState);
 
 export function useLibraries(): Library[] {
   let mediaState = useMediaState();

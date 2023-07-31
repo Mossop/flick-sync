@@ -1,6 +1,6 @@
 import AppView from "../components/AppView";
-import { Library } from "../state";
-import { ContainerType, List, ListControls } from "../components/List";
+import { ContainerType, Library } from "../state";
+import { List, ListControls } from "../components/List";
 
 export default function LibraryContents({ library }: { library: Library }) {
   return (

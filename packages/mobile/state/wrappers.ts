@@ -190,19 +190,12 @@ type IEpisode = Replace<
 >;
 
 abstract class StateWrapper<S> {
-  public constructor(
-    protected readonly state: S,
-    protected readonly setState: Dispatch<S>,
-  ) {}
+  public constructor(protected readonly state: S) {}
 }
 
 abstract class ServerItemWrapper<S> extends StateWrapper<S> {
-  public constructor(
-    public readonly server: Server,
-    state: S,
-    setState: Dispatch<S>,
-  ) {
-    super(state, setState);
+  public constructor(public readonly server: Server, state: S) {
+    super(state);
   }
 }
 
@@ -399,8 +392,8 @@ abstract class VideoWrapper<S extends Omit<VideoState, "detail">>
 {
   public readonly totalDuration: number;
 
-  public constructor(server: Server, state: S, setState: Dispatch<S>) {
-    super(server, state, setState);
+  public constructor(server: Server, state: S) {
+    super(server, state);
 
     this.totalDuration = state.parts.reduce(
       (total, part) => total + part.duration,
@@ -444,13 +437,6 @@ abstract class VideoWrapper<S extends Omit<VideoState, "detail">>
     return this.state.playbackState;
   }
 
-  public set playbackState(playbackState: PlaybackState) {
-    this.setState({
-      ...this.state,
-      playbackState,
-    });
-  }
-
   public get playPosition(): number {
     if (this.playbackState.state == "inprogress") {
       return this.playbackState.position;
@@ -461,10 +447,6 @@ abstract class VideoWrapper<S extends Omit<VideoState, "detail">>
     }
 
     return 0;
-  }
-
-  public set playPosition(position: number) {
-    this.playbackState = { state: "inprogress", position };
   }
 
   public get isDownloaded(): boolean {
@@ -577,12 +559,8 @@ function clsFactory<S, R>(
 }
 
 export class Server extends StateWrapper<ServerState> implements IServer {
-  public constructor(
-    public readonly id: string,
-    state: ServerState,
-    setState: Dispatch<ServerState>,
-  ) {
-    super(state, setState);
+  public constructor(public readonly id: string, state: ServerState) {
+    super(state);
   }
 
   public get name(): string {
@@ -591,30 +569,22 @@ export class Server extends StateWrapper<ServerState> implements IServer {
 
   public getLibrary = itemGetter(
     "libraries",
-    (
-      server: Server,
-      state: LibraryState,
-      setState: Dispatch<LibraryState>,
-    ): Library => {
+    (server: Server, state: LibraryState): Library => {
       if (state.type == LibraryType.Movie) {
-        return new MovieLibrary(server, state, setState);
+        return new MovieLibrary(server, state);
       }
-      return new ShowLibrary(server, state, setState);
+      return new ShowLibrary(server, state);
     },
   );
 
   public getCollection = itemGetter(
     "collections",
-    (
-      server: Server,
-      state: CollectionState,
-      setState: Dispatch<CollectionState>,
-    ): Collection => {
+    (server: Server, state: CollectionState): Collection => {
       let library = server.getLibrary(state.library);
       if (library instanceof MovieLibrary) {
-        return new MovieCollection(server, state, setState);
+        return new MovieCollection(server, state);
       }
-      return new ShowCollection(server, state, setState);
+      return new ShowCollection(server, state);
     },
   );
 
@@ -694,15 +664,7 @@ export class MediaState extends StateWrapper<State> {
       throw new Error(`Unknown server ${id}`);
     }
 
-    return new Server(id, ss, (newState) => {
-      this.setState({
-        ...this.state,
-        servers: {
-          ...this.state.servers,
-          [id]: newState,
-        },
-      });
-    });
+    return new Server(id, ss);
   });
 
   public servers(): Server[] {

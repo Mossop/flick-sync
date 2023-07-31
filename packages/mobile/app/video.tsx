@@ -16,13 +16,19 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { OrientationLock } from "expo-screen-orientation";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useMediaState, useSettings } from "../components/AppState";
 import { AppRoutes, AppScreenProps } from "../components/AppNavigator";
 import { PADDING } from "../modules/styles";
 import Scrubber from "../components/Scrubber";
 import { SchemeOverride } from "../components/ThemeProvider";
 import { isDownloaded, isMovie, Video } from "../state";
-import { pad } from "../modules/util";
+import { pad, useMediaState } from "../modules/util";
+import {
+  reportError,
+  setPlaybackState,
+  useAction,
+  useStoragePath,
+} from "../components/Store";
+import { PlaybackState } from "../state/base";
 
 const OVERLAY_TIMEOUT = 10000;
 
@@ -264,17 +270,34 @@ function Overlay({
 
 export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let navigation = useNavigation<NativeStackNavigationProp<AppRoutes>>();
-  let settings = useSettings();
   let mediaState = useMediaState();
   let videoRef = useRef<VideoComponent | null>(null);
   let [playbackStatus, setPlaybackStatus] =
     useState<AVPlaybackStatusSuccess | null>(null);
   let initialized = useRef<string | null>(null);
+  let dispatchSetError = useAction(reportError);
+  let storagePath = useStoragePath();
 
   let { server, queue, index } = route.params;
 
+  let dispatchSetPlaybackState = useAction(setPlaybackState);
+  let setPlayState = useCallback(
+    (state: PlaybackState) => {
+      dispatchSetPlaybackState([server, queue[index]!, state]);
+    },
+    [dispatchSetPlaybackState, server, queue, index],
+  );
+  let setPlayPosition = useCallback(
+    (position: number) => {
+      setPlayState({ state: "inprogress", position });
+    },
+    [setPlayState],
+  );
+
   let video = mediaState.getServer(server).getVideo(queue[index]!);
   let { restart } = route.params;
+
+  let finalState = useRef(video.playbackState);
 
   let previousDuration = useRef<number>(0);
   let currentPart = useRef<number>();
@@ -306,14 +329,14 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
         let { download } = video.parts[targetPart]!;
 
         if (!isDownloaded(download)) {
-          settings.notificationMessage = "Unexpected non-downloaded part";
+          dispatchSetError("Unexpected non-downloaded part");
           navigation.pop();
           return;
         }
 
         console.log(`Loading ${download.path} at position ${partPosition}`);
         await videoRef.current!.loadAsync(
-          { uri: settings.path(download.path) },
+          { uri: storagePath(download.path) },
           {
             positionMillis: partPosition,
             shouldPlay: true,
@@ -322,25 +345,32 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
         );
       }
     },
-    [video, settings, navigation],
+    [video, dispatchSetError, storagePath, navigation],
   );
 
   useEffect(() => {
     NavigationBar.setVisibilityAsync("hidden");
     StatusBar.setStatusBarHidden(true, "fade");
     ScreenOrientation.lockAsync(OrientationLock.LANDSCAPE);
+    console.log("mount");
 
     return () => {
+      console.log("unmount");
       StatusBar.setStatusBarHidden(false, "fade");
       NavigationBar.setVisibilityAsync("visible");
       ScreenOrientation.unlockAsync();
       // eslint-disable-next-line react-hooks/exhaustive-deps
       videoRef.current?.unloadAsync();
-      initialized.current = null;
-      currentPart.current = undefined;
       setPlaybackStatus(null);
     };
   }, []);
+
+  useEffect(
+    () => () => {
+      setPlayState(finalState.current);
+    },
+    [setPlayState],
+  );
 
   useEffect((): (() => void) | undefined => {
     if (playbackStatus?.isPlaying) {
@@ -354,7 +384,9 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   }, [playbackStatus?.isPlaying]);
 
   useEffect(() => {
-    if (initialized.current != video.id) {
+    if (initialized.current !== video.id) {
+      console.log("Initializing for new video");
+      currentPart.current = undefined;
       seek(
         video.playbackState.state == "played" || restart
           ? 0
@@ -371,9 +403,21 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
         let currentPosition =
           previousDuration.current + avStatus.positionMillis;
 
+        if (currentPosition < 30000) {
+          finalState.current = { state: "unplayed" };
+        } else if (currentPosition > 0.95 * video.totalDuration) {
+          finalState.current = { state: "played" };
+        } else {
+          finalState.current = {
+            state: "inprogress",
+            position: currentPosition,
+          };
+        }
+
         if (avStatus.didJustFinish) {
           if (currentPart.current == video.parts.length - 1) {
-            video.playbackState = { state: "played" };
+            finalState.current = { state: "played" };
+            setPlayState(finalState.current);
             if (index + 1 >= queue.length) {
               navigation.pop();
             } else {
@@ -386,37 +430,47 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
             previousDuration.current +=
               video.parts[currentPart.current!]!.duration;
             currentPart.current = currentPart.current! + 1;
-            video.playPosition = previousDuration.current;
+            setPlayPosition(previousDuration.current);
 
             let { download } = video.parts[currentPart.current!]!;
             if (!isDownloaded(download)) {
-              settings.notificationMessage = "Unexpected non-downloaded part";
+              dispatchSetError("Unexpected non-downloaded part");
               navigation.pop();
               return;
             }
 
             videoRef.current?.loadAsync(
-              { uri: settings.path(download.path) },
+              { uri: storagePath(download.path) },
               { positionMillis: 0, shouldPlay: true },
             );
           }
         } else if (Math.abs(currentPosition - video.playPosition) > 5000) {
-          video.playPosition = currentPosition;
+          setPlayPosition(currentPosition);
         }
       } else {
         setPlaybackStatus(null);
       }
     },
-    [video, previousDuration, navigation, settings, index, queue],
+    [
+      video,
+      previousDuration,
+      navigation,
+      dispatchSetError,
+      storagePath,
+      index,
+      queue,
+      setPlayState,
+      setPlayPosition,
+    ],
   );
 
   let onError = useCallback(
     (message: string) => {
       console.error(message);
-      settings.notificationMessage = "Video playback failed";
+      dispatchSetError("Video playback failed");
       navigation.pop();
     },
-    [settings, navigation],
+    [dispatchSetError, navigation],
   );
 
   let previous = useMemo(() => {

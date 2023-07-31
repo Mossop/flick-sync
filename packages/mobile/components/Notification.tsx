@@ -1,15 +1,9 @@
 import { Snackbar } from "react-native-paper";
-import { useCallback } from "react";
-import { useSettings } from "./AppState";
+import { clearError, useAction, useSelector } from "./Store";
 
 export default function Scrubber() {
-  let settings = useSettings();
-
-  let onDismiss = useCallback(() => {
-    settings.notificationMessage = undefined;
-  }, [settings]);
-
-  let message = settings.notificationMessage;
+  let onDismiss = useAction(clearError);
+  let message = useSelector((storeState) => storeState.notificationMessage);
 
   return (
     <Snackbar visible={message !== undefined} onDismiss={onDismiss}>

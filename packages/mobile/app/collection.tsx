@@ -1,8 +1,8 @@
 import AppView from "../components/AppView";
-import { useMediaState } from "../components/AppState";
-import { isMovieCollection } from "../state";
+import { useMediaState } from "../modules/util";
+import { ContainerType, isMovieCollection } from "../state";
 import { AppScreenProps } from "../components/AppNavigator";
-import { ContainerType, List, ListControls } from "../components/List";
+import { List, ListControls } from "../components/List";
 
 export default function Collection({ route }: AppScreenProps<"collection">) {
   let mediaState = useMediaState();

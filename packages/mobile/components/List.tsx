@@ -30,8 +30,8 @@ import {
   ShowCollection,
   MovieCollection,
   isVideo,
+  ContainerType,
 } from "../state";
-import { useSettings } from "./AppState";
 import {
   EPISODE_HEIGHT,
   EPISODE_WIDTH,
@@ -41,40 +41,20 @@ import {
 } from "../modules/styles";
 import { AppRoutes, VideoParams } from "./AppNavigator";
 import { byTitle, pad } from "../modules/util";
+import {
+  Display,
+  ListSetting,
+  Ordering,
+  setListSettings,
+  useAction,
+  useListSetting,
+  useStoragePath,
+} from "./Store";
 
 // Offer to start from the current position as long as it is larger than this.
 const START_SLOP = 15000;
 
-export enum ContainerType {
-  // eslint-disable-next-line @typescript-eslint/no-shadow
-  MovieCollection,
-  // eslint-disable-next-line @typescript-eslint/no-shadow
-  ShowCollection,
-  // eslint-disable-next-line @typescript-eslint/no-shadow
-  Playlist,
-  // eslint-disable-next-line @typescript-eslint/no-shadow
-  Show,
-  Library,
-}
-
-export enum Display {
-  Grid = "grid",
-  // eslint-disable-next-line @typescript-eslint/no-shadow
-  List = "list",
-}
-
-export enum Ordering {
-  Index = "index",
-  Title = "title",
-  AirDate = "airdate",
-}
-
 type ChildItem = Video | Collection | Playlist | Show;
-
-export interface ListSetting {
-  display: Display;
-  ordering: Ordering;
-}
 
 const styles = StyleSheet.create({
   root: {
@@ -224,46 +204,6 @@ function duration(item: ChildItem) {
   return result;
 }
 
-function defaultSetting(container: ContainerType): ListSetting {
-  switch (container) {
-    case ContainerType.Show:
-      return {
-        display: Display.List,
-        ordering: Ordering.Index,
-      };
-    case ContainerType.Playlist:
-      return {
-        display: Display.List,
-        ordering: Ordering.Index,
-      };
-    case ContainerType.MovieCollection:
-      return {
-        display: Display.Grid,
-        ordering: Ordering.Index,
-      };
-    case ContainerType.ShowCollection:
-      return {
-        display: Display.Grid,
-        ordering: Ordering.Index,
-      };
-    case ContainerType.Library:
-      return {
-        display: Display.Grid,
-        ordering: Ordering.Title,
-      };
-    default:
-      return {
-        display: Display.Grid,
-        ordering: Ordering.Title,
-      };
-  }
-}
-
-function useListSetting(id: string, container: ContainerType) {
-  let settings = useSettings();
-  return settings.getListSetting(id) ?? defaultSetting(container);
-}
-
 function useSorted<T extends ChildItem>(
   items: readonly T[],
   ordering: Ordering,
@@ -321,8 +261,8 @@ export function ListControls({
   id: string;
   container: ContainerType;
 }) {
-  let settings = useSettings();
   let listSettings = useListSetting(id, container);
+  let dispatchSetListSettings = useAction(setListSettings);
 
   let [menuVisible, setMenuVisible] = useState(false);
 
@@ -333,8 +273,8 @@ export function ListControls({
         listSettings.display == Display.Grid ? Display.List : Display.Grid,
     };
 
-    settings.setListSetting(id, newSettings);
-  }, [id, listSettings, settings]);
+    dispatchSetListSettings([id, newSettings]);
+  }, [id, listSettings, dispatchSetListSettings]);
 
   let setOrdering = useCallback(
     (ordering: Ordering) => {
@@ -343,10 +283,10 @@ export function ListControls({
         ordering,
       };
 
-      settings.setListSetting(id, newSettings);
+      dispatchSetListSettings([id, newSettings]);
       setMenuVisible(false);
     },
-    [id, listSettings, settings],
+    [id, listSettings, dispatchSetListSettings],
   );
 
   return (
@@ -453,7 +393,7 @@ function ThumbnailOverlay({
 }
 
 function Thumbnail({ item, type }: { item: ChildItem; type: ThumbnailType }) {
-  let settings = useSettings();
+  let storagePath = useStoragePath();
   let [dimensions, setDimensions] = useState<{
     width: number;
     height: number;
@@ -461,7 +401,7 @@ function Thumbnail({ item, type }: { item: ChildItem; type: ThumbnailType }) {
 
   let uri =
     !(item instanceof Playlist) && item.thumbnail.state == "downloaded"
-      ? settings.path(item.thumbnail.path)
+      ? storagePath(item.thumbnail.path)
       : undefined;
 
   useEffect(() => {

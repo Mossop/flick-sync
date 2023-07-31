@@ -4,7 +4,7 @@ import { createMaterialBottomTabNavigator } from "@react-navigation/material-bot
 import { useEffect, useMemo } from "react";
 import * as NavigationBar from "expo-navigation-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { AppStateProvider } from "./components/AppState";
+import { StoreProvider } from "./components/Store";
 import Notification from "./components/Notification";
 import Video from "./app/video";
 import createAppNavigator, {
@@ -89,7 +89,7 @@ export default function Root() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <AppStateProvider>
+      <StoreProvider>
         <NavigationContainer>
           <ThemeProvider>
             <RootStack.Navigator
@@ -103,7 +103,7 @@ export default function Root() {
             <Notification />
           </ThemeProvider>
         </NavigationContainer>
-      </AppStateProvider>
+      </StoreProvider>
     </GestureHandlerRootView>
   );
 }
