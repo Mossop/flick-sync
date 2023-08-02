@@ -1,10 +1,5 @@
 import { Pressable, StyleSheet, View } from "react-native";
-import {
-  Video as VideoComponent,
-  ResizeMode,
-  AVPlaybackStatusSuccess,
-  AVPlaybackStatus,
-} from "expo-av";
+import { Video as VideoComponent, ResizeMode, AVPlaybackStatus } from "expo-av";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as StatusBar from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -29,6 +24,12 @@ import {
   useStoragePath,
 } from "../components/Store";
 import { PlaybackState } from "../state/base";
+
+interface PlaybackStatus {
+  position: number;
+  duration: number;
+  isPlaying: boolean;
+}
 
 const OVERLAY_TIMEOUT = 10000;
 
@@ -143,36 +144,31 @@ function Overlay({
   video,
   videoComponent,
   status,
-  previousDuration,
-  totalDuration,
   goPrevious,
   goNext,
 }: {
   seek: (position: number) => Promise<void>;
   video: Video;
-  videoComponent: VideoComponent;
-  status: AVPlaybackStatusSuccess;
-  previousDuration: number;
-  totalDuration: number;
+  videoComponent: VideoComponent | null;
+  status: PlaybackStatus;
   goPrevious?: () => void;
   goNext?: () => void;
 }) {
   let navigation = useNavigation<NativeStackNavigationProp<AppRoutes>>();
   let [visible, updateState] = useOverlayState();
-  let position = previousDuration + status.positionMillis;
   let keepAlive = useCallback(() => updateState(true), [updateState]);
 
   let togglePlayback = useCallback(() => {
-    videoComponent.setStatusAsync({ shouldPlay: !status.isPlaying });
+    videoComponent?.setStatusAsync({ shouldPlay: !status.isPlaying });
     keepAlive();
   }, [videoComponent, status, keepAlive]);
 
   let skip = useCallback(
     (delta: number) => {
-      seek(position + delta);
+      seek(status.position + delta);
       keepAlive();
     },
-    [seek, position, keepAlive],
+    [seek, status, keepAlive],
   );
 
   let restart = useCallback(() => {
@@ -188,15 +184,15 @@ function Overlay({
 
   let previous = useCallback(() => {
     if (goPrevious) {
-      goPrevious();
       updateState(true);
+      goPrevious();
     }
   }, [goPrevious, updateState]);
 
   let next = useCallback(() => {
     if (goNext) {
-      goNext();
       updateState(true);
+      goNext();
     }
   }, [goNext, updateState]);
 
@@ -257,8 +253,8 @@ function Overlay({
             )}
           </View>
           <Scrubber
-            position={position}
-            totalDuration={totalDuration}
+            position={status.position}
+            totalDuration={status.duration}
             onScrubbing={keepAlive}
             onScrubbingComplete={seek}
           />
@@ -272,8 +268,6 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let navigation = useNavigation<NativeStackNavigationProp<AppRoutes>>();
   let mediaState = useMediaState();
   let videoRef = useRef<VideoComponent | null>(null);
-  let [playbackStatus, setPlaybackStatus] =
-    useState<AVPlaybackStatusSuccess | null>(null);
   let initialized = useRef<string | null>(null);
   let dispatchSetError = useAction(reportError);
   let storagePath = useStoragePath();
@@ -296,6 +290,12 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
 
   let video = mediaState.getServer(server).getVideo(queue[index]!);
   let { restart } = route.params;
+
+  let [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>({
+    position: restart ? 0 : video.playPosition,
+    duration: video.totalDuration,
+    isPlaying: false,
+  });
 
   let finalState = useRef(video.playbackState);
 
@@ -361,7 +361,6 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
       ScreenOrientation.unlockAsync();
       // eslint-disable-next-line react-hooks/exhaustive-deps
       videoRef.current?.unloadAsync();
-      setPlaybackStatus(null);
     };
   }, []);
 
@@ -399,9 +398,13 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let onStatus = useCallback(
     (avStatus: AVPlaybackStatus) => {
       if ("uri" in avStatus) {
-        setPlaybackStatus(avStatus);
         let currentPosition =
           previousDuration.current + avStatus.positionMillis;
+        setPlaybackStatus({
+          position: currentPosition,
+          duration: video.totalDuration,
+          isPlaying: avStatus.isPlaying,
+        });
 
         if (currentPosition < 30000) {
           finalState.current = { state: "unplayed" };
@@ -417,10 +420,10 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
         if (avStatus.didJustFinish) {
           if (currentPart.current == video.parts.length - 1) {
             finalState.current = { state: "played" };
-            setPlayState(finalState.current);
             if (index + 1 >= queue.length) {
               navigation.pop();
             } else {
+              setPlayState(finalState.current);
               navigation.setParams({
                 index: index + 1,
                 restart: true,
@@ -447,8 +450,6 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
         } else if (Math.abs(currentPosition - video.playPosition) > 5000) {
           setPlayPosition(currentPosition);
         }
-      } else {
-        setPlaybackStatus(null);
       }
     },
     [
@@ -508,18 +509,14 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
         onPlaybackStatusUpdate={onStatus}
         onError={onError}
       />
-      {videoRef.current && playbackStatus && (
-        <Overlay
-          goPrevious={previous}
-          goNext={next}
-          seek={seek}
-          previousDuration={previousDuration.current}
-          totalDuration={video.totalDuration}
-          status={playbackStatus}
-          videoComponent={videoRef.current}
-          video={video}
-        />
-      )}
+      <Overlay
+        goPrevious={previous}
+        goNext={next}
+        seek={seek}
+        status={playbackStatus}
+        videoComponent={videoRef.current}
+        video={video}
+      />
     </SafeAreaView>
   );
 }
