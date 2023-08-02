@@ -1,22 +1,18 @@
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet } from "react-native";
 import { Video as VideoComponent, ResizeMode, AVPlaybackStatus } from "expo-av";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as StatusBar from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as NavigationBar from "expo-navigation-bar";
-import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
-import { IconButton, Text } from "react-native-paper";
 import { useNavigation } from "@react-navigation/native";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { OrientationLock } from "expo-screen-orientation";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { AppRoutes, AppScreenProps } from "../components/AppNavigator";
-import { PADDING } from "../modules/styles";
-import Scrubber from "../components/Scrubber";
 import { SchemeOverride } from "../components/ThemeProvider";
-import { isDownloaded, isMovie, Video } from "../state";
-import { pad, useMediaState } from "../modules/util";
+import { isDownloaded } from "../state";
+import { useMediaState } from "../modules/util";
 import {
   reportError,
   setPlaybackState,
@@ -24,14 +20,7 @@ import {
   useStoragePath,
 } from "../components/Store";
 import { PlaybackState } from "../state/base";
-
-interface PlaybackStatus {
-  position: number;
-  duration: number;
-  isPlaying: boolean;
-}
-
-const OVERLAY_TIMEOUT = 10000;
+import { Overlay, PlaybackStatus } from "../components/VideoOverlay";
 
 const styles = StyleSheet.create({
   container: {
@@ -43,226 +32,7 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-  overlayContainer: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    left: 0,
-    bottom: 0,
-    width: "100%",
-    height: "100%",
-  },
-  overlay: {
-    flex: 1,
-    flexDirection: "column",
-    alignItems: "stretch",
-    justifyContent: "flex-start",
-    padding: PADDING,
-    backgroundColor: "#00000050",
-  },
-  overlayMeta: {
-    flex: 1,
-    flexDirection: "column",
-    alignItems: "center",
-    paddingTop: PADDING,
-  },
-  buttons: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-  },
-  controls: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
 });
-
-function useOverlayState(): [boolean, (state?: boolean) => void] {
-  let [visible, setVisible] = useState(true);
-  let timeout = useRef<NodeJS.Timeout | null>(null);
-
-  let initTimeout = (duration?: number) => {
-    if (timeout.current) {
-      clearTimeout(timeout.current);
-    }
-
-    timeout.current = setTimeout(() => {
-      timeout.current = null;
-      setVisible(false);
-    }, duration ?? OVERLAY_TIMEOUT);
-  };
-
-  if (!timeout.current && visible) {
-    initTimeout(OVERLAY_TIMEOUT / 2);
-  }
-
-  return [
-    visible,
-    (state?: boolean) => {
-      let newState = state ?? !visible;
-      if (!newState) {
-        setVisible(false);
-        if (timeout.current) {
-          clearTimeout(timeout.current);
-          timeout.current = null;
-        }
-      } else {
-        initTimeout();
-        setVisible(true);
-      }
-    },
-  ];
-}
-
-function OverlayMeta({ video }: { video: Video }) {
-  if (isMovie(video)) {
-    return (
-      <View style={styles.overlayMeta}>
-        <Text variant="titleLarge" numberOfLines={1} ellipsizeMode="tail">
-          {video.title}
-        </Text>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.overlayMeta}>
-      <Text variant="titleLarge" numberOfLines={1} ellipsizeMode="tail">
-        {video.season.show.title}
-      </Text>
-      <Text variant="titleMedium" numberOfLines={1} ellipsizeMode="tail">
-        s{pad(video.season.index)}e{pad(video.index)} - {video.title}
-      </Text>
-    </View>
-  );
-}
-
-function Overlay({
-  seek,
-  video,
-  videoComponent,
-  status,
-  goPrevious,
-  goNext,
-}: {
-  seek: (position: number) => Promise<void>;
-  video: Video;
-  videoComponent: VideoComponent | null;
-  status: PlaybackStatus;
-  goPrevious?: () => void;
-  goNext?: () => void;
-}) {
-  let navigation = useNavigation<NativeStackNavigationProp<AppRoutes>>();
-  let [visible, updateState] = useOverlayState();
-  let keepAlive = useCallback(() => updateState(true), [updateState]);
-
-  let togglePlayback = useCallback(() => {
-    videoComponent?.setStatusAsync({ shouldPlay: !status.isPlaying });
-    keepAlive();
-  }, [videoComponent, status, keepAlive]);
-
-  let skip = useCallback(
-    (delta: number) => {
-      seek(status.position + delta);
-      keepAlive();
-    },
-    [seek, status, keepAlive],
-  );
-
-  let restart = useCallback(() => {
-    seek(0);
-    keepAlive();
-  }, [seek, keepAlive]);
-
-  let goBack = useCallback(() => {
-    navigation.pop();
-  }, [navigation]);
-
-  let inQueue = goPrevious || goNext;
-
-  let previous = useCallback(() => {
-    if (goPrevious) {
-      updateState(true);
-      goPrevious();
-    }
-  }, [goPrevious, updateState]);
-
-  let next = useCallback(() => {
-    if (goNext) {
-      updateState(true);
-      goNext();
-    }
-  }, [goNext, updateState]);
-
-  return (
-    <Pressable style={styles.overlayContainer} onPress={() => updateState()}>
-      {visible && (
-        <Animated.View
-          style={styles.overlay}
-          entering={FadeIn}
-          exiting={FadeOut}
-        >
-          <View style={styles.buttons}>
-            <IconButton icon="replay" onPress={restart} size={40} />
-            <OverlayMeta video={video} />
-            <IconButton icon="close" onPress={goBack} size={40} />
-          </View>
-          <View style={styles.controls}>
-            {inQueue && (
-              <IconButton
-                icon="skip-previous"
-                disabled={goPrevious === undefined}
-                onPress={previous}
-                size={40}
-              />
-            )}
-            <IconButton
-              icon="rewind-30"
-              onPress={() => skip(-30000)}
-              size={40}
-            />
-            <IconButton
-              icon="rewind-10"
-              onPress={() => skip(-15000)}
-              size={40}
-            />
-            <IconButton
-              icon={status.isPlaying ? "pause" : "play"}
-              onPress={togglePlayback}
-              size={80}
-            />
-            <IconButton
-              icon="fast-forward-10"
-              onPress={() => skip(15000)}
-              size={40}
-            />
-            <IconButton
-              icon="fast-forward-30"
-              onPress={() => skip(30000)}
-              size={40}
-            />
-            {inQueue && (
-              <IconButton
-                icon="skip-next"
-                disabled={goNext === undefined}
-                onPress={next}
-                size={40}
-              />
-            )}
-          </View>
-          <Scrubber
-            position={status.position}
-            totalDuration={status.duration}
-            onScrubbing={keepAlive}
-            onScrubbingComplete={seek}
-          />
-        </Animated.View>
-      )}
-    </Pressable>
-  );
-}
 
 export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let navigation = useNavigation<NativeStackNavigationProp<AppRoutes>>();
@@ -291,11 +61,11 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let video = mediaState.getServer(server).getVideo(queue[index]!);
   let { restart } = route.params;
 
-  let [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>({
+  let [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>(() => ({
     position: restart ? 0 : video.playPosition,
     duration: video.totalDuration,
     isPlaying: false,
-  });
+  }));
 
   let finalState = useRef(video.playbackState);
 
@@ -499,6 +269,13 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     return undefined;
   }, [navigation, index, queue]);
 
+  let setPlaying = useCallback(
+    (playing: boolean) => {
+      videoRef.current?.setStatusAsync({ shouldPlay: playing });
+    },
+    [videoRef],
+  );
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: "black" }]}>
       <SchemeOverride scheme="dark" />
@@ -514,7 +291,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
         goNext={next}
         seek={seek}
         status={playbackStatus}
-        videoComponent={videoRef.current}
+        setPlaying={setPlaying}
         video={video}
       />
     </SafeAreaView>
