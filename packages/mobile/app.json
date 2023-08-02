@@ -2,7 +2,7 @@
   "expo": {
     "name": "Synced Flicks",
     "slug": "flicksync",
-    "version": "1.1.0",
+    "version": "1.5.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "automatic",
