@@ -1,10 +1,12 @@
+const { version } = require("./package.json");
+
 const IS_DEV = process.env.APP_VARIANT === "development";
 const LOGO = IS_DEV ? "./assets/logo-dev" : "./assets/logo";
 
 export default {
   name: IS_DEV ? "Synced Flicks (Dev)" : "Synced Flicks",
   slug: "flicksync",
-  version: "1.5.0",
+  version,
   orientation: "default",
   icon: `${LOGO}/icon.png`,
   userInterfaceStyle: "automatic",

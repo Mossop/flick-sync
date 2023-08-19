@@ -1,6 +1,6 @@
 {
   "name": "flick-sync-mobile",
-  "version": "0.1.0",
+  "version": "1.6.0",
   "main": "index",
   "scripts": {
     "start": "expo start",
