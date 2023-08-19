@@ -9,6 +9,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { OrientationLock } from "expo-screen-orientation";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { Event, useTrackPlayerEvents } from "react-native-track-player";
 import { AppRoutes, AppScreenProps } from "../components/AppNavigator";
 import { SchemeOverride } from "../components/ThemeProvider";
 import { isDownloaded } from "../state";
@@ -268,6 +269,18 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
 
     return undefined;
   }, [navigation, index, queue]);
+
+  useTrackPlayerEvents([Event.RemotePlay, Event.RemotePause], async () => {
+    let videoComponent = videoRef.current;
+    if (!videoComponent) {
+      return;
+    }
+
+    let avStatus = await videoComponent.getStatusAsync();
+    if ("uri" in avStatus) {
+      await videoComponent.setStatusAsync({ shouldPlay: !avStatus.isPlaying });
+    }
+  });
 
   let setPlaying = useCallback(
     (playing: boolean) => {

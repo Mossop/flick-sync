@@ -15,6 +15,9 @@ import {
 import { StorageAccessFramework, getInfoAsync } from "expo-file-system";
 import * as SplashScreen from "expo-splash-screen";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import TrackPlayer, {
+  AppKilledPlaybackBehavior,
+} from "react-native-track-player";
 import { ReactNode, useCallback } from "react";
 import { PlaybackState, State } from "../state/base";
 import { ContainerType, StateDecoder } from "../state";
@@ -377,6 +380,14 @@ async function findStore(): Promise<[string, State]> {
 async function initStore() {
   // Keep the splash screen visible while we fetch resources
   SplashScreen.preventAutoHideAsync();
+
+  await TrackPlayer.setupPlayer();
+  await TrackPlayer.updateOptions({
+    android: {
+      appKilledPlaybackBehavior:
+        AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification,
+    },
+  });
 
   try {
     let [storeLocation, state] = await findStore();
