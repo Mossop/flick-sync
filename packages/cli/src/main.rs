@@ -100,6 +100,16 @@ async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf> {
         }
     }
 
+    let config = path.join(CONFIG_FILE);
+    if let Ok(stats) = metadata(&config).await {
+        if stats.is_file() {
+            trace!("Store contained config file");
+            return Ok(path);
+        } else {
+            return err("Store contained a non-file where a config file was expected");
+        }
+    }
+
     let state = path.join(STATE_FILE);
     if let Ok(stats) = metadata(&state).await {
         if stats.is_file() {

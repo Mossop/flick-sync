@@ -151,6 +151,7 @@ impl PartialOrd for TranscodeProfile {
 }
 
 #[derive(Deserialize, Serialize, Default, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) max_downloads: Option<usize>,
