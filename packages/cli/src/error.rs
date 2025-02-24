@@ -27,11 +27,11 @@ pub enum Error {
     #[error("Unknown server {0}")]
     UnknownServer(String),
     #[error("{0}")]
-    ErrorMessage(String),
+    Generic(String),
     #[error("Unknown error")]
     Unknown,
 }
 
 pub fn err<T, S: ToString>(s: S) -> Result<T, Error> {
-    Err(Error::ErrorMessage(s.to_string()))
+    Err(Error::Generic(s.to_string()))
 }

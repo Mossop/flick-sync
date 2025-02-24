@@ -579,7 +579,7 @@ macro_rules! return_if_seen {
     };
 }
 
-impl<'a> StateSync<'a> {
+impl StateSync<'_> {
     async fn add_video<T: MediaItem + FromMetadata>(&mut self, sync: &SyncItem, video: &T) {
         if sync.only_unplayed && video.metadata().view_count.unwrap_or_default() > 0 {
             return;

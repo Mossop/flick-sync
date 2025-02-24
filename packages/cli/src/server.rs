@@ -256,7 +256,7 @@ pub struct Add {
 #[async_trait]
 impl Runnable for Add {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
-        let unexpected = || Error::ErrorMessage("Unexpected URL format".to_string());
+        let unexpected = || Error::Generic("Unexpected URL format".to_string());
 
         let url = Url::parse(&self.url)?;
         let fragment = url.fragment().ok_or_else(unexpected)?;
@@ -325,7 +325,7 @@ impl Runnable for Add {
             return Ok(());
         }
 
-        Err(Error::ErrorMessage("No matching server found".to_string()))
+        Err(Error::Generic("No matching server found".to_string()))
     }
 }
 

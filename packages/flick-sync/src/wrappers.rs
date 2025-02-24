@@ -1,5 +1,4 @@
 use std::{
-    cmp::{max, min},
     fmt,
     io::{ErrorKind, IoSlice},
     ops::{Add, AddAssign},
@@ -272,7 +271,7 @@ struct WriterProgress<'a, W, P> {
     progress: &'a mut P,
 }
 
-impl<'a, W, P> AsyncWrite for WriterProgress<'a, W, P>
+impl<W, P> AsyncWrite for WriterProgress<'_, W, P>
 where
     W: AsyncWrite + Unpin,
     P: Progress + Unpin,
@@ -622,7 +621,7 @@ impl VideoPart {
                 }) => {
                     progress.progress(p as u64, 100);
                     let delay = if let Some(remaining) = remaining {
-                        max(2, min(5, remaining))
+                        remaining.clamp(2, 5)
                     } else {
                         5
                     };
