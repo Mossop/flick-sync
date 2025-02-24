@@ -1,7 +1,7 @@
 [package]
 name = "flick-sync-cli"
 version = "1.6.0"
-edition = "2021"
+edition = "2024"
 
 [[bin]]
 name = "flick-sync"
@@ -12,13 +12,13 @@ futures = "0.3.28"
 flick-sync = { path = "../flick-sync" }
 clap = { version = "4.1.13", features = ["derive", "env"] }
 console = "0.15.5"
-dialoguer = "0.10.3"
+dialoguer = "0.11.0"
 indicatif = "0.17.3"
 tracing = { version = "^0.1.37", features = ["attributes"] }
 async-trait = "0.1.68"
-thiserror = "1.0.40"
+thiserror = "2.0.11"
 url = "2.3.1"
-tracing-subscriber = {version = "0.3.16", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 enum_dispatch = "0.3.11"
 async-std = { version = "1.12.0", features = ["attributes"] }
 tokio = { version = "1.29.1", features = ["sync"] }
