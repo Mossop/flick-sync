@@ -1,18 +1,17 @@
 use async_trait::async_trait;
 use clap::Args;
 use flick_sync::{
+    FlickSync, Server, ServerConnection,
     plex_api::{
-        self,
+        self, HttpClient, MyPlex, MyPlexBuilder, Server as PlexServer,
         device::{Device, DeviceConnection},
         library::{Item, MetadataItem},
-        HttpClient, MyPlex, MyPlexBuilder, Server as PlexServer,
     },
-    FlickSync, Server, ServerConnection,
 };
 use tracing::{error, warn};
 use url::Url;
 
-use crate::{error::err, Console, Error, Result, Runnable};
+use crate::{Console, Error, Result, Runnable, error::err};
 
 #[derive(Args)]
 pub struct Login {
@@ -117,7 +116,7 @@ async fn reconnect_server(server: &Server, flick_sync: &FlickSync, console: &Con
                 console.println("Expected server no longer exists.")
             }
         }
-        ServerConnection::Direct { url: _ } => {
+        ServerConnection::Direct { .. } => {
             console.println("No need to re-authenticate with direct connection.");
         }
     }

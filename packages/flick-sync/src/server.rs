@@ -14,25 +14,26 @@ use async_std::{
 };
 use core::ops::Deref;
 use plex_api::{
+    MyPlexBuilder,
     device::DeviceConnection,
     library::{
         Episode, FromMetadata, Item, Library as PlexLibrary, MediaItem, MetadataItem, Movie,
         Playlist, Season, Show, Video,
     },
     media_container::server::library::MetadataType,
-    MyPlexBuilder,
 };
 use tokio::sync::{Semaphore, SemaphorePermit};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
+    DEFAULT_PROFILES, Error, Inner, Library, Result, ServerConnection,
     config::{Config, ServerConfig, SyncItem, TranscodeProfile},
     state::{
         CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, SeasonState,
         ServerState, ShowState, VideoDetail, VideoState,
     },
     util::safe,
-    wrappers, Error, Inner, Library, Result, ServerConnection, DEFAULT_PROFILES,
+    wrappers,
 };
 
 pub enum ItemType {
@@ -295,9 +296,7 @@ impl Server {
 
         match &server_config.connection {
             ServerConnection::MyPlex {
-                username: _,
-                user_id,
-                device_id,
+                user_id, device_id, ..
             } => {
                 let token = state
                     .servers

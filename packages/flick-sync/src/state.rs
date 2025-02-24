@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use async_std::fs;
 use plex_api::{
+    Server,
     library::{Collection, MetadataItem, Part, Playlist, Season, Show},
     media_container::server::library::{Metadata, MetadataType},
-    Server,
 };
 use plex_api::{
     library::{FromMetadata, MediaItem},
@@ -84,7 +84,7 @@ impl fmt::Debug for ThumbnailState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::None => write!(f, "None"),
-            Self::Downloaded { path: _ } => write!(f, "Downloaded"),
+            Self::Downloaded { .. } => write!(f, "Downloaded"),
         }
     }
 }
@@ -328,10 +328,7 @@ impl DownloadState {
         match self {
             Self::None => None,
             Self::Downloading { path } => Some(path.clone()),
-            Self::Transcoding {
-                path,
-                session_id: _,
-            } => Some(path.clone()),
+            Self::Transcoding { path, .. } => Some(path.clone()),
             Self::Downloaded { path } => Some(path.clone()),
             Self::Transcoded { path } => Some(path.clone()),
         }
@@ -340,7 +337,7 @@ impl DownloadState {
     pub(crate) fn needs_download(&self) -> bool {
         !matches!(
             self,
-            DownloadState::Downloaded { path: _ } | DownloadState::Transcoded { path: _ }
+            DownloadState::Downloaded { .. } | DownloadState::Transcoded { .. }
         )
     }
 
@@ -348,7 +345,7 @@ impl DownloadState {
     pub(crate) async fn verify(&mut self, server: &Server, root: &Path) {
         let path = match self {
             DownloadState::None => return,
-            DownloadState::Downloading { path: _ } => {
+            DownloadState::Downloading { .. } => {
                 return;
             }
             DownloadState::Transcoding { session_id, path } => {
@@ -450,13 +447,10 @@ impl fmt::Debug for DownloadState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::None => write!(f, "None"),
-            Self::Downloading { path: _ } => write!(f, "Downloading"),
-            Self::Transcoding {
-                session_id,
-                path: _,
-            } => write!(f, "Transcoding({session_id})"),
-            Self::Downloaded { path: _ } => write!(f, "Downloaded"),
-            Self::Transcoded { path: _ } => write!(f, "Transcoded"),
+            Self::Downloading { .. } => write!(f, "Downloading"),
+            Self::Transcoding { session_id, .. } => write!(f, "Transcoding({session_id})"),
+            Self::Downloaded { .. } => write!(f, "Downloaded"),
+            Self::Transcoded { .. } => write!(f, "Transcoded"),
         }
     }
 }

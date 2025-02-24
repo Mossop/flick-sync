@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use async_std::fs::{create_dir_all, File, OpenOptions};
+use async_std::fs::{File, OpenOptions, create_dir_all};
 use async_std::{
     fs::{metadata, remove_file},
     task::sleep,
@@ -26,12 +26,12 @@ use plex_api::{
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
+    Error, Inner, Result, Server,
     state::{
         CollectionState, DownloadState, LibraryState, PlaylistState, SeasonState, ServerState,
         ShowState, ThumbnailState, VideoDetail, VideoPartState, VideoState,
     },
     util::safe,
-    Error, Inner, Result, Server,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -374,11 +374,8 @@ impl VideoPart {
 
         match download_state {
             DownloadState::None => TransferState::Waiting,
-            DownloadState::Downloading { path: _ } => TransferState::Downloading,
-            DownloadState::Transcoding {
-                session_id: _,
-                path: _,
-            } => TransferState::Transcoding,
+            DownloadState::Downloading { .. } => TransferState::Downloading,
+            DownloadState::Transcoding { .. } => TransferState::Transcoding,
             _ => TransferState::Downloaded,
         }
     }
@@ -649,13 +646,7 @@ impl VideoPart {
     pub async fn negotiate_transfer_type(&self) -> Result {
         let mut download_state = self.download_state().await;
 
-        if matches!(
-            download_state,
-            DownloadState::Transcoding {
-                session_id: _,
-                path: _
-            }
-        ) {
+        if matches!(download_state, DownloadState::Transcoding { .. }) {
             let root = self.inner.path.read().await;
             download_state
                 .verify(&self.server.connect().await?, &root)
@@ -692,11 +683,7 @@ impl VideoPart {
             self.negotiate_transfer_type().await?;
 
             let download_state = self.download_state().await;
-            if let DownloadState::Transcoding {
-                session_id,
-                path: _,
-            } = download_state
-            {
+            if let DownloadState::Transcoding { session_id, .. } = download_state {
                 match self
                     .wait_for_transcode_to_complete(&session_id, &mut progress)
                     .await
@@ -838,7 +825,7 @@ impl VideoPart {
             DownloadState::Transcoding { session_id, path } => {
                 self.download_transcode(&session_id, &path, progress).await
             }
-            DownloadState::Downloaded { path: _ } | DownloadState::Transcoded { path: _ } => Ok(()),
+            DownloadState::Downloaded { .. } | DownloadState::Transcoded { .. } => Ok(()),
         }
     }
 
