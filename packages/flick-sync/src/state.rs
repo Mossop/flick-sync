@@ -43,23 +43,50 @@ impl RelatedFileState {
     }
 
     #[instrument(level = "trace", skip(root))]
-    pub(crate) async fn verify(&mut self, root: &Path) {
+    pub(crate) async fn verify(&mut self, root: &Path, expected_path: &Path) {
         if let RelatedFileState::Stored { path } = self {
             let file = root.join(&path);
 
             match fs::metadata(&file).await {
                 Ok(stats) => {
                     if !stats.is_file() {
-                        error!(?path, "Expected a file");
+                        trace!(?path, "Removing unexpected directory");
+                        let _ = fs::remove_dir_all(&file).await;
+                        *self = RelatedFileState::None;
+
+                        return;
                     }
                 }
                 Err(e) => {
                     if e.kind() == ErrorKind::NotFound {
                         warn!(?path, "File no longer present");
                         *self = RelatedFileState::None;
+
+                        return;
                     } else {
                         error!(?path, error=?e, "Error accessing file");
+
+                        return;
                     }
+                }
+            }
+
+            if path != expected_path {
+                let new_target = root.join(expected_path);
+
+                if let Some(parent) = new_target.parent() {
+                    if let Err(e) = fs::create_dir_all(parent).await {
+                        warn!(?parent, error=?e, "Failed to create parent directories");
+                        return;
+                    }
+                }
+
+                if let Err(e) = fs::rename(&file, &new_target).await {
+                    warn!(?path, ?expected_path, error=?e, "Failed to move file to expected location");
+                } else {
+                    *self = RelatedFileState::Stored {
+                        path: expected_path.to_owned(),
+                    };
                 }
             }
         }
@@ -133,11 +160,7 @@ impl CollectionState {
     }
 
     pub(crate) async fn delete(&mut self, root: &Path) {
-        self.thumbnail.verify(root).await;
-
-        if self.thumbnail != RelatedFileState::None {
-            self.thumbnail.delete(root).await;
-        }
+        self.thumbnail.delete(root).await;
     }
 }
 
@@ -263,17 +286,8 @@ impl ShowState {
     }
 
     pub(crate) async fn delete(&mut self, root: &Path) {
-        self.thumbnail.verify(root).await;
-
-        if self.thumbnail != RelatedFileState::None {
-            self.thumbnail.delete(root).await;
-        }
-
-        self.metadata.verify(root).await;
-
-        if self.metadata != RelatedFileState::None {
-            self.metadata.delete(root).await;
-        }
+        self.thumbnail.delete(root).await;
+        self.metadata.delete(root).await;
     }
 }
 
@@ -389,7 +403,12 @@ impl DownloadState {
     }
 
     #[instrument(level = "trace", skip(root, server))]
-    pub(crate) async fn verify(&mut self, server: &Server, root: &Path) {
+    pub(crate) async fn verify(
+        &mut self,
+        server: &Server,
+        root: &Path,
+        expected_path: Option<&Path>,
+    ) {
         let path = match self {
             DownloadState::None => return,
             DownloadState::Downloading { .. } => {
@@ -442,7 +461,11 @@ impl DownloadState {
 
         match fs::metadata(&file).await {
             Ok(stats) => {
-                if stats.is_file() {
+                if !stats.is_file() {
+                    trace!(?path, "Removing unexpected directory");
+                    let _ = fs::remove_dir_all(&file).await;
+                    *self = DownloadState::None;
+
                     return;
                 }
             }
@@ -450,12 +473,34 @@ impl DownloadState {
                 if e.kind() != ErrorKind::NotFound {
                     error!(?path, error=?e, "Error accessing file");
                     return;
+                } else {
+                    error!(?path, "Download is no longer present");
+                    *self = DownloadState::None;
+
+                    return;
                 }
             }
         }
 
-        error!(?path, "Download is no longer present");
-        *self = DownloadState::None;
+        if let Some(expected_path) = expected_path {
+            if expected_path != path {
+                let new_target = root.join(expected_path);
+
+                if let Err(e) = fs::rename(&file, &new_target).await {
+                    warn!(?path, ?expected_path, error=?e, "Failed to move file to expected location");
+                } else if matches!(self, DownloadState::Downloaded { .. }) {
+                    *self = DownloadState::Downloaded {
+                        path: expected_path.to_owned(),
+                    };
+                } else if matches!(self, DownloadState::Transcoded { .. }) {
+                    *self = DownloadState::Transcoded {
+                        path: expected_path.to_owned(),
+                    };
+                } else {
+                    unreachable!("Should have returned early if the video is not local");
+                }
+            }
+        }
     }
 
     #[instrument(level = "trace", skip(root, server))]

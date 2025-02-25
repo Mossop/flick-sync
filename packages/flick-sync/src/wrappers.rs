@@ -102,11 +102,13 @@ macro_rules! thumbnail_methods {
         pub async fn update_thumbnail(&self, rebuild: bool) -> Result {
             let root = self.inner.path.read().await.to_owned();
 
+            let thumbnail_path = self.file_path(FileType::Thumbnail, "jpg").await;
+
             let mut thumbnail = self.thumbnail().await;
             if rebuild {
                 thumbnail.delete(&root).await;
             } else {
-                thumbnail.verify(&root).await;
+                thumbnail.verify(&root, &thumbnail_path).await;
             }
 
             self.update_state(|s| s.thumbnail = thumbnail.clone())
@@ -124,8 +126,7 @@ macro_rules! thumbnail_methods {
                     return Ok(());
                 };
 
-                let path = self.file_path(FileType::Thumbnail, "jpg").await;
-                let target = root.join(&path);
+                let target = root.join(&thumbnail_path);
 
                 if let Some(parent) = target.parent() {
                     create_dir_all(parent).await?;
@@ -136,7 +137,9 @@ macro_rules! thumbnail_methods {
                     .transcode_artwork(&image, 320, 320, Default::default(), file)
                     .await?;
 
-                let state = RelatedFileState::Stored { path };
+                let state = RelatedFileState::Stored {
+                    path: thumbnail_path,
+                };
 
                 self.update_state(|s| s.thumbnail = state).await?;
                 trace!("Thumbnail for {} successfully updated", item.title());
@@ -157,18 +160,19 @@ macro_rules! metadata_methods {
         pub async fn update_metadata(&self, rebuild: bool) -> Result {
             let root = self.inner.path.read().await;
 
+            let metadata_path = self.file_path(FileType::Metadata, "nfo").await;
+
             let mut metadata = self.metadata().await;
             if rebuild {
                 metadata.delete(&root).await;
             } else {
-                metadata.verify(&root).await;
+                metadata.verify(&root, &metadata_path).await;
             }
 
             self.update_state(|s| s.metadata = metadata.clone()).await?;
 
             if metadata.is_none() {
-                let path = self.file_path(FileType::Metadata, "nfo").await;
-                let target = root.join(&path);
+                let target = root.join(&metadata_path);
 
                 if let Some(parent) = target.parent() {
                     create_dir_all(parent).await?;
@@ -182,7 +186,9 @@ macro_rules! metadata_methods {
 
                 self.write_metadata(&mut writer).await?;
 
-                let state = RelatedFileState::Stored { path };
+                let state = RelatedFileState::Stored {
+                    path: metadata_path,
+                };
 
                 self.update_state(|s| s.metadata = state).await?;
                 trace!("Metadata for {} successfully updated", self.id);
@@ -457,7 +463,19 @@ impl VideoPart {
         let mut download_state = self.download_state().await;
         let root = self.inner.path.read().await.clone();
 
-        download_state.verify(&server, &root).await;
+        let expected_path = if let Some(extension) = download_state.file().and_then(|fp| {
+            fp.extension()
+                .and_then(|os| os.to_str())
+                .map(|s| s.to_owned())
+        }) {
+            Some(self.file_path(&extension).await)
+        } else {
+            None
+        };
+
+        download_state
+            .verify(&server, &root, expected_path.as_deref())
+            .await;
 
         self.update_state(|state| state.download = download_state)
             .await
@@ -720,7 +738,7 @@ impl VideoPart {
         if matches!(download_state, DownloadState::Transcoding { .. }) {
             let root = self.inner.path.read().await;
             download_state
-                .verify(&self.server.connect().await?, &root)
+                .verify(&self.server.connect().await?, &root, None)
                 .await;
 
             self.update_state(|state| state.download = download_state.clone())
