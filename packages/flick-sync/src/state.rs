@@ -3,7 +3,8 @@ use std::fmt;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use async_std::fs;
+use crate::Result;
+use async_std::{fs, process::Command};
 use plex_api::{
     Server,
     library::{Collection, MetadataItem, Part, Playlist, Season, Show},
@@ -14,6 +15,7 @@ use plex_api::{
     transcode::TranscodeStatus,
 };
 use serde::{Deserialize, Serialize};
+use tempfile::NamedTempFile;
 use time::{Date, OffsetDateTime};
 use tracing::{debug, error, info, instrument, trace, warn};
 use typeshare::typeshare;
@@ -21,28 +23,28 @@ use uuid::Uuid;
 
 #[derive(Deserialize, Default, Serialize, Clone, PartialEq)]
 #[serde(tag = "state", rename_all = "camelCase")]
-pub(crate) enum ThumbnailState {
+pub(crate) enum RelatedFileState {
     #[default]
     None,
-    #[serde(rename_all = "camelCase")]
-    Downloaded { path: PathBuf },
+    #[serde(rename = "downloaded")]
+    Stored { path: PathBuf },
 }
 
-impl ThumbnailState {
+impl RelatedFileState {
     pub(crate) fn file(&self) -> Option<PathBuf> {
         match self {
             Self::None => None,
-            Self::Downloaded { path } => Some(path.clone()),
+            Self::Stored { path } => Some(path.clone()),
         }
     }
 
     pub(crate) fn is_none(&self) -> bool {
-        matches!(self, ThumbnailState::None)
+        matches!(self, RelatedFileState::None)
     }
 
     #[instrument(level = "trace", skip(root))]
     pub(crate) async fn verify(&mut self, root: &Path) {
-        if let ThumbnailState::Downloaded { path } = self {
+        if let RelatedFileState::Stored { path } = self {
             let file = root.join(&path);
 
             match fs::metadata(&file).await {
@@ -53,10 +55,10 @@ impl ThumbnailState {
                 }
                 Err(e) => {
                     if e.kind() == ErrorKind::NotFound {
-                        warn!(?path, "Thumbnail no longer present");
-                        *self = ThumbnailState::None;
+                        warn!(?path, "File no longer present");
+                        *self = RelatedFileState::None;
                     } else {
-                        error!(?path, error=?e, "Error accessing thumbnail");
+                        error!(?path, error=?e, "Error accessing file");
                     }
                 }
             }
@@ -65,9 +67,9 @@ impl ThumbnailState {
 
     #[instrument(level = "trace", skip(root))]
     pub(crate) async fn delete(&mut self, root: &Path) {
-        if let ThumbnailState::Downloaded { path } = self {
+        if let RelatedFileState::Stored { path } = self {
             let file = root.join(&path);
-            trace!(?path, "Removing old thumbnail file");
+            trace!(?path, "Removing old file");
 
             if let Err(e) = fs::remove_file(&file).await {
                 if e.kind() != ErrorKind::NotFound {
@@ -75,16 +77,16 @@ impl ThumbnailState {
                 }
             }
 
-            *self = ThumbnailState::None;
+            *self = RelatedFileState::None;
         }
     }
 }
 
-impl fmt::Debug for ThumbnailState {
+impl fmt::Debug for RelatedFileState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::None => write!(f, "None"),
-            Self::Downloaded { .. } => write!(f, "Downloaded"),
+            Self::Stored { .. } => write!(f, "Stored"),
         }
     }
 }
@@ -100,7 +102,7 @@ pub(crate) struct CollectionState {
     #[serde(with = "time::serde::timestamp")]
     #[typeshare(serialized_as = "number")]
     pub(crate) last_updated: OffsetDateTime,
-    pub(crate) thumbnail: ThumbnailState,
+    pub(crate) thumbnail: RelatedFileState,
 }
 
 impl CollectionState {
@@ -133,7 +135,7 @@ impl CollectionState {
     pub(crate) async fn delete(&mut self, root: &Path) {
         self.thumbnail.verify(root).await;
 
-        if self.thumbnail != ThumbnailState::None {
+        if self.thumbnail != RelatedFileState::None {
             self.thumbnail.delete(root).await;
         }
     }
@@ -222,7 +224,9 @@ pub(crate) struct ShowState {
     #[serde(with = "time::serde::timestamp")]
     #[typeshare(serialized_as = "number")]
     pub(crate) last_updated: OffsetDateTime,
-    pub(crate) thumbnail: ThumbnailState,
+    pub(crate) thumbnail: RelatedFileState,
+    #[serde(default, skip_serializing_if = "RelatedFileState::is_none")]
+    pub(crate) metadata: RelatedFileState,
 }
 
 impl ShowState {
@@ -239,6 +243,7 @@ impl ShowState {
             year,
             last_updated: metadata.updated_at.unwrap(),
             thumbnail: Default::default(),
+            metadata: Default::default(),
         }
     }
 
@@ -251,6 +256,7 @@ impl ShowState {
         if let Some(updated) = show.metadata().updated_at {
             if updated > self.last_updated {
                 self.thumbnail.delete(root).await;
+                self.metadata.delete(root).await;
             }
             self.last_updated = updated;
         }
@@ -259,8 +265,14 @@ impl ShowState {
     pub(crate) async fn delete(&mut self, root: &Path) {
         self.thumbnail.verify(root).await;
 
-        if self.thumbnail != ThumbnailState::None {
+        if self.thumbnail != RelatedFileState::None {
             self.thumbnail.delete(root).await;
+        }
+
+        self.metadata.verify(root).await;
+
+        if self.metadata != RelatedFileState::None {
+            self.metadata.delete(root).await;
         }
     }
 }
@@ -339,6 +351,41 @@ impl DownloadState {
             self,
             DownloadState::Downloaded { .. } | DownloadState::Transcoded { .. }
         )
+    }
+
+    #[instrument(level = "trace", skip(root))]
+    pub(crate) async fn strip_metadata(&self, root: &Path) -> Result {
+        let source_file = match self {
+            Self::None => return Ok(()),
+            Self::Downloading { .. } => return Ok(()),
+            Self::Transcoding { .. } => return Ok(()),
+            Self::Downloaded { path } => root.join(path),
+            Self::Transcoded { path } => root.join(path),
+        };
+
+        let temp_file = NamedTempFile::new()?;
+
+        let result = Command::new("ffmpeg")
+            .arg("-y")
+            .arg("-loglevel")
+            .arg("warning")
+            .arg("-i")
+            .arg(&source_file)
+            .arg("-map_metadata")
+            .arg("-1")
+            .arg("-c")
+            .arg("copy")
+            .arg("-map")
+            .arg("0")
+            .arg(temp_file.path())
+            .output()
+            .await?;
+
+        if result.status.success() {
+            fs::copy(temp_file.path(), &source_file).await?;
+        }
+
+        Ok(())
     }
 
     #[instrument(level = "trace", skip(root, server))]
@@ -523,7 +570,9 @@ pub(crate) struct VideoState {
     pub(crate) detail: VideoDetail,
     #[typeshare(serialized_as = "string")]
     pub(crate) air_date: Date,
-    pub(crate) thumbnail: ThumbnailState,
+    pub(crate) thumbnail: RelatedFileState,
+    #[serde(default, skip_serializing_if = "RelatedFileState::is_none")]
+    pub(crate) metadata: RelatedFileState,
     pub(crate) media_id: String,
     #[serde(with = "time::serde::timestamp")]
     #[typeshare(serialized_as = "number")]
@@ -578,6 +627,7 @@ impl VideoState {
             detail,
             air_date: metadata.originally_available_at.unwrap(),
             thumbnail: Default::default(),
+            metadata: Default::default(),
             media_id: media.metadata().id.clone().unwrap(),
             last_updated: metadata.updated_at.unwrap(),
             parts,
@@ -647,6 +697,7 @@ impl VideoState {
         if let Some(updated) = metadata.updated_at {
             if updated > self.last_updated {
                 self.thumbnail.delete(root).await;
+                self.metadata.delete(root).await;
             }
             self.last_updated = updated;
         }
@@ -686,8 +737,12 @@ impl VideoState {
     }
 
     pub(crate) async fn delete(&mut self, server: &Server, root: &Path) {
-        if self.thumbnail != ThumbnailState::None {
+        if self.thumbnail != RelatedFileState::None {
             self.thumbnail.delete(root).await;
+        }
+
+        if self.metadata != RelatedFileState::None {
+            self.metadata.delete(root).await;
         }
 
         for part in self.parts.iter_mut() {

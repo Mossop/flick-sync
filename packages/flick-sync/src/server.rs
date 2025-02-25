@@ -2,6 +2,7 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fmt,
+    io::ErrorKind,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -97,8 +98,10 @@ async fn prune_directory(path: &Path, expected_files: &HashSet<PathBuf>) -> bool
                                     debug!(path = %path.display(), "Deleted unknown file");
                                 }
                                 Err(e) => {
-                                    error!(error=?e, path=%path.display(), "Failed to delete unknown file");
-                                    should_prune = false;
+                                    if e.kind() != ErrorKind::NotFound {
+                                        error!(error=?e, path=%path.display(), "Failed to delete unknown file");
+                                        should_prune = false;
+                                    }
                                 }
                             }
                         } else {
@@ -442,18 +445,29 @@ impl Server {
             self.inner.persist_state(&state).await?;
         }
 
-        self.update_thumbnails().await?;
+        self.update_thumbnails(false).await;
+        self.update_metadata(false).await;
         self.verify_downloads().await
+    }
+
+    /// Rebuilds metadata files for the synced items
+    pub async fn rebuild_metadata(&self) -> Result {
+        info!("Rebuilding item metadata");
+
+        self.update_thumbnails(true).await;
+        self.update_metadata(true).await;
+
+        Ok(())
     }
 
     /// Updates thumbnails for synced items.
     #[instrument(level = "trace", skip(self), fields(server = self.id))]
-    pub async fn update_thumbnails(&self) -> Result {
+    pub async fn update_thumbnails(&self, rebuild: bool) {
         info!("Updating thumbnails");
 
         for library in self.libraries().await {
             for collection in library.collections().await {
-                if let Err(e) = collection.update_thumbnail().await {
+                if let Err(e) = collection.update_thumbnail(rebuild).await {
                     warn!(error=?e);
                 }
             }
@@ -461,20 +475,20 @@ impl Server {
             match library {
                 Library::Movie(l) => {
                     for video in l.movies().await {
-                        if let Err(e) = video.update_thumbnail().await {
+                        if let Err(e) = video.update_thumbnail(rebuild).await {
                             warn!(error=?e);
                         }
                     }
                 }
                 Library::Show(l) => {
                     for show in l.shows().await {
-                        if let Err(e) = show.update_thumbnail().await {
+                        if let Err(e) = show.update_thumbnail(rebuild).await {
                             warn!(error=?e);
                         }
 
                         for season in show.seasons().await {
                             for video in season.episodes().await {
-                                if let Err(e) = video.update_thumbnail().await {
+                                if let Err(e) = video.update_thumbnail(rebuild).await {
                                     warn!(error=?e);
                                 }
                             }
@@ -483,8 +497,51 @@ impl Server {
                 }
             }
         }
+    }
 
-        Ok(())
+    /// Updates metadata files for synced videos.
+    #[instrument(level = "trace", skip(self), fields(server = self.id))]
+    pub async fn update_metadata(&self, rebuild: bool) {
+        info!("Updating metadata files");
+
+        for library in self.libraries().await {
+            match library {
+                Library::Movie(l) => {
+                    for video in l.movies().await {
+                        if let Err(e) = video.update_metadata(rebuild).await {
+                            warn!(error=?e);
+                        }
+
+                        if rebuild {
+                            for part in video.parts().await {
+                                part.strip_metadata().await;
+                            }
+                        }
+                    }
+                }
+                Library::Show(l) => {
+                    for show in l.shows().await {
+                        if let Err(e) = show.update_metadata(rebuild).await {
+                            warn!(error=?e);
+                        }
+
+                        for season in show.seasons().await {
+                            for video in season.episodes().await {
+                                if let Err(e) = video.update_metadata(rebuild).await {
+                                    warn!(error=?e);
+                                }
+
+                                if rebuild {
+                                    for part in video.parts().await {
+                                        part.strip_metadata().await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Verifies the presence of downloads for synced items.
@@ -529,10 +586,18 @@ impl Server {
             if let Some(file) = show.thumbnail.file() {
                 expected_files.insert(root.join(file));
             }
+
+            if let Some(file) = show.metadata.file() {
+                expected_files.insert(root.join(file));
+            }
         }
 
         for video in server_state.videos.values() {
             if let Some(file) = video.thumbnail.file() {
+                expected_files.insert(root.join(file));
+            }
+
+            if let Some(file) = video.metadata.file() {
                 expected_files.insert(root.join(file));
             }
 

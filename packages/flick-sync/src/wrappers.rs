@@ -24,20 +24,24 @@ use plex_api::{
     transcode::TranscodeStatus,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
+use xml::{EmitterConfig, writer::XmlEvent};
 
 use crate::{
     Error, Inner, Result, Server,
     state::{
-        CollectionState, DownloadState, LibraryState, PlaylistState, SeasonState, ServerState,
-        ShowState, ThumbnailState, VideoDetail, VideoPartState, VideoState,
+        CollectionState, DownloadState, LibraryState, PlaylistState, RelatedFileState, SeasonState,
+        ServerState, ShowState, VideoDetail, VideoPartState, VideoState,
     },
     util::safe,
 };
+
+type EventWriter = xml::writer::EventWriter<std::fs::File>;
 
 #[derive(Debug, Clone, Copy)]
 enum FileType {
     Video(usize),
     Thumbnail,
+    Metadata,
 }
 
 #[async_trait]
@@ -90,16 +94,20 @@ macro_rules! state_wrapper {
 
 macro_rules! thumbnail_methods {
     () => {
-        pub(crate) async fn thumbnail(&self) -> ThumbnailState {
+        pub(crate) async fn thumbnail(&self) -> RelatedFileState {
             self.with_state(|s| s.thumbnail.clone()).await
         }
 
         #[instrument(level = "trace")]
-        pub async fn update_thumbnail(&self) -> Result {
+        pub async fn update_thumbnail(&self, rebuild: bool) -> Result {
             let root = self.inner.path.read().await.to_owned();
 
             let mut thumbnail = self.thumbnail().await;
-            thumbnail.verify(&root).await;
+            if rebuild {
+                thumbnail.delete(&root).await;
+            } else {
+                thumbnail.verify(&root).await;
+            }
 
             self.update_state(|s| s.thumbnail = thumbnail.clone())
                 .await?;
@@ -123,15 +131,61 @@ macro_rules! thumbnail_methods {
                     create_dir_all(parent).await?;
                 }
 
-                let file = File::create(root.join(&path)).await?;
+                let file = File::create(&target).await?;
                 server
                     .transcode_artwork(&image, 320, 320, Default::default(), file)
                     .await?;
 
-                let state = ThumbnailState::Downloaded { path };
+                let state = RelatedFileState::Stored { path };
 
                 self.update_state(|s| s.thumbnail = state).await?;
                 trace!("Thumbnail for {} successfully updated", item.title());
+            }
+
+            Ok(())
+        }
+    };
+}
+
+macro_rules! metadata_methods {
+    () => {
+        pub(crate) async fn metadata(&self) -> RelatedFileState {
+            self.with_state(|s| s.metadata.clone()).await
+        }
+
+        #[instrument(level = "trace")]
+        pub async fn update_metadata(&self, rebuild: bool) -> Result {
+            let root = self.inner.path.read().await;
+
+            let mut metadata = self.metadata().await;
+            if rebuild {
+                metadata.delete(&root).await;
+            } else {
+                metadata.verify(&root).await;
+            }
+
+            self.update_state(|s| s.metadata = metadata.clone()).await?;
+
+            if metadata.is_none() {
+                let path = self.file_path(FileType::Metadata, "nfo").await;
+                let target = root.join(&path);
+
+                if let Some(parent) = target.parent() {
+                    create_dir_all(parent).await?;
+                }
+
+                let output = std::fs::File::create(&target)?;
+
+                let mut writer = EmitterConfig::new()
+                    .perform_indent(true)
+                    .create_writer(output);
+
+                self.write_metadata(&mut writer).await?;
+
+                let state = RelatedFileState::Stored { path };
+
+                self.update_state(|s| s.metadata = state).await?;
+                trace!("Metadata for {} successfully updated", self.id);
             }
 
             Ok(())
@@ -193,8 +247,24 @@ state_wrapper!(Show, ShowState, shows);
 
 impl Show {
     thumbnail_methods!();
+    metadata_methods!();
     parent!(library, ShowLibrary, library);
     children!(seasons, seasons, Season, show);
+
+    pub async fn write_metadata(&self, writer: &mut EventWriter) -> Result {
+        self.with_state(|state| {
+            writer.write(XmlEvent::start_element("tvshow"))?;
+
+            writer.write(XmlEvent::start_element("title"))?;
+            writer.write(XmlEvent::characters(&state.title))?;
+            writer.write(XmlEvent::end_element())?;
+
+            writer.write(XmlEvent::end_element())?;
+
+            Ok(())
+        })
+        .await
+    }
 
     async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
@@ -202,7 +272,8 @@ impl Show {
 
             let name = match file_type {
                 FileType::Video(_) => panic!("Unexpected"),
-                FileType::Thumbnail => format!(".thumb.{extension}"),
+                FileType::Thumbnail => format!("dvdcover.{extension}"),
+                FileType::Metadata => format!("tvshow.{extension}"),
             };
 
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
@@ -699,7 +770,8 @@ impl VideoPart {
 
     #[instrument(level = "trace", skip(self, path, progress), fields(video=self.id, part=self.index))]
     async fn download_direct<P: Progress + Unpin>(&self, path: &Path, mut progress: P) -> Result {
-        let target = { self.inner.path.read().await.join(path) };
+        let root = self.inner.path.read().await;
+        let target = root.join(path);
         let offset = match metadata(&target).await {
             Ok(stats) => stats.len(),
             Err(e) => {
@@ -750,12 +822,18 @@ impl VideoPart {
         part.download(writer, offset..).await?;
         info!(path=?path, "Download complete");
 
+        let new_state = DownloadState::Downloaded {
+            path: path.to_owned(),
+        };
+
         self.update_state(|state| {
-            state.download = DownloadState::Downloaded {
-                path: path.to_owned(),
-            }
+            state.download = new_state.clone();
         })
         .await?;
+
+        if let Err(e) = new_state.strip_metadata(&root).await {
+            warn!(path=?path, error=%e, "Failed to strip metadata");
+        }
 
         Ok(())
     }
@@ -776,7 +854,8 @@ impl VideoPart {
             return Err(Error::DownloadUnavailable);
         }
 
-        let target = { self.inner.path.read().await.join(path) };
+        let root = self.inner.path.read().await;
+        let target = root.join(path);
 
         if let Some(parent) = target.parent() {
             create_dir_all(parent).await?;
@@ -800,10 +879,12 @@ impl VideoPart {
         session.download(writer).await?;
         info!(path=?path, "Download complete");
 
+        let new_state = DownloadState::Downloaded {
+            path: path.to_owned(),
+        };
+
         self.update_state(|state| {
-            state.download = DownloadState::Transcoded {
-                path: path.to_owned(),
-            }
+            state.download = new_state.clone();
         })
         .await?;
 
@@ -812,6 +893,10 @@ impl VideoPart {
                 error=?e,
                 "Transcode session failed to cancel"
             );
+        }
+
+        if let Err(e) = new_state.strip_metadata(&root).await {
+            warn!(path=?path, error=%e, "Failed to strip metadata");
         }
 
         Ok(())
@@ -832,6 +917,16 @@ impl VideoPart {
     async fn download_state(&self) -> DownloadState {
         self.with_state(|part_state| part_state.download.clone())
             .await
+    }
+
+    pub(crate) async fn strip_metadata(&self) {
+        let root = self.inner.path.read().await;
+
+        let state = self.download_state().await;
+
+        if let Err(e) = state.strip_metadata(&root).await {
+            warn!(error=%e, "Unable to strip metadata from video file");
+        }
     }
 }
 
@@ -963,7 +1058,40 @@ state_wrapper!(Episode, VideoState, videos);
 
 impl Episode {
     thumbnail_methods!();
+    metadata_methods!();
     parent!(season, Season, episode_state().season);
+
+    pub async fn write_metadata(&self, writer: &mut EventWriter) -> Result {
+        let season = self.season().await.with_state(|ss| ss.index).await;
+        let show = self.show().await.with_state(|ss| ss.title.clone()).await;
+
+        self.with_state(|state| {
+            writer.write(XmlEvent::start_element("episodedetails"))?;
+
+            writer.write(XmlEvent::start_element("title"))?;
+            writer.write(XmlEvent::characters(&state.title))?;
+            writer.write(XmlEvent::end_element())?;
+
+            writer.write(XmlEvent::start_element("showtitle"))?;
+            writer.write(XmlEvent::characters(&show))?;
+            writer.write(XmlEvent::end_element())?;
+
+            writer.write(XmlEvent::start_element("season"))?;
+            writer.write(XmlEvent::characters(&season.to_string()))?;
+            writer.write(XmlEvent::end_element())?;
+
+            writer.write(XmlEvent::start_element("episode"))?;
+            writer.write(XmlEvent::characters(
+                &state.episode_state().index.to_string(),
+            ))?;
+            writer.write(XmlEvent::end_element())?;
+
+            writer.write(XmlEvent::end_element())?;
+
+            Ok(())
+        })
+        .await
+    }
 
     pub async fn stats(&self) -> Result<VideoStats> {
         let server = self.server.connect().await?;
@@ -1020,10 +1148,18 @@ impl Episode {
                         season.index, ep_state.index, state.title
                     )
                 }
-                FileType::Thumbnail => format!(
-                    ".S{:02}E{:02}.thumb.{extension}",
-                    season.index, ep_state.index
-                ),
+                FileType::Thumbnail => {
+                    format!(
+                        "S{:02}E{:02} - {}.{extension}",
+                        season.index, ep_state.index, state.title
+                    )
+                }
+                FileType::Metadata => {
+                    format!(
+                        "S{:02}E{:02} - {}.{extension}",
+                        season.index, ep_state.index, state.title
+                    )
+                }
             };
 
             PathBuf::from(safe(&self.server.id))
@@ -1052,7 +1188,23 @@ state_wrapper!(Movie, VideoState, videos);
 
 impl Movie {
     thumbnail_methods!();
+    metadata_methods!();
     parent!(library, MovieLibrary, movie_state().library);
+
+    pub async fn write_metadata(&self, writer: &mut EventWriter) -> Result {
+        self.with_state(|state| {
+            writer.write(XmlEvent::start_element("movie"))?;
+
+            writer.write(XmlEvent::start_element("title"))?;
+            writer.write(XmlEvent::characters(&state.title))?;
+            writer.write(XmlEvent::end_element())?;
+
+            writer.write(XmlEvent::end_element())?;
+
+            Ok(())
+        })
+        .await
+    }
 
     pub async fn stats(&self) -> Result<VideoStats> {
         let server = self.server.connect().await?;
@@ -1096,7 +1248,20 @@ impl Movie {
 
                     format!("{} ({}){part_name}.{extension}", state.title, m_state.year)
                 }
-                FileType::Thumbnail => format!(".thumb.{extension}",),
+                FileType::Thumbnail => {
+                    if state.parts.len() == 1 {
+                        format!("{} ({}).{extension}", state.title, m_state.year)
+                    } else {
+                        format!("movie.{extension}")
+                    }
+                }
+                FileType::Metadata => {
+                    if state.parts.len() == 1 {
+                        format!("{} ({}).{extension}", state.title, m_state.year)
+                    } else {
+                        format!("movie.{extension}")
+                    }
+                }
             };
 
             PathBuf::from(safe(&self.server.id))
@@ -1150,10 +1315,17 @@ impl Video {
         }
     }
 
-    pub async fn update_thumbnail(&self) -> Result {
+    pub async fn update_thumbnail(&self, rebuild: bool) -> Result {
         match self {
-            Self::Movie(v) => v.update_thumbnail().await,
-            Self::Episode(v) => v.update_thumbnail().await,
+            Self::Movie(v) => v.update_thumbnail(rebuild).await,
+            Self::Episode(v) => v.update_thumbnail(rebuild).await,
+        }
+    }
+
+    pub async fn update_metadata(&self, rebuild: bool) -> Result {
+        match self {
+            Self::Movie(v) => v.update_metadata(rebuild).await,
+            Self::Episode(v) => v.update_metadata(rebuild).await,
         }
     }
 }
@@ -1296,10 +1468,10 @@ pub enum Collection {
 }
 
 impl Collection {
-    pub async fn update_thumbnail(&self) -> Result {
+    pub async fn update_thumbnail(&self, rebuild: bool) -> Result {
         match self {
-            Self::Movie(c) => c.update_thumbnail().await,
-            Self::Show(c) => c.update_thumbnail().await,
+            Self::Movie(c) => c.update_thumbnail(rebuild).await,
+            Self::Show(c) => c.update_thumbnail(rebuild).await,
         }
     }
 }

@@ -10,8 +10,8 @@ use async_std::{
 use async_trait::async_trait;
 use clap::{Parser, Subcommand};
 use enum_dispatch::enum_dispatch;
-use error::{err, Error};
-use flick_sync::{FlickSync, Server, CONFIG_FILE, STATE_FILE};
+use error::{Error, err};
+use flick_sync::{CONFIG_FILE, FlickSync, STATE_FILE, Server};
 use sync::{Prune, Sync};
 use tracing::{error, trace};
 
@@ -22,6 +22,7 @@ mod sync;
 mod util;
 
 pub use crate::console::Console;
+use crate::sync::BuildMetadata;
 use server::{Add, Login, Rebuild, Remove};
 use util::{List, Stats};
 
@@ -47,6 +48,8 @@ pub enum Command {
     List,
     /// Attempts to rebuild a corrupt state file.
     Rebuild,
+    /// Rebuilds metadata files.
+    BuildMetadata,
 }
 
 #[async_trait]

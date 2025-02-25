@@ -41,6 +41,11 @@ pub enum Error {
     TranscodeSkipped,
     #[error("Unknown transcode profile {0}")]
     UnknownProfile(String),
+    #[error("Error writing metadata: {source}")]
+    XmlError {
+        #[from]
+        source: xml::writer::Error,
+    },
     #[error("Unknown error")]
     Unknown(String),
 }

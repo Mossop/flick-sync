@@ -8,8 +8,9 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, error, instrument};
 
 use crate::{
+    Console, Result, Runnable,
     console::{Bar, ProgressType},
-    select_servers, Console, Result, Runnable,
+    select_servers,
 };
 
 #[derive(Args)]
@@ -35,6 +36,30 @@ impl Runnable for Prune {
 
             if let Err(e) = server.prune().await {
                 error!(server=server.id(), error=?e, "Failed to prune server directory");
+                continue;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Args)]
+pub struct BuildMetadata {
+    /// The servers to rebuild. Can be repeated. When not passed all servers are
+    /// rebuilt
+    #[clap(short = 's', long = "server")]
+    ids: Vec<String>,
+}
+
+#[async_trait]
+impl Runnable for BuildMetadata {
+    async fn run(self, flick_sync: FlickSync, _console: Console) -> Result {
+        let servers = select_servers(&flick_sync, &self.ids).await?;
+
+        for server in servers {
+            if let Err(e) = server.rebuild_metadata().await {
+                error!(server=server.id(), error=?e, "Failed to rebuild metadata for server");
                 continue;
             }
         }
