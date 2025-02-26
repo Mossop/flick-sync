@@ -226,7 +226,7 @@ impl Runnable for Sync {
 
         flick_sync.prune_root().await;
 
-        for server in servers {
+        for server in &servers {
             if let Err(e) = server.update_state().await {
                 error!(server=server.id(), error=?e, "Failed to update server");
                 continue;
@@ -280,6 +280,10 @@ impl Runnable for Sync {
         }
 
         join_all(jobs).await;
+
+        for server in servers {
+            server.write_playlists().await;
+        }
 
         Ok(())
     }

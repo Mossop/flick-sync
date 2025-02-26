@@ -9,12 +9,16 @@ use std::{
     time::Duration,
 };
 
-use async_std::fs::{File, OpenOptions, create_dir_all};
+use async_std::{
+    fs::{File, OpenOptions, create_dir_all},
+    io::BufWriter,
+};
 use async_std::{
     fs::{metadata, remove_file},
     task::sleep,
 };
-use futures::AsyncWrite;
+use futures::{AsyncWrite, AsyncWriteExt};
+use pathdiff::diff_paths;
 use pin_project::pin_project;
 use plex_api::{
     library::{self, Item, MediaItem, MetadataItem},
@@ -36,10 +40,11 @@ use crate::{
 type EventWriter = xml::writer::EventWriter<std::fs::File>;
 
 #[derive(Debug, Clone, Copy)]
-enum FileType {
+pub(crate) enum FileType {
     Video(usize),
     Thumbnail,
     Metadata,
+    Playlist,
 }
 
 trait StateWrapper<S> {
@@ -90,7 +95,6 @@ macro_rules! state_wrapper {
 macro_rules! wrapper_builders {
     ($typ:ident, $st_typ:ident) => {
         impl $typ {
-            #[allow(dead_code)]
             pub(crate) fn wrap(server: &crate::server::Server, state: &$st_typ) -> Self {
                 Self {
                     server: server.clone(),
@@ -98,6 +102,7 @@ macro_rules! wrapper_builders {
                 }
             }
 
+            #[allow(dead_code)]
             pub(crate) fn wrap_from_id(server: &crate::server::Server, id: &str) -> Self {
                 Self {
                     server: server.clone(),
@@ -229,10 +234,10 @@ macro_rules! children {
         pub async fn $meth(&self) -> Vec<$typ> {
             self.with_server_state(|ss| {
                 ss.$prop
-                    .iter()
-                    .filter_map(|(id, s)| {
+                    .values()
+                    .filter_map(|s| {
                         if s.$($pprop)* == self.id {
-                            Some($typ::wrap_from_id(&self.server, id))
+                            Some($typ::wrap(&self.server, s))
                         } else {
                             None
                         }
@@ -242,6 +247,36 @@ macro_rules! children {
             .await
         }
     };
+}
+
+async fn write_playlist(root: &Path, playlist_path: &Path, videos: Vec<Video>) -> Result {
+    let target = root.join(playlist_path);
+    let parent = target.parent().unwrap();
+
+    let output = File::create(&target).await?;
+    let mut writer = BufWriter::new(output);
+
+    for video in videos {
+        for part in video.parts().await {
+            let download = part.download_state().await;
+
+            if let Some(video_path) = download.file() {
+                if !download.needs_download() {
+                    if let Some(relative) = diff_paths(root.join(video_path), parent) {
+                        writer
+                            .write_all(relative.as_os_str().as_encoded_bytes())
+                            .await?;
+                        writer.write_all(b"\n").await?;
+                    }
+                }
+            }
+        }
+    }
+
+    writer.flush().await?;
+    writer.close().await?;
+
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -263,7 +298,24 @@ impl Show {
     thumbnail_methods!();
     metadata_methods!();
     parent!(library, ShowLibrary, library);
-    children!(seasons, seasons, Season, show);
+
+    pub async fn seasons(&self) -> Vec<Season> {
+        self.with_server_state(|ss| {
+            let mut season_states: Vec<&SeasonState> = ss
+                .seasons
+                .values()
+                .filter(|ss| ss.show == self.id)
+                .collect();
+
+            season_states.sort_by(|sa, sb| sa.index.cmp(&sb.index));
+
+            season_states
+                .into_iter()
+                .map(|ss| Season::wrap(&self.server, ss))
+                .collect()
+        })
+        .await
+    }
 
     pub async fn write_metadata(&self, writer: &mut EventWriter) -> Result {
         self.with_state(|state| {
@@ -280,12 +332,14 @@ impl Show {
         .await
     }
 
-    async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
+    pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.shows.get(&self.id).unwrap();
 
             let name = match file_type {
-                FileType::Video(_) => panic!("Unexpected"),
+                FileType::Video(_) | FileType::Playlist => {
+                    unreachable!("Invalid file type for Show")
+                }
                 FileType::Thumbnail => format!("dvdcover.{extension}"),
                 FileType::Metadata => format!("tvshow.{extension}"),
             };
@@ -320,12 +374,13 @@ impl Season {
 
     pub async fn episodes(&self) -> Vec<Episode> {
         self.with_server_state(|ss| {
-            ss.videos
-                .iter()
-                .filter_map(|(id, s)| {
-                    if let VideoDetail::Episode(ref detail) = s.detail {
+            let mut episode_states: Vec<(u32, &VideoState)> = ss
+                .videos
+                .values()
+                .filter_map(|vs| {
+                    if let VideoDetail::Episode(ref detail) = vs.detail {
                         if detail.season == self.id {
-                            Some(Episode::wrap_from_id(&self.server, id))
+                            Some((detail.index, vs))
                         } else {
                             None
                         }
@@ -333,6 +388,13 @@ impl Season {
                         None
                     }
                 })
+                .collect();
+
+            episode_states.sort_by(|(ia, _), (ib, _)| ia.cmp(ib));
+
+            episode_states
+                .into_iter()
+                .map(|(_, vs)| Episode::wrap(&self.server, vs))
                 .collect()
         })
         .await
@@ -489,7 +551,7 @@ impl VideoPart {
             .await
     }
 
-    async fn file_path(&self, extension: &str) -> PathBuf {
+    pub(crate) async fn file_path(&self, extension: &str) -> PathBuf {
         let video = self.video().await;
         video
             .file_path(FileType::Video(self.index), extension)
@@ -1132,7 +1194,7 @@ impl Episode {
         .await
     }
 
-    async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
+    pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.videos.get(&self.id).unwrap();
             let ep_state = state.episode_state();
@@ -1141,6 +1203,7 @@ impl Episode {
             let library_title = &ss.libraries.get(&show.library).unwrap().title;
 
             let name = match file_type {
+                FileType::Playlist => unreachable!("Invalid file type for Episode"),
                 FileType::Video(index) => {
                     let part_name = if state.parts.len() == 1 {
                         "".to_string()
@@ -1236,13 +1299,14 @@ impl Movie {
         .await
     }
 
-    async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
+    pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.videos.get(&self.id).unwrap();
             let m_state = state.movie_state();
             let library_title = &ss.libraries.get(&m_state.library).unwrap().title;
 
             let name = match file_type {
+                FileType::Playlist => unreachable!("Invalid file type for Movie"),
                 FileType::Video(index) => {
                     let part_name = if state.parts.len() == 1 {
                         "".to_string()
@@ -1319,7 +1383,7 @@ impl Video {
         }
     }
 
-    async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
+    pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
         match self {
             Self::Movie(v) => v.file_path(file_type, extension).await,
             Self::Episode(v) => v.file_path(file_type, extension).await,
@@ -1367,6 +1431,27 @@ impl Playlist {
         })
         .await
     }
+
+    pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
+        self.with_state(|state| {
+            let name = match file_type {
+                FileType::Thumbnail | FileType::Playlist => format!("{}.{extension}", state.title),
+                _ => unreachable!("Invalid file type for Playlist"),
+            };
+
+            PathBuf::from(safe(&self.server.id))
+                .join("Playlists")
+                .join(safe(&name))
+        })
+        .await
+    }
+
+    pub(crate) async fn write_playlist(&self) -> Result {
+        let root = self.server.inner.path.read().await;
+        let playlist_path = self.file_path(FileType::Playlist, "m3u").await;
+
+        write_playlist(&root, &playlist_path, self.videos().await).await
+    }
 }
 
 #[derive(Clone)]
@@ -1398,16 +1483,33 @@ impl MovieCollection {
         .await
     }
 
-    async fn file_path(&self, _file_type: FileType, extension: &str) -> PathBuf {
+    pub async fn videos(&self) -> Vec<Video> {
+        self.movies().await.into_iter().map(Video::Movie).collect()
+    }
+
+    pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.collections.get(&self.id).unwrap();
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
 
+            let name = match file_type {
+                FileType::Thumbnail | FileType::Playlist => format!("{}.{extension}", state.title),
+                _ => unreachable!("Invalid file type for MovieCollection"),
+            };
+
             PathBuf::from(safe(&self.server.id))
                 .join(safe(library_title))
-                .join(safe(format!(".{}.{extension}", state.id)))
+                .join("Collections")
+                .join(safe(&name))
         })
         .await
+    }
+
+    pub(crate) async fn write_playlist(&self) -> Result {
+        let root = self.server.inner.path.read().await;
+        let playlist_path = self.file_path(FileType::Playlist, "m3u").await;
+
+        write_playlist(&root, &playlist_path, self.videos().await).await
     }
 }
 
@@ -1440,16 +1542,39 @@ impl ShowCollection {
         .await
     }
 
-    async fn file_path(&self, _file_type: FileType, extension: &str) -> PathBuf {
+    pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
         self.with_server_state(|ss| {
             let state = ss.collections.get(&self.id).unwrap();
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
 
+            let name = match file_type {
+                FileType::Thumbnail | FileType::Playlist => format!("{}.{extension}", state.title),
+                _ => unreachable!("Invalid file type for ShowCollection"),
+            };
+
             PathBuf::from(safe(&self.server.id))
                 .join(safe(library_title))
-                .join(safe(format!(".{}.{extension}", state.id)))
+                .join("Collections")
+                .join(safe(&name))
         })
         .await
+    }
+
+    pub(crate) async fn write_playlist(&self) -> Result {
+        let mut videos: Vec<Video> = Vec::new();
+
+        for show in self.shows().await {
+            for season in show.seasons().await {
+                for episode in season.episodes().await {
+                    videos.push(Video::Episode(episode));
+                }
+            }
+        }
+
+        let root = self.server.inner.path.read().await;
+        let playlist_path = self.file_path(FileType::Playlist, "m3u").await;
+
+        write_playlist(&root, &playlist_path, videos).await
     }
 }
 
@@ -1464,6 +1589,20 @@ impl Collection {
         match self {
             Self::Movie(c) => c.update_thumbnail(rebuild).await,
             Self::Show(c) => c.update_thumbnail(rebuild).await,
+        }
+    }
+
+    pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
+        match self {
+            Self::Movie(c) => c.file_path(file_type, extension).await,
+            Self::Show(c) => c.file_path(file_type, extension).await,
+        }
+    }
+
+    pub(crate) async fn write_playlist(&self) -> Result {
+        match self {
+            Self::Movie(c) => c.write_playlist().await,
+            Self::Show(c) => c.write_playlist().await,
         }
     }
 }

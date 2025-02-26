@@ -27,7 +27,7 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
-    DEFAULT_PROFILES, Error, Inner, Library, Result, ServerConnection,
+    DEFAULT_PROFILES, Error, FileType, Inner, Library, Result, ServerConnection,
     config::{Config, ServerConfig, SyncItem, TranscodeProfile},
     state::{
         CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, SeasonState,
@@ -250,8 +250,30 @@ impl Server {
             .get(&self.id)
             .unwrap()
             .playlists
-            .keys()
-            .map(|id| wrappers::Playlist::wrap_from_id(self, id))
+            .values()
+            .map(|state| wrappers::Playlist::wrap(self, state))
+            .collect()
+    }
+
+    pub async fn collections(&self) -> Vec<wrappers::Collection> {
+        let state = self.inner.state.read().await;
+        let server_state = state.servers.get(&self.id).unwrap();
+
+        server_state
+            .collections
+            .values()
+            .map(|cs| {
+                let library = server_state.libraries.get(&cs.library).unwrap();
+
+                match library.library_type {
+                    LibraryType::Movie => {
+                        wrappers::Collection::Movie(wrappers::MovieCollection::wrap(self, cs))
+                    }
+                    LibraryType::Show => {
+                        wrappers::Collection::Show(wrappers::ShowCollection::wrap(self, cs))
+                    }
+                }
+            })
             .collect()
     }
 
@@ -421,7 +443,27 @@ impl Server {
 
         self.update_thumbnails(false).await;
         self.update_metadata(false).await;
-        self.verify_downloads().await
+        self.verify_downloads().await;
+        self.write_playlists().await;
+
+        Ok(())
+    }
+
+    /// Writes out the playlist files for playlists and collections
+    pub async fn write_playlists(&self) {
+        info!("Writing playlists");
+
+        for collection in self.collections().await {
+            if let Err(e) = collection.write_playlist().await {
+                warn!(error=?e, "Failed to write playlist");
+            }
+        }
+
+        for playlist in self.playlists().await {
+            if let Err(e) = playlist.write_playlist().await {
+                warn!(error=?e, "Failed to write playlist");
+            }
+        }
     }
 
     /// Rebuilds metadata files for the synced items
@@ -520,7 +562,7 @@ impl Server {
 
     /// Verifies the presence of downloads for synced items.
     #[instrument(level = "trace", skip(self), fields(server = self.id))]
-    pub async fn verify_downloads(&self) -> Result {
+    pub async fn verify_downloads(&self) {
         info!("Verifying downloads");
 
         for video in self.videos().await {
@@ -530,8 +572,6 @@ impl Server {
                 }
             }
         }
-
-        Ok(())
     }
 
     /// Verifies the presence of downloads for synced items.
@@ -554,6 +594,10 @@ impl Server {
             if let Some(file) = collection.thumbnail.file() {
                 expected_files.insert(root.join(file));
             }
+        }
+
+        for collection in self.collections().await {
+            expected_files.insert(root.join(collection.file_path(FileType::Playlist, "m3u").await));
         }
 
         for show in server_state.shows.values() {
@@ -580,6 +624,10 @@ impl Server {
                     expected_files.insert(root.join(file));
                 }
             }
+        }
+
+        for playlist in self.playlists().await {
+            expected_files.insert(root.join(playlist.file_path(FileType::Playlist, "m3u").await));
         }
 
         let server_root = root.join(safe(&self.id));
