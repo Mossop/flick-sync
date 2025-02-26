@@ -27,8 +27,8 @@ use xml::{EmitterConfig, writer::XmlEvent};
 use crate::{
     Error, Result, Server,
     state::{
-        CollectionState, DownloadState, LibraryState, PlaylistState, RelatedFileState, SeasonState,
-        ServerState, ShowState, VideoDetail, VideoPartState, VideoState,
+        CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, RelatedFileState,
+        SeasonState, ServerState, ShowState, VideoDetail, VideoPartState, VideoState,
     },
     util::safe,
 };
@@ -83,6 +83,26 @@ macro_rules! state_wrapper {
                 let server_state = state.servers.get_mut(&self.server.id).unwrap();
                 cb(server_state.$prop.get_mut(&self.id).unwrap());
                 self.server.inner.persist_state(&state).await
+            }
+        }
+    };
+}
+macro_rules! wrapper_builders {
+    ($typ:ident, $st_typ:ident) => {
+        impl $typ {
+            #[allow(dead_code)]
+            pub(crate) fn wrap(server: &crate::server::Server, state: &$st_typ) -> Self {
+                Self {
+                    server: server.clone(),
+                    id: state.id.clone(),
+                }
+            }
+
+            pub(crate) fn wrap_from_id(server: &crate::server::Server, id: &str) -> Self {
+                Self {
+                    server: server.clone(),
+                    id: id.to_owned(),
+                }
             }
         }
     };
@@ -198,10 +218,7 @@ macro_rules! metadata_methods {
 macro_rules! parent {
     ($meth:ident, $typ:ident, $($pprop:tt)*) => {
         pub async fn $meth(&self) -> $typ {
-            self.with_state(|ss| $typ {
-                server: self.server.clone(),
-                id: ss.$($pprop)*.clone(),
-            })
+            self.with_state(|ss| $typ::wrap_from_id(&self.server, &ss.$($pprop)*))
             .await
         }
     };
@@ -215,10 +232,7 @@ macro_rules! children {
                     .iter()
                     .filter_map(|(id, s)| {
                         if s.$($pprop)* == self.id {
-                            Some($typ {
-                                server: self.server.clone(),
-                                id: id.clone(),
-                            })
+                            Some($typ::wrap_from_id(&self.server, id))
                         } else {
                             None
                         }
@@ -232,8 +246,8 @@ macro_rules! children {
 
 #[derive(Clone)]
 pub struct Show {
-    pub(crate) server: Server,
-    pub(crate) id: String,
+    server: Server,
+    id: String,
 }
 
 impl fmt::Debug for Show {
@@ -243,6 +257,7 @@ impl fmt::Debug for Show {
 }
 
 state_wrapper!(Show, ShowState, shows);
+wrapper_builders!(Show, ShowState);
 
 impl Show {
     thumbnail_methods!();
@@ -287,8 +302,8 @@ impl Show {
 
 #[derive(Clone)]
 pub struct Season {
-    pub(crate) server: Server,
-    pub(crate) id: String,
+    server: Server,
+    id: String,
 }
 
 impl fmt::Debug for Season {
@@ -298,6 +313,7 @@ impl fmt::Debug for Season {
 }
 
 state_wrapper!(Season, SeasonState, seasons);
+wrapper_builders!(Season, SeasonState);
 
 impl Season {
     parent!(show, Show, show);
@@ -309,10 +325,7 @@ impl Season {
                 .filter_map(|(id, s)| {
                     if let VideoDetail::Episode(ref detail) = s.detail {
                         if detail.season == self.id {
-                            Some(Episode {
-                                server: self.server.clone(),
-                                id: id.clone(),
-                            })
+                            Some(Episode::wrap_from_id(&self.server, id))
                         } else {
                             None
                         }
@@ -403,9 +416,9 @@ pub enum TransferState {
 
 #[derive(Clone)]
 pub struct VideoPart {
-    pub(crate) server: Server,
-    pub(crate) id: String,
-    pub(crate) index: usize,
+    server: Server,
+    id: String,
+    index: usize,
 }
 
 impl fmt::Debug for VideoPart {
@@ -472,21 +485,8 @@ impl VideoPart {
     }
 
     pub async fn video(&self) -> Video {
-        self.with_server_state(|server_state| {
-            let video_state = server_state.videos.get(&self.id).unwrap();
-
-            match video_state.detail {
-                VideoDetail::Movie(_) => Video::Movie(Movie {
-                    server: self.server.clone(),
-                    id: self.id.clone(),
-                }),
-                VideoDetail::Episode(_) => Video::Episode(Episode {
-                    server: self.server.clone(),
-                    id: self.id.clone(),
-                }),
-            }
-        })
-        .await
+        self.with_video_state(|video_state| Video::wrap(&self.server, video_state))
+            .await
     }
 
     async fn file_path(&self, extension: &str) -> PathBuf {
@@ -1049,8 +1049,8 @@ impl VideoStats {
 
 #[derive(Clone)]
 pub struct Episode {
-    pub(crate) server: Server,
-    pub(crate) id: String,
+    server: Server,
+    id: String,
 }
 
 impl fmt::Debug for Episode {
@@ -1060,6 +1060,7 @@ impl fmt::Debug for Episode {
 }
 
 state_wrapper!(Episode, VideoState, videos);
+wrapper_builders!(Episode, VideoState);
 
 impl Episode {
     thumbnail_methods!();
@@ -1177,8 +1178,8 @@ impl Episode {
 
 #[derive(Clone)]
 pub struct Movie {
-    pub(crate) server: Server,
-    pub(crate) id: String,
+    server: Server,
+    id: String,
 }
 
 impl fmt::Debug for Movie {
@@ -1188,6 +1189,7 @@ impl fmt::Debug for Movie {
 }
 
 state_wrapper!(Movie, VideoState, videos);
+wrapper_builders!(Movie, VideoState);
 
 impl Movie {
     thumbnail_methods!();
@@ -1282,6 +1284,13 @@ pub enum Video {
 }
 
 impl Video {
+    pub(crate) fn wrap(server: &Server, state: &VideoState) -> Self {
+        match state.detail {
+            VideoDetail::Movie(_) => Self::Movie(Movie::wrap(server, state)),
+            VideoDetail::Episode(_) => Self::Episode(Episode::wrap(server, state)),
+        }
+    }
+
     pub async fn library(&self) -> Library {
         match self {
             Self::Movie(v) => Library::Movie(v.library().await),
@@ -1334,8 +1343,8 @@ impl Video {
 
 #[derive(Clone)]
 pub struct Playlist {
-    pub(crate) server: Server,
-    pub(crate) id: String,
+    server: Server,
+    id: String,
 }
 
 impl fmt::Debug for Playlist {
@@ -1345,6 +1354,7 @@ impl fmt::Debug for Playlist {
 }
 
 state_wrapper!(Playlist, PlaylistState, playlists);
+wrapper_builders!(Playlist, PlaylistState);
 
 impl Playlist {
     pub async fn videos(&self) -> Vec<Video> {
@@ -1352,16 +1362,7 @@ impl Playlist {
             let ps = ss.playlists.get(&self.id).unwrap();
             ps.videos
                 .iter()
-                .map(|id| match ss.videos.get(id).unwrap().detail {
-                    VideoDetail::Movie(_) => Video::Movie(Movie {
-                        server: self.server.clone(),
-                        id: id.clone(),
-                    }),
-                    VideoDetail::Episode(_) => Video::Episode(Episode {
-                        server: self.server.clone(),
-                        id: id.clone(),
-                    }),
-                })
+                .map(|id| Video::wrap(&self.server, ss.videos.get(id).unwrap()))
                 .collect()
         })
         .await
@@ -1370,8 +1371,8 @@ impl Playlist {
 
 #[derive(Clone)]
 pub struct MovieCollection {
-    pub(crate) server: Server,
-    pub(crate) id: String,
+    server: Server,
+    id: String,
 }
 
 impl fmt::Debug for MovieCollection {
@@ -1381,6 +1382,7 @@ impl fmt::Debug for MovieCollection {
 }
 
 state_wrapper!(MovieCollection, CollectionState, collections);
+wrapper_builders!(MovieCollection, CollectionState);
 
 impl MovieCollection {
     thumbnail_methods!();
@@ -1390,10 +1392,7 @@ impl MovieCollection {
         self.with_state(|cs| {
             cs.contents
                 .iter()
-                .map(|id| Movie {
-                    server: self.server.clone(),
-                    id: id.clone(),
-                })
+                .map(|id| Movie::wrap_from_id(&self.server, id))
                 .collect()
         })
         .await
@@ -1414,8 +1413,8 @@ impl MovieCollection {
 
 #[derive(Clone)]
 pub struct ShowCollection {
-    pub(crate) server: Server,
-    pub(crate) id: String,
+    server: Server,
+    id: String,
 }
 
 impl fmt::Debug for ShowCollection {
@@ -1425,6 +1424,7 @@ impl fmt::Debug for ShowCollection {
 }
 
 state_wrapper!(ShowCollection, CollectionState, collections);
+wrapper_builders!(ShowCollection, CollectionState);
 
 impl ShowCollection {
     thumbnail_methods!();
@@ -1434,10 +1434,7 @@ impl ShowCollection {
         self.with_state(|cs| {
             cs.contents
                 .iter()
-                .map(|id| Show {
-                    server: self.server.clone(),
-                    id: id.clone(),
-                })
+                .map(|id| Show::wrap_from_id(&self.server, id))
                 .collect()
         })
         .await
@@ -1473,8 +1470,8 @@ impl Collection {
 
 #[derive(Clone)]
 pub struct MovieLibrary {
-    pub(crate) server: Server,
-    pub(crate) id: String,
+    server: Server,
+    id: String,
 }
 
 impl fmt::Debug for MovieLibrary {
@@ -1484,6 +1481,7 @@ impl fmt::Debug for MovieLibrary {
 }
 
 state_wrapper!(MovieLibrary, LibraryState, libraries);
+wrapper_builders!(MovieLibrary, LibraryState);
 
 impl MovieLibrary {
     children!(collections, collections, MovieCollection, library);
@@ -1491,14 +1489,11 @@ impl MovieLibrary {
     pub async fn movies(&self) -> Vec<Movie> {
         self.with_server_state(|ss| {
             ss.videos
-                .iter()
-                .filter_map(|(id, s)| {
-                    if let VideoDetail::Movie(ref detail) = s.detail {
+                .values()
+                .filter_map(|vs| {
+                    if let VideoDetail::Movie(ref detail) = vs.detail {
                         if detail.library == self.id {
-                            Some(Movie {
-                                server: self.server.clone(),
-                                id: id.clone(),
-                            })
+                            Some(Movie::wrap(&self.server, vs))
                         } else {
                             None
                         }
@@ -1514,8 +1509,8 @@ impl MovieLibrary {
 
 #[derive(Clone)]
 pub struct ShowLibrary {
-    pub(crate) server: Server,
-    pub(crate) id: String,
+    server: Server,
+    id: String,
 }
 
 impl fmt::Debug for ShowLibrary {
@@ -1525,6 +1520,7 @@ impl fmt::Debug for ShowLibrary {
 }
 
 state_wrapper!(ShowLibrary, LibraryState, libraries);
+wrapper_builders!(ShowLibrary, LibraryState);
 
 impl ShowLibrary {
     children!(collections, collections, ShowCollection, library);
@@ -1538,6 +1534,13 @@ pub enum Library {
 }
 
 impl Library {
+    pub(crate) fn wrap(server: &Server, state: &LibraryState) -> Self {
+        match state.library_type {
+            LibraryType::Movie => Self::Movie(MovieLibrary::wrap(server, state)),
+            LibraryType::Show => Self::Show(ShowLibrary::wrap(server, state)),
+        }
+    }
+
     pub async fn collections(&self) -> Vec<Collection> {
         match self {
             Self::Movie(l) => l

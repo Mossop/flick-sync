@@ -31,7 +31,7 @@ use crate::{
     config::{Config, ServerConfig, SyncItem, TranscodeProfile},
     state::{
         CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, SeasonState,
-        ServerState, ShowState, VideoDetail, VideoState,
+        ServerState, ShowState, VideoState,
     },
     util::safe,
     wrappers,
@@ -226,17 +226,8 @@ impl Server {
             .get(&self.id)
             .unwrap()
             .videos
-            .iter()
-            .map(|(id, vs)| match vs.detail {
-                VideoDetail::Movie(_) => wrappers::Video::Movie(wrappers::Movie {
-                    server: self.clone(),
-                    id: id.clone(),
-                }),
-                VideoDetail::Episode(_) => wrappers::Video::Episode(wrappers::Episode {
-                    server: self.clone(),
-                    id: id.clone(),
-                }),
-            })
+            .values()
+            .map(|vs| wrappers::Video::wrap(self, vs))
             .collect()
     }
 
@@ -247,17 +238,8 @@ impl Server {
             .get(&self.id)
             .unwrap()
             .libraries
-            .iter()
-            .map(|(id, ls)| match ls.library_type {
-                LibraryType::Movie => wrappers::Library::Movie(wrappers::MovieLibrary {
-                    server: self.clone(),
-                    id: id.clone(),
-                }),
-                LibraryType::Show => wrappers::Library::Show(wrappers::ShowLibrary {
-                    server: self.clone(),
-                    id: id.clone(),
-                }),
-            })
+            .values()
+            .map(|ls| wrappers::Library::wrap(self, ls))
             .collect()
     }
 
@@ -269,10 +251,7 @@ impl Server {
             .unwrap()
             .playlists
             .keys()
-            .map(|id| wrappers::Playlist {
-                server: self.clone(),
-                id: id.clone(),
-            })
+            .map(|id| wrappers::Playlist::wrap_from_id(self, id))
             .collect()
     }
 
