@@ -5,7 +5,6 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     result,
-    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
@@ -26,7 +25,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use xml::{EmitterConfig, writer::XmlEvent};
 
 use crate::{
-    Error, Inner, Result, Server,
+    Error, Result, Server,
     state::{
         CollectionState, DownloadState, LibraryState, PlaylistState, RelatedFileState, SeasonState,
         ServerState, ShowState, VideoDetail, VideoPartState, VideoState,
@@ -64,7 +63,7 @@ macro_rules! state_wrapper {
             where
                 F: Send + FnOnce(&ServerState) -> R,
             {
-                let state = self.inner.state.read().await;
+                let state = self.server.inner.state.read().await;
                 cb(&state.servers.get(&self.server.id).unwrap())
             }
 
@@ -80,10 +79,10 @@ macro_rules! state_wrapper {
             where
                 F: Send + FnOnce(&mut $st_typ),
             {
-                let mut state = self.inner.state.write().await;
+                let mut state = self.server.inner.state.write().await;
                 let server_state = state.servers.get_mut(&self.server.id).unwrap();
                 cb(server_state.$prop.get_mut(&self.id).unwrap());
-                self.inner.persist_state(&state).await
+                self.server.inner.persist_state(&state).await
             }
         }
     };
@@ -97,7 +96,7 @@ macro_rules! thumbnail_methods {
 
         #[instrument(level = "trace")]
         pub async fn update_thumbnail(&self, rebuild: bool) -> Result {
-            let root = self.inner.path.read().await.to_owned();
+            let root = self.server.inner.path.read().await.to_owned();
 
             let thumbnail_path = self.file_path(FileType::Thumbnail, "jpg").await;
 
@@ -155,7 +154,7 @@ macro_rules! metadata_methods {
 
         #[instrument(level = "trace")]
         pub async fn update_metadata(&self, rebuild: bool) -> Result {
-            let root = self.inner.path.read().await;
+            let root = self.server.inner.path.read().await;
 
             let metadata_path = self.file_path(FileType::Metadata, "nfo").await;
 
@@ -202,7 +201,6 @@ macro_rules! parent {
             self.with_state(|ss| $typ {
                 server: self.server.clone(),
                 id: ss.$($pprop)*.clone(),
-                inner: self.inner.clone(),
             })
             .await
         }
@@ -220,7 +218,6 @@ macro_rules! children {
                             Some($typ {
                                 server: self.server.clone(),
                                 id: id.clone(),
-                                inner: self.inner.clone(),
                             })
                         } else {
                             None
@@ -237,7 +234,6 @@ macro_rules! children {
 pub struct Show {
     pub(crate) server: Server,
     pub(crate) id: String,
-    pub(crate) inner: Arc<Inner>,
 }
 
 impl fmt::Debug for Show {
@@ -293,7 +289,6 @@ impl Show {
 pub struct Season {
     pub(crate) server: Server,
     pub(crate) id: String,
-    pub(crate) inner: Arc<Inner>,
 }
 
 impl fmt::Debug for Season {
@@ -317,7 +312,6 @@ impl Season {
                             Some(Episode {
                                 server: self.server.clone(),
                                 id: id.clone(),
-                                inner: self.inner.clone(),
                             })
                         } else {
                             None
@@ -412,7 +406,6 @@ pub struct VideoPart {
     pub(crate) server: Server,
     pub(crate) id: String,
     pub(crate) index: usize,
-    pub(crate) inner: Arc<Inner>,
 }
 
 impl fmt::Debug for VideoPart {
@@ -458,7 +451,7 @@ impl VideoPart {
     pub async fn verify_download(&self) -> Result {
         let server = self.server.connect().await?;
         let mut download_state = self.download_state().await;
-        let root = self.inner.path.read().await.clone();
+        let root = self.server.inner.path.read().await.clone();
 
         let expected_path = if let Some(extension) = download_state.file().and_then(|fp| {
             fp.extension()
@@ -486,12 +479,10 @@ impl VideoPart {
                 VideoDetail::Movie(_) => Video::Movie(Movie {
                     server: self.server.clone(),
                     id: self.id.clone(),
-                    inner: self.inner.clone(),
                 }),
                 VideoDetail::Episode(_) => Video::Episode(Episode {
                     server: self.server.clone(),
                     id: self.id.clone(),
-                    inner: self.inner.clone(),
                 }),
             }
         })
@@ -506,7 +497,7 @@ impl VideoPart {
     }
 
     pub async fn rebuild_download(&self) -> Result {
-        let root = self.inner.path.read().await;
+        let root = self.server.inner.path.read().await;
         let title = self.with_video_state(|vs| vs.title.clone()).await;
 
         for container in [
@@ -548,6 +539,7 @@ impl VideoPart {
         let server_profile = self.server.transcode_profile().await;
 
         let options = if let Some(options) = self
+            .server
             .inner
             .transcode_options(profile.or(server_profile))
             .await
@@ -653,7 +645,7 @@ impl VideoPart {
             .file_path(&part.metadata().container.unwrap().to_string())
             .await;
 
-        let target = { self.inner.path.read().await.join(&path) };
+        let target = { self.server.inner.path.read().await.join(&path) };
         if let Err(e) = remove_file(target).await {
             if e.kind() != ErrorKind::NotFound {
                 return Err(Error::from(e));
@@ -733,7 +725,7 @@ impl VideoPart {
         let mut download_state = self.download_state().await;
 
         if matches!(download_state, DownloadState::Transcoding { .. }) {
-            let root = self.inner.path.read().await;
+            let root = self.server.inner.path.read().await;
             download_state
                 .verify(&self.server.connect().await?, &root, None)
                 .await;
@@ -785,7 +777,7 @@ impl VideoPart {
 
     #[instrument(level = "trace", skip(self, path, progress), fields(video=self.id, part=self.index))]
     async fn download_direct<P: Progress + Unpin>(&self, path: &Path, mut progress: P) -> Result {
-        let root = self.inner.path.read().await;
+        let root = self.server.inner.path.read().await;
         let target = root.join(path);
         let offset = match metadata(&target).await {
             Ok(stats) => stats.len(),
@@ -869,7 +861,7 @@ impl VideoPart {
             return Err(Error::DownloadUnavailable);
         }
 
-        let root = self.inner.path.read().await;
+        let root = self.server.inner.path.read().await;
         let target = root.join(path);
 
         if let Some(parent) = target.parent() {
@@ -935,7 +927,7 @@ impl VideoPart {
     }
 
     pub(crate) async fn strip_metadata(&self) {
-        let root = self.inner.path.read().await;
+        let root = self.server.inner.path.read().await;
 
         let state = self.download_state().await;
 
@@ -950,7 +942,7 @@ impl StateWrapper<VideoPartState> for VideoPart {
     where
         F: Send + FnOnce(&ServerState) -> R,
     {
-        let state = self.inner.state.read().await;
+        let state = self.server.inner.state.read().await;
         cb(state.servers.get(&self.server.id).unwrap())
     }
 
@@ -966,7 +958,7 @@ impl StateWrapper<VideoPartState> for VideoPart {
     where
         F: Send + FnOnce(&mut VideoPartState),
     {
-        let mut state = self.inner.state.write().await;
+        let mut state = self.server.inner.state.write().await;
         let server_state = state.servers.get_mut(&self.server.id).unwrap();
         cb(server_state
             .videos
@@ -975,7 +967,7 @@ impl StateWrapper<VideoPartState> for VideoPart {
             .parts
             .get_mut(self.index)
             .unwrap());
-        self.inner.persist_state(&state).await
+        self.server.inner.persist_state(&state).await
     }
 }
 
@@ -1037,7 +1029,7 @@ impl VideoStats {
             }
 
             if let Some(path) = state.file() {
-                let path = local_part.inner.path.read().await.join(path);
+                let path = local_part.server.inner.path.read().await.join(path);
                 if let Ok(file_stats) = metadata(path).await {
                     stats.local_bytes += file_stats.len();
                 }
@@ -1059,7 +1051,6 @@ impl VideoStats {
 pub struct Episode {
     pub(crate) server: Server,
     pub(crate) id: String,
-    pub(crate) inner: Arc<Inner>,
 }
 
 impl fmt::Debug for Episode {
@@ -1134,7 +1125,6 @@ impl Episode {
                     server: self.server.clone(),
                     id: self.id.clone(),
                     index,
-                    inner: self.inner.clone(),
                 })
                 .collect()
         })
@@ -1189,7 +1179,6 @@ impl Episode {
 pub struct Movie {
     pub(crate) server: Server,
     pub(crate) id: String,
-    pub(crate) inner: Arc<Inner>,
 }
 
 impl fmt::Debug for Movie {
@@ -1239,7 +1228,6 @@ impl Movie {
                     server: self.server.clone(),
                     id: self.id.clone(),
                     index,
-                    inner: self.inner.clone(),
                 })
                 .collect()
         })
@@ -1348,7 +1336,6 @@ impl Video {
 pub struct Playlist {
     pub(crate) server: Server,
     pub(crate) id: String,
-    pub(crate) inner: Arc<Inner>,
 }
 
 impl fmt::Debug for Playlist {
@@ -1369,12 +1356,10 @@ impl Playlist {
                     VideoDetail::Movie(_) => Video::Movie(Movie {
                         server: self.server.clone(),
                         id: id.clone(),
-                        inner: self.inner.clone(),
                     }),
                     VideoDetail::Episode(_) => Video::Episode(Episode {
                         server: self.server.clone(),
                         id: id.clone(),
-                        inner: self.inner.clone(),
                     }),
                 })
                 .collect()
@@ -1387,7 +1372,6 @@ impl Playlist {
 pub struct MovieCollection {
     pub(crate) server: Server,
     pub(crate) id: String,
-    pub(crate) inner: Arc<Inner>,
 }
 
 impl fmt::Debug for MovieCollection {
@@ -1409,7 +1393,6 @@ impl MovieCollection {
                 .map(|id| Movie {
                     server: self.server.clone(),
                     id: id.clone(),
-                    inner: self.inner.clone(),
                 })
                 .collect()
         })
@@ -1433,7 +1416,6 @@ impl MovieCollection {
 pub struct ShowCollection {
     pub(crate) server: Server,
     pub(crate) id: String,
-    pub(crate) inner: Arc<Inner>,
 }
 
 impl fmt::Debug for ShowCollection {
@@ -1455,7 +1437,6 @@ impl ShowCollection {
                 .map(|id| Show {
                     server: self.server.clone(),
                     id: id.clone(),
-                    inner: self.inner.clone(),
                 })
                 .collect()
         })
@@ -1494,7 +1475,6 @@ impl Collection {
 pub struct MovieLibrary {
     pub(crate) server: Server,
     pub(crate) id: String,
-    pub(crate) inner: Arc<Inner>,
 }
 
 impl fmt::Debug for MovieLibrary {
@@ -1518,7 +1498,6 @@ impl MovieLibrary {
                             Some(Movie {
                                 server: self.server.clone(),
                                 id: id.clone(),
-                                inner: self.inner.clone(),
                             })
                         } else {
                             None
@@ -1537,7 +1516,6 @@ impl MovieLibrary {
 pub struct ShowLibrary {
     pub(crate) server: Server,
     pub(crate) id: String,
-    pub(crate) inner: Arc<Inner>,
 }
 
 impl fmt::Debug for ShowLibrary {

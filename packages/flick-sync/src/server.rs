@@ -231,12 +231,10 @@ impl Server {
                 VideoDetail::Movie(_) => wrappers::Video::Movie(wrappers::Movie {
                     server: self.clone(),
                     id: id.clone(),
-                    inner: self.inner.clone(),
                 }),
                 VideoDetail::Episode(_) => wrappers::Video::Episode(wrappers::Episode {
                     server: self.clone(),
                     id: id.clone(),
-                    inner: self.inner.clone(),
                 }),
             })
             .collect()
@@ -254,12 +252,10 @@ impl Server {
                 LibraryType::Movie => wrappers::Library::Movie(wrappers::MovieLibrary {
                     server: self.clone(),
                     id: id.clone(),
-                    inner: self.inner.clone(),
                 }),
                 LibraryType::Show => wrappers::Library::Show(wrappers::ShowLibrary {
                     server: self.clone(),
                     id: id.clone(),
-                    inner: self.inner.clone(),
                 }),
             })
             .collect()
@@ -276,7 +272,6 @@ impl Server {
             .map(|id| wrappers::Playlist {
                 server: self.clone(),
                 id: id.clone(),
-                inner: self.inner.clone(),
             })
             .collect()
     }
