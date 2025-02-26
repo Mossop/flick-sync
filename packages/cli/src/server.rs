@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use clap::Args;
 use flick_sync::{
     FlickSync, Server, ServerConnection,
@@ -230,7 +229,6 @@ async fn create_server(args: Login, flick_sync: FlickSync, console: Console) -> 
     Ok(())
 }
 
-#[async_trait]
 impl Runnable for Login {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         match flick_sync.server(&self.id).await {
@@ -252,7 +250,6 @@ pub struct Add {
     only_unplayed: bool,
 }
 
-#[async_trait]
 impl Runnable for Add {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let unexpected = || Error::Generic("Unexpected URL format".to_string());
@@ -336,7 +333,6 @@ pub struct Remove {
     id: String,
 }
 
-#[async_trait]
 impl Runnable for Remove {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let server = if let Some(server) = flick_sync.server(&self.server).await {
@@ -365,7 +361,6 @@ impl Runnable for Remove {
 #[derive(Args)]
 pub struct Rebuild {}
 
-#[async_trait]
 impl Runnable for Rebuild {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         for server in flick_sync.servers().await {

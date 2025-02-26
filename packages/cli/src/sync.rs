@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use clap::Args;
 use flick_sync::{FlickSync, Progress, TransferState, VideoPart};
 use futures::future::join_all;
@@ -21,7 +20,6 @@ pub struct Prune {
     ids: Vec<String>,
 }
 
-#[async_trait]
 impl Runnable for Prune {
     async fn run(self, flick_sync: FlickSync, _console: Console) -> Result {
         flick_sync.prune_root().await;
@@ -52,7 +50,6 @@ pub struct BuildMetadata {
     ids: Vec<String>,
 }
 
-#[async_trait]
 impl Runnable for BuildMetadata {
     async fn run(self, flick_sync: FlickSync, _console: Console) -> Result {
         let servers = select_servers(&flick_sync, &self.ids).await?;
@@ -219,7 +216,6 @@ pub struct Sync {
     ids: Vec<String>,
 }
 
-#[async_trait]
 impl Runnable for Sync {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let servers = select_servers(&flick_sync, &self.ids).await?;

@@ -15,7 +15,6 @@ use async_std::{
     fs::{metadata, remove_file},
     task::sleep,
 };
-use async_trait::async_trait;
 use futures::AsyncWrite;
 use pin_project::pin_project;
 use plex_api::{
@@ -44,7 +43,6 @@ enum FileType {
     Metadata,
 }
 
-#[async_trait]
 trait StateWrapper<S> {
     async fn with_server_state<F, R>(&self, cb: F) -> R
     where
@@ -61,7 +59,6 @@ trait StateWrapper<S> {
 
 macro_rules! state_wrapper {
     ($typ:ident, $st_typ:ident, $prop:ident) => {
-        #[async_trait]
         impl StateWrapper<$st_typ> for $typ {
             async fn with_server_state<F, R>(&self, cb: F) -> R
             where
@@ -948,7 +945,6 @@ impl VideoPart {
     }
 }
 
-#[async_trait]
 impl StateWrapper<VideoPartState> for VideoPart {
     async fn with_server_state<F, R>(&self, cb: F) -> R
     where

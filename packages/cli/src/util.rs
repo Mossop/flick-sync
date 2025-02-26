@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use clap::Args;
 use flick_sync::{FlickSync, ItemType, VideoStats};
 use indicatif::{DecimalBytes, HumanDuration};
@@ -18,7 +17,6 @@ fn percent<T: Into<u64>>(a: T, b: T) -> String {
     }
 }
 
-#[async_trait]
 impl Runnable for Stats {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let mut total = VideoStats::default();
@@ -99,7 +97,6 @@ impl Runnable for Stats {
 #[derive(Args)]
 pub struct List {}
 
-#[async_trait]
 impl Runnable for List {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let servers = flick_sync.servers().await;

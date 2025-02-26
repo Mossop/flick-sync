@@ -7,7 +7,6 @@ use async_std::{
     fs::{metadata, read_dir},
     stream::StreamExt,
 };
-use async_trait::async_trait;
 use clap::{Parser, Subcommand};
 use enum_dispatch::enum_dispatch;
 use error::{Error, err};
@@ -52,9 +51,8 @@ pub enum Command {
     BuildMetadata,
 }
 
-#[async_trait]
 #[enum_dispatch(Command)]
-pub trait Runnable {
+pub(crate) trait Runnable {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result;
 }
 

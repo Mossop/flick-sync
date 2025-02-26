@@ -15,7 +15,6 @@ console = "0.15.5"
 dialoguer = "0.11.0"
 indicatif = "0.17.3"
 tracing = { version = "^0.1.37", features = ["attributes"] }
-async-trait = "0.1.68"
 thiserror = "2.0.11"
 url = "2.3.1"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
