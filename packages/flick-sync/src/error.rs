@@ -8,10 +8,12 @@ pub enum Error {
         source: std::io::Error,
     },
     #[error("Unable to deserialize JSON: {source}")]
-    DeserealiseError {
+    DeserealizeError {
         #[from]
         source: serde_json::Error,
     },
+    #[error("Unexpected schema version")]
+    SchemaError,
     #[error("The Plex API returned an error: {source}")]
     PlexError {
         #[from]

@@ -7,7 +7,11 @@ use plex_api::{
 use serde::{Deserialize, Serialize};
 use serde_plain::derive_display_from_serialize;
 
-use crate::util::{derive_list_item, from_list, into_list, ListItem};
+use crate::{
+    Result,
+    schema::{JsonObject, MigratableStore},
+    util::{ListItem, derive_list_item, from_list, into_list},
+};
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(tag = "type")]
@@ -160,4 +164,10 @@ pub(crate) struct Config {
     pub(crate) device: Option<String>,
     #[serde(default)]
     pub(crate) profiles: HashMap<String, TranscodeProfile>,
+}
+
+impl MigratableStore for Config {
+    fn migrate(_data: &mut JsonObject) -> Result<bool> {
+        Ok(false)
+    }
 }

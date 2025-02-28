@@ -3,7 +3,10 @@ use std::fmt;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use crate::Result;
+use crate::{
+    Error, Result,
+    schema::{JsonObject, JsonUtils, MigratableStore, SchemaVersion},
+};
 use async_std::{fs, process::Command};
 use plex_api::{
     Server,
@@ -15,19 +18,23 @@ use plex_api::{
     transcode::TranscodeStatus,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tempfile::NamedTempFile;
 use time::{Date, OffsetDateTime};
 use tracing::{debug, error, info, instrument, trace, warn};
 use typeshare::typeshare;
 use uuid::Uuid;
 
+const SCHEMA_VERSION: u64 = 1;
+
 #[derive(Deserialize, Default, Serialize, Clone, PartialEq)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub(crate) enum RelatedFileState {
     #[default]
     None,
-    #[serde(rename = "downloaded")]
-    Stored { path: PathBuf },
+    Stored {
+        path: PathBuf,
+    },
 }
 
 impl RelatedFileState {
@@ -823,16 +830,117 @@ pub(crate) struct ServerState {
 #[typeshare]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct State {
+    schema: SchemaVersion<SCHEMA_VERSION>,
     pub(crate) client_id: String,
     #[serde(default)]
     pub(crate) servers: HashMap<String, ServerState>,
 }
 
+impl State {
+    fn migrate_v0(data: &mut JsonObject) -> Result {
+        for thumbnail in data
+            .prop("servers")
+            .values()
+            .prop("videos")
+            .values()
+            .prop("thumbnail")
+            .as_object()
+        {
+            if thumbnail.get("state") == Some(&Value::String("downloaded".to_string())) {
+                thumbnail.insert("state".to_owned(), Value::String("stored".to_owned()));
+            }
+        }
+
+        for thumbnail in data
+            .prop("servers")
+            .values()
+            .prop("videos")
+            .values()
+            .prop("metadata")
+            .as_object()
+        {
+            if thumbnail.get("state") == Some(&Value::String("downloaded".to_string())) {
+                thumbnail.insert("state".to_owned(), Value::String("stored".to_owned()));
+            }
+        }
+
+        for thumbnail in data
+            .prop("servers")
+            .values()
+            .prop("collections")
+            .values()
+            .prop("thumbnail")
+            .as_object()
+        {
+            if thumbnail.get("state") == Some(&Value::String("downloaded".to_string())) {
+                thumbnail.insert("state".to_owned(), Value::String("stored".to_owned()));
+            }
+        }
+
+        for thumbnail in data
+            .prop("servers")
+            .values()
+            .prop("shows")
+            .values()
+            .prop("thumbnail")
+            .as_object()
+        {
+            if thumbnail.get("state") == Some(&Value::String("downloaded".to_string())) {
+                thumbnail.insert("state".to_owned(), Value::String("stored".to_owned()));
+            }
+        }
+
+        for thumbnail in data
+            .prop("servers")
+            .values()
+            .prop("shows")
+            .values()
+            .prop("metadata")
+            .as_object()
+        {
+            if thumbnail.get("state") == Some(&Value::String("downloaded".to_string())) {
+                thumbnail.insert("state".to_owned(), Value::String("stored".to_owned()));
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl Default for State {
     fn default() -> Self {
         Self {
+            schema: Default::default(),
             client_id: Uuid::new_v4().braced().to_string(),
             servers: Default::default(),
         }
+    }
+}
+
+impl MigratableStore for State {
+    fn migrate(data: &mut JsonObject) -> Result<bool> {
+        let version = match data.get("schema") {
+            None => 0,
+            Some(Value::Number(number)) => match number.as_u64() {
+                Some(SCHEMA_VERSION) => return Ok(false),
+                Some(version) => {
+                    if version > SCHEMA_VERSION {
+                        return Err(Error::SchemaError);
+                    }
+
+                    version
+                }
+                _ => return Err(Error::SchemaError),
+            },
+            _ => return Err(Error::SchemaError),
+        };
+
+        if version < 1 {
+            Self::migrate_v0(data)?;
+        }
+
+        data.insert("schema".to_string(), SCHEMA_VERSION.into());
+
+        Ok(true)
     }
 }

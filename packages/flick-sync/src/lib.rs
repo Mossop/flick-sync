@@ -1,7 +1,6 @@
 #![deny(unreachable_pub)]
 use std::{
     collections::{HashMap, HashSet},
-    io::ErrorKind,
     ops::Deref,
     path::{Path, PathBuf},
     sync::Arc,
@@ -9,13 +8,14 @@ use std::{
 
 mod config;
 mod error;
+mod schema;
 mod server;
 mod state;
 mod util;
 mod wrappers;
 
 use async_std::{
-    fs::{read_dir, read_to_string, remove_dir_all, remove_file, write},
+    fs::{read_dir, remove_dir_all, remove_file, write},
     sync::RwLockReadGuard,
 };
 use async_std::{
@@ -27,16 +27,15 @@ use config::{Config, ServerConfig, TranscodeProfile};
 pub use error::Error;
 use lazy_static::lazy_static;
 pub use plex_api;
-use plex_api::{transcode::VideoTranscodeOptions, HttpClient, HttpClientBuilder};
-use serde::{de::DeserializeOwned, Serialize};
-use serde_json::{from_str, to_string_pretty};
+use plex_api::{HttpClient, HttpClientBuilder, transcode::VideoTranscodeOptions};
+use serde_json::to_string_pretty;
 pub use server::{ItemType, Server, SyncItemInfo};
 use state::{ServerState, State};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 pub use wrappers::*;
 
-use crate::config::H264Profile;
+use crate::{config::H264Profile, schema::MigratableStore};
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
@@ -147,32 +146,6 @@ pub struct FlickSync {
     inner: Arc<Inner>,
 }
 
-async fn read_or_default<S>(path: &Path) -> Result<S>
-where
-    S: Serialize + DeserializeOwned + Default,
-{
-    match read_to_string(path).await {
-        Ok(str) => match from_str::<S>(&str) {
-            Ok(r) => Ok(r),
-            Err(e) => {
-                error!(error = ?e);
-                Ok(Default::default())
-            }
-        },
-        Err(e) => {
-            if e.kind() == ErrorKind::NotFound {
-                let val = S::default();
-                let str = to_string_pretty(&val)?;
-                write(path, str).await?;
-                Ok(val)
-            } else {
-                error!(error = ?e);
-                Ok(Default::default())
-            }
-        }
-    }
-}
-
 impl FlickSync {
     pub async fn max_downloads(&self) -> usize {
         let config = self.inner.config.read().await;
@@ -180,8 +153,8 @@ impl FlickSync {
     }
 
     pub async fn new(path: &Path) -> Result<Self> {
-        let config: Config = read_or_default(&path.join(CONFIG_FILE)).await?;
-        let state: State = read_or_default(&path.join(STATE_FILE)).await?;
+        let config = Config::read_or_default(&path.join(CONFIG_FILE)).await?;
+        let state = State::read_or_default(&path.join(STATE_FILE)).await?;
 
         Ok(Self {
             inner: Arc::new(Inner {
