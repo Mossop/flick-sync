@@ -40,7 +40,7 @@ dependencies = [
  "flate2",
  "futures-core",
  "h2",
- "http",
+ "http 0.2.12",
  "httparse",
  "httpdate",
  "itoa",
@@ -76,7 +76,7 @@ checksum = "13d324164c51f63867b57e73ba5936ea151b8a41a1d23d1031eeb9f70d0236f8"
 dependencies = [
  "bytestring",
  "cfg-if",
- "http",
+ "http 0.2.12",
  "regex",
  "regex-lite",
  "serde",
@@ -875,8 +875,12 @@ dependencies = [
  "actix-web",
  "anyhow",
  "async-std",
+ "bytes",
+ "futures",
+ "http 1.2.0",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -1218,7 +1222,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
- "http",
+ "http 0.2.12",
  "indexmap 2.7.1",
  "slab",
  "tokio",
@@ -1268,12 +1272,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "http"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f16ca2af56261c99fba8bac40a10251ce8188205a4c448fbb745a2e4daa76fea"
+dependencies = [
+ "bytes",
+ "fnv",
+ "itoa",
+]
+
+[[package]]
 name = "http-serde"
 version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f560b665ad9f1572cfcaf034f7fb84338a7ce945216d64a90fd81f046a3caee"
 dependencies = [
- "http",
+ "http 0.2.12",
  "serde",
 ]
 
@@ -1533,7 +1548,7 @@ dependencies = [
  "encoding_rs",
  "event-listener 2.5.3",
  "futures-lite 1.13.0",
- "http",
+ "http 0.2.12",
  "log",
  "mime",
  "once_cell",
@@ -1936,7 +1951,7 @@ source = "git+https://github.com/andrey-yantsen/plex-api.rs.git#40095e032059116c
 dependencies = [
  "enum_dispatch",
  "futures",
- "http",
+ "http 0.2.12",
  "http-serde",
  "inflections",
  "isahc",
