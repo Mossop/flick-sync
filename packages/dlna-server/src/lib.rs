@@ -1,20 +1,24 @@
 #![deny(unreachable_pub)]
 //! A basic implementation of a DLNA media server
 
-use core::net::Ipv4Addr;
 use std::net::IpAddr;
+use std::{
+    collections::HashMap,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
 use actix_web::{App, HttpServer, dev::ServerHandle};
+use getifaddrs::{Interface, InterfaceFlags, getifaddrs};
+use tracing::trace;
+use uuid::Uuid;
 
 use crate::{
     rt::{TaskHandle, spawn},
     ssdp::SsdpTask,
 };
 
-/// The default port to use for SSDP communication
-pub const SSDP_PORT: u16 = 1900;
 /// The default port to use for HTTP communication
-pub const HTTP_PORT: u16 = 1980;
+const HTTP_PORT: u16 = 1980;
 
 mod cds;
 #[cfg_attr(feature = "rt-async", path = "rt/async_std.rs")]
@@ -54,7 +58,7 @@ impl DlnaServer {
     /// starts it listening using the chosen runtime.
     pub async fn new() -> anyhow::Result<Self> {
         Self::builder()
-            .bind(Ipv4Addr::UNSPECIFIED, SSDP_PORT, HTTP_PORT)
+            .bind(Ipv4Addr::UNSPECIFIED, HTTP_PORT)
             .build()
             .await
     }
@@ -69,22 +73,61 @@ impl DlnaServer {
     }
 }
 
-#[derive(Default)]
 /// A builder allowing configuration of the DLNA server.
 pub struct DlnaServerBuilder {
-    binds: Vec<(IpAddr, u16, u16)>,
+    uuid: Uuid,
+    binds: Vec<(IpAddr, u16)>,
+}
+
+impl Default for DlnaServerBuilder {
+    fn default() -> Self {
+        Self {
+            uuid: Uuid::new_v4(),
+            binds: Vec::new(),
+        }
+    }
 }
 
 impl DlnaServerBuilder {
     /// Builds the DLNA server and starts it listening using the chosen runtime.
     pub async fn build(self) -> anyhow::Result<DlnaServer> {
-        let mut http_server = HttpServer::new(App::new);
+        let mut http_server = HttpServer::new(|| App::new().service(cds::device_root));
 
-        let mut ssdp: Vec<SsdpTask> = Vec::new();
-        for (ipaddr, ssdp_port, http_port) in self.binds {
-            ssdp.push(SsdpTask::new(ipaddr, ssdp_port, http_port).await?);
+        let interfaces: Vec<Interface> = getifaddrs()?
+            .filter(|iface| {
+                iface.flags.contains(InterfaceFlags::MULTICAST) && iface.address.is_ipv4()
+                    || iface.index.is_some()
+            })
+            .collect();
 
-            http_server = http_server.bind((ipaddr, http_port))?;
+        let mut bound_interfaces: HashMap<Interface, u16> = HashMap::new();
+
+        for (ipaddr, http_port) in self.binds {
+            let is_unspecified = match ipaddr {
+                IpAddr::V4(ipv4) => ipv4 == Ipv4Addr::UNSPECIFIED,
+                IpAddr::V6(ipv4) => ipv4 == Ipv6Addr::UNSPECIFIED,
+            };
+
+            let new_interfaces = interfaces
+                .iter()
+                .filter_map(|iface| {
+                    if bound_interfaces.contains_key(iface) {
+                        None
+                    } else if (is_unspecified && ipaddr.is_ipv4() == iface.address.is_ipv4())
+                        || ipaddr == iface.address
+                    {
+                        Some(iface.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<Interface>>();
+
+            for iface in new_interfaces {
+                trace!("Binding to {}", iface.address);
+                http_server = http_server.bind((iface.address, http_port))?;
+                bound_interfaces.insert(iface, http_port);
+            }
         }
 
         let server = http_server.run();
@@ -93,7 +136,9 @@ impl DlnaServerBuilder {
         spawn(server);
 
         let mut task_handles = TaskHandles::default();
-        for ssdp_task in ssdp {
+
+        for (iface, http_port) in bound_interfaces.into_iter() {
+            let ssdp_task = SsdpTask::new(self.uuid, iface.into(), http_port).await;
             task_handles.add(spawn(ssdp_task.run()));
         }
 
@@ -103,12 +148,18 @@ impl DlnaServerBuilder {
         })
     }
 
-    /// Binds to an IP address. You must give both the SSDP (UDP) port and HTTP (tcp) ports to
-    /// use for this address.
+    /// Sets a specific UUID. If not called a unique ID is generated everytime a new server is
+    /// created.
+    pub fn uuid(mut self, uuid: Uuid) -> Self {
+        self.uuid = uuid;
+        self
+    }
+
+    /// Binds to an IP address. You must give the HTTP port to use for this address.
     /// This can be called multiple times to bind to different addresses, most commonly to bind
     /// to IPv4 and IPv6 addresses.
-    pub fn bind<A: Into<IpAddr>>(mut self, addr: A, ssdp_port: u16, http_port: u16) -> Self {
-        self.binds.push((addr.into(), ssdp_port, http_port));
+    pub fn bind<A: Into<IpAddr>>(mut self, addr: A, http_port: u16) -> Self {
+        self.binds.push((addr.into(), http_port));
         self
     }
 }

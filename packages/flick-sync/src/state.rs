@@ -831,7 +831,7 @@ pub(crate) struct ServerState {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct State {
     schema: SchemaVersion<SCHEMA_VERSION>,
-    pub(crate) client_id: String,
+    pub(crate) client_id: Uuid,
     #[serde(default)]
     pub(crate) servers: HashMap<String, ServerState>,
 }
@@ -911,7 +911,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             schema: Default::default(),
-            client_id: Uuid::new_v4().braced().to_string(),
+            client_id: Uuid::new_v4(),
             servers: Default::default(),
         }
     }

@@ -28,6 +28,7 @@ use tokio::{
     sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 pub use wrappers::*;
 
 use crate::{config::H264Profile, schema::MigratableStore};
@@ -129,7 +130,7 @@ impl Inner {
                     .clone()
                     .unwrap_or_else(|| "Generic".to_string()),
             )
-            .set_x_plex_client_identifier(state.client_id.clone())
+            .set_x_plex_client_identifier(state.client_id)
             .set_x_plex_product("FlickSync")
             .build()
             .unwrap()
@@ -142,6 +143,10 @@ pub struct FlickSync {
 }
 
 impl FlickSync {
+    pub async fn client_id(&self) -> Uuid {
+        self.inner.state.read().await.client_id
+    }
+
     pub async fn max_downloads(&self) -> usize {
         let config = self.inner.config.read().await;
         config.max_downloads.unwrap_or(2)
