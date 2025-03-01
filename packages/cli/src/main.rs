@@ -12,6 +12,7 @@ use tokio::fs::{metadata, read_dir};
 use tracing::{error, trace};
 
 mod console;
+mod dlna;
 mod error;
 mod server;
 mod sync;
@@ -21,7 +22,7 @@ use server::{Add, Login, Rebuild, Remove};
 use util::{List, Stats};
 
 pub use crate::console::Console;
-use crate::sync::BuildMetadata;
+use crate::{dlna::Dlna, sync::BuildMetadata};
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
@@ -47,6 +48,8 @@ pub enum Command {
     Rebuild,
     /// Rebuilds metadata files.
     BuildMetadata,
+    /// Serves downloaded media over DLNA.
+    Dlna,
 }
 
 #[enum_dispatch(Command)]

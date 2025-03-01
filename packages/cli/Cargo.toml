@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 futures = "0.3.28"
 flick-sync = { path = "../flick-sync" }
+dlna-server = { path = "../dlna-server" }
 clap = { version = "4.1.13", features = ["derive", "env"] }
 console = "0.15.5"
 dialoguer = "0.11.0"
@@ -20,3 +21,5 @@ url = "2.3.1"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 enum_dispatch = "0.3.11"
 tokio = { version = "1.29.1", features = ["rt", "macros", "rt-multi-thread"] }
+anyhow = "1.0.96"
+ctrlc = "3.4.5"

@@ -1,0 +1,16 @@
+[package]
+name = "dlna-server"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["rt-tokio"]
+rt-tokio = ["tokio/rt"]
+rt-async = ["dep:async-std"]
+
+[dependencies]
+tokio = { version = "1.43.0", features = ["net"] }
+tokio-util = { version = "0.7.13", features = ["net", "codec"] }
+anyhow = "1.0.96"
+actix-web = "4.9.0"
+async-std = { version = "1.13.0", optional = true }

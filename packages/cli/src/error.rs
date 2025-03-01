@@ -26,6 +26,11 @@ pub enum Error {
     UnsupportedType(String),
     #[error("Unknown server {0}")]
     UnknownServer(String),
+    #[error("{source:?}")]
+    Any {
+        #[from]
+        source: anyhow::Error,
+    },
     #[error("{0}")]
     Generic(String),
     #[error("Unknown error")]
