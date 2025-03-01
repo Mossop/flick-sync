@@ -1,3 +1,4 @@
+use core::ops::Deref;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -8,12 +9,6 @@ use std::{
 };
 
 use async_recursion::async_recursion;
-use async_std::sync::Mutex;
-use async_std::{
-    fs::{read_dir, remove_dir, remove_dir_all, remove_file},
-    stream::StreamExt,
-};
-use core::ops::Deref;
 use plex_api::{
     MyPlexBuilder,
     device::DeviceConnection,
@@ -23,7 +18,10 @@ use plex_api::{
     },
     media_container::server::library::MetadataType,
 };
-use tokio::sync::{Semaphore, SemaphorePermit};
+use tokio::{
+    fs::{read_dir, remove_dir, remove_dir_all, remove_file},
+    sync::{Mutex, Semaphore, SemaphorePermit},
+};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
@@ -83,9 +81,9 @@ async fn prune_directory(path: &Path, expected_files: &HashSet<PathBuf>) -> bool
     let mut should_prune = true;
 
     loop {
-        match reader.next().await {
-            Some(Ok(entry)) => {
-                let path: PathBuf = entry.path().into();
+        match reader.next_entry().await {
+            Ok(Some(entry)) => {
+                let path: PathBuf = entry.path();
                 match entry.file_type().await {
                     Ok(file_type) => {
                         if file_type.is_dir() {
@@ -113,10 +111,10 @@ async fn prune_directory(path: &Path, expected_files: &HashSet<PathBuf>) -> bool
                     }
                 }
             }
-            None => {
+            Ok(None) => {
                 break;
             }
-            Some(Err(e)) => {
+            Err(e) => {
                 error!(error=?e, path=%path.display(), "Failed to read directory");
                 return false;
             }

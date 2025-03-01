@@ -9,21 +9,18 @@ use std::{
     time::Duration,
 };
 
-use async_std::{
-    fs::{File, OpenOptions, create_dir_all},
-    io::BufWriter,
-};
-use async_std::{
-    fs::{metadata, remove_file},
-    task::sleep,
-};
-use futures::{AsyncWrite, AsyncWriteExt};
+use futures::io::AsyncWrite;
 use pathdiff::diff_paths;
 use pin_project::pin_project;
 use plex_api::{
     library::{self, Item, MediaItem, MetadataItem},
     media_container::server::library::ContainerFormat,
     transcode::TranscodeStatus,
+};
+use tokio::{
+    fs::{File, OpenOptions, create_dir_all, metadata, remove_file},
+    io::{AsyncWriteExt, BufWriter},
+    time::sleep,
 };
 use tracing::{debug, error, info, instrument, trace, warn};
 use xml::{EmitterConfig, writer::XmlEvent};
@@ -34,7 +31,7 @@ use crate::{
         CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, RelatedFileState,
         SeasonState, ServerState, ShowState, VideoDetail, VideoPartState, VideoState,
     },
-    util::safe,
+    util::{AsyncWriteAdapter, safe},
 };
 
 type EventWriter = xml::writer::EventWriter<std::fs::File>;
@@ -153,7 +150,7 @@ macro_rules! thumbnail_methods {
                     create_dir_all(parent).await?;
                 }
 
-                let file = File::create(&target).await?;
+                let file = AsyncWriteAdapter::new(File::create(&target).await?);
                 server
                     .transcode_artwork(&image, 320, 320, Default::default(), file)
                     .await?;
@@ -274,7 +271,7 @@ async fn write_playlist(root: &Path, playlist_path: &Path, videos: Vec<Video>) -
     }
 
     writer.flush().await?;
-    writer.close().await?;
+    writer.shutdown().await?;
 
     Ok(())
 }
@@ -883,7 +880,7 @@ impl VideoPart {
         let writer = WriterProgress {
             offset,
             size: part.metadata().size.unwrap(),
-            writer: file,
+            writer: AsyncWriteAdapter::new(file),
             progress: &mut progress,
         };
         info!(path=?path, offset, "Downloading source file");
@@ -940,7 +937,7 @@ impl VideoPart {
         let writer = WriterProgress {
             offset: 0,
             size: stats.size as u64,
-            writer: file,
+            writer: AsyncWriteAdapter::new(file),
             progress: &mut progress,
         };
         info!(path=?path, "Downloading transcoded video");

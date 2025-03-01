@@ -1,29 +1,29 @@
-use std::collections::HashMap;
-use std::fmt;
-use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
-
-use crate::{
-    Error, Result,
-    schema::{JsonObject, JsonUtils, MigratableStore, SchemaVersion},
+use std::{
+    collections::HashMap,
+    fmt,
+    io::ErrorKind,
+    path::{Path, PathBuf},
 };
-use async_std::{fs, process::Command};
+
 use plex_api::{
     Server,
-    library::{Collection, MetadataItem, Part, Playlist, Season, Show},
+    library::{Collection, FromMetadata, MediaItem, MetadataItem, Part, Playlist, Season, Show},
     media_container::server::library::{Metadata, MetadataType},
-};
-use plex_api::{
-    library::{FromMetadata, MediaItem},
     transcode::TranscodeStatus,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tempfile::NamedTempFile;
 use time::{Date, OffsetDateTime};
+use tokio::{fs, process::Command};
 use tracing::{debug, error, info, instrument, trace, warn};
 use typeshare::typeshare;
 use uuid::Uuid;
+
+use crate::{
+    Error, Result,
+    schema::{JsonObject, JsonUtils, MigratableStore, SchemaVersion},
+};
 
 const SCHEMA_VERSION: u64 = 1;
 

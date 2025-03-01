@@ -4,12 +4,12 @@ use std::{
     path::Path,
 };
 
-use async_std::fs::{read_to_string, write};
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{DeserializeOwned, Error as _, Unexpected},
 };
 use serde_json::{Map, Value, from_str, from_value, to_string_pretty};
+use tokio::fs::{read_to_string, write};
 use tracing::error;
 
 use crate::Error;

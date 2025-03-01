@@ -14,14 +14,6 @@ mod state;
 mod util;
 mod wrappers;
 
-use async_std::{
-    fs::{read_dir, remove_dir_all, remove_file, write},
-    sync::RwLockReadGuard,
-};
-use async_std::{
-    stream::StreamExt,
-    sync::{Mutex, RwLock, RwLockWriteGuard},
-};
 pub use config::ServerConnection;
 use config::{Config, ServerConfig, TranscodeProfile};
 pub use error::Error;
@@ -31,8 +23,11 @@ use plex_api::{HttpClient, HttpClientBuilder, transcode::VideoTranscodeOptions};
 use serde_json::to_string_pretty;
 pub use server::{ItemType, Server, SyncItemInfo};
 use state::{ServerState, State};
+use tokio::{
+    fs::{read_dir, remove_dir_all, remove_file, write},
+    sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
+};
 use tracing::{debug, info, warn};
-
 pub use wrappers::*;
 
 use crate::{config::H264Profile, schema::MigratableStore};
@@ -261,8 +256,8 @@ impl FlickSync {
         };
 
         loop {
-            match reader.next().await {
-                Some(Ok(entry)) => {
+            match reader.next_entry().await {
+                Ok(Some(entry)) => {
                     if let Some(str) = entry.file_name().to_str() {
                         if str == STATE_FILE || str == CONFIG_FILE || servers.contains(str) {
                             continue;
@@ -297,10 +292,10 @@ impl FlickSync {
                         }
                     }
                 }
-                None => {
+                Ok(None) => {
                     break;
                 }
-                Some(Err(e)) => {
+                Err(e) => {
                     tracing::error!(error=?e, path=%root.display(), "Failed to read directory");
                     break;
                 }

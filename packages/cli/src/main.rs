@@ -3,15 +3,12 @@ use std::{
     path::PathBuf,
 };
 
-use async_std::{
-    fs::{metadata, read_dir},
-    stream::StreamExt,
-};
 use clap::{Parser, Subcommand};
 use enum_dispatch::enum_dispatch;
 use error::{Error, err};
 use flick_sync::{CONFIG_FILE, FlickSync, STATE_FILE, Server};
 use sync::{Prune, Sync};
+use tokio::fs::{metadata, read_dir};
 use tracing::{error, trace};
 
 mod console;
@@ -20,10 +17,11 @@ mod server;
 mod sync;
 mod util;
 
-pub use crate::console::Console;
-use crate::sync::BuildMetadata;
 use server::{Add, Login, Rebuild, Remove};
 use util::{List, Stats};
+
+pub use crate::console::Console;
+use crate::sync::BuildMetadata;
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
@@ -123,8 +121,7 @@ async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf> {
 
     trace!("No state file, checking for non-config files in a new store");
     let mut reader = read_dir(&path).await?;
-    while let Some(result) = reader.next().await {
-        let entry = result?;
+    while let Some(entry) = reader.next_entry().await? {
         let file_name = entry.file_name();
         let name = match file_name.to_str() {
             Some(s) => s,
@@ -156,7 +153,7 @@ async fn wrapped_main(args: Args, console: Console) -> Result {
     args.command.run(flick_sync, console).await
 }
 
-#[async_std::main]
+#[tokio::main]
 async fn main() -> Result {
     let args: Args = Args::parse();
 
