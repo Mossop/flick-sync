@@ -7,12 +7,13 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 
-use actix_web::{App, HttpServer, dev::ServerHandle};
+use actix_web::{App, HttpServer, dev::ServerHandle, middleware::from_fn, web::Data};
 use getifaddrs::{Interface, InterfaceFlags, getifaddrs};
-use tracing::trace;
+use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
+    cds::HttpAppData,
     rt::{TaskHandle, spawn},
     ssdp::SsdpTask,
 };
@@ -28,6 +29,12 @@ mod ssdp;
 
 #[cfg(not(any(feature = "rt-tokio", feature = "rt-async")))]
 compile_error!("An async runtime must be selected");
+
+pub trait DlnaRequestHandler
+where
+    Self: Send + Sync,
+{
+}
 
 #[derive(Default)]
 struct TaskHandles {
@@ -56,15 +63,19 @@ pub struct DlnaServer {
 impl DlnaServer {
     /// Builds a default DLNA server listing on all interfaces on IPv4 and
     /// starts it listening using the chosen runtime.
-    pub async fn new() -> anyhow::Result<Self> {
-        Self::builder()
+    pub async fn new<H: DlnaRequestHandler + 'static>(handler: H) -> anyhow::Result<Self> {
+        Self::builder(handler)
             .bind(Ipv4Addr::UNSPECIFIED, HTTP_PORT)
             .build()
             .await
     }
 
-    pub fn builder() -> DlnaServerBuilder {
-        DlnaServerBuilder::default()
+    pub fn builder<H: DlnaRequestHandler + 'static>(handler: H) -> DlnaServerBuilder {
+        DlnaServerBuilder {
+            uuid: Uuid::new_v4(),
+            binds: Vec::new(),
+            handler: Box::new(handler),
+        }
     }
 
     pub async fn shutdown(self) {
@@ -77,21 +88,26 @@ impl DlnaServer {
 pub struct DlnaServerBuilder {
     uuid: Uuid,
     binds: Vec<(IpAddr, u16)>,
-}
-
-impl Default for DlnaServerBuilder {
-    fn default() -> Self {
-        Self {
-            uuid: Uuid::new_v4(),
-            binds: Vec::new(),
-        }
-    }
+    handler: Box<dyn DlnaRequestHandler>,
 }
 
 impl DlnaServerBuilder {
     /// Builds the DLNA server and starts it listening using the chosen runtime.
     pub async fn build(self) -> anyhow::Result<DlnaServer> {
-        let mut http_server = HttpServer::new(|| App::new().service(cds::device_root));
+        let app_data = Data::new(HttpAppData {
+            uuid: self.uuid,
+            handler: self.handler,
+        });
+
+        let mut http_server = HttpServer::new(move || {
+            App::new()
+                .app_data(app_data.clone())
+                .wrap(from_fn(cds::middleware::middleware))
+                .service(cds::device_root)
+                .service(cds::connection_manager)
+                .service(cds::content_directory)
+                .service(cds::services())
+        });
 
         let interfaces: Vec<Interface> = getifaddrs()?
             .filter(|iface| {
@@ -124,7 +140,7 @@ impl DlnaServerBuilder {
                 .collect::<Vec<Interface>>();
 
             for iface in new_interfaces {
-                trace!("Binding to {}", iface.address);
+                debug!("Binding to {}", iface.address);
                 http_server = http_server.bind((iface.address, http_port))?;
                 bound_interfaces.insert(iface, http_port);
             }

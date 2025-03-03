@@ -879,11 +879,15 @@ dependencies = [
  "futures",
  "getifaddrs",
  "http 1.2.0",
+ "mime",
+ "serde",
  "socket2",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-util",
  "tracing",
  "uuid",
+ "xml",
 ]
 
 [[package]]
