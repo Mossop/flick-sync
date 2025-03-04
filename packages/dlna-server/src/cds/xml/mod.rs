@@ -18,7 +18,7 @@ use actix_web::{
 use bytes::Bytes;
 use mime::Mime;
 use thiserror::Error;
-use tracing::error;
+use tracing::{debug, error};
 use xml::{
     EmitterConfig, EventReader, EventWriter,
     common::XmlVersion,
@@ -540,16 +540,19 @@ where
 
     type Future = Pin<Box<dyn Future<Output = Result<Self, Self::Error>>>>;
 
-    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
+    fn from_request(req: &HttpRequest, payload: &mut Payload) -> Self::Future {
         let req = req.clone();
+        let mut payload = payload.take();
 
         Box::pin(async move {
             let content_type = req.content_type();
+            debug!(content_type);
             if content_type != "application/xml" && content_type != "text/xml" {
                 return Err(format!("Unexpected content-type: {content_type}").into());
             }
 
-            let bytes = Bytes::extract(&req).await?;
+            let bytes = Bytes::from_request(&req, &mut payload).await?;
+            debug!(bytes = bytes.len());
 
             let mut reader = XmlReader::new(bytes.as_ref());
 

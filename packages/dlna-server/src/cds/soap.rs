@@ -8,7 +8,7 @@ use actix_web::{
 };
 use mime::Mime;
 use serde::{Serialize, de::DeserializeOwned};
-use tracing::{Instrument, Level, debug, error, span, trace};
+use tracing::{Instrument, Level, error, span, trace};
 
 use crate::{
     HttpAppData,
