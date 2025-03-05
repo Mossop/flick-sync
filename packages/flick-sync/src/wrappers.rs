@@ -1126,6 +1126,10 @@ impl Episode {
     metadata_methods!();
     parent!(season, Season, episode_state().season);
 
+    pub fn server(&self) -> Server {
+        self.server.clone()
+    }
+
     pub async fn write_metadata(&self, writer: &mut EventWriter) -> Result {
         let season = self.season().await.with_state(|ss| ss.index).await;
         let show = self.show().await.with_state(|ss| ss.title.clone()).await;
@@ -1256,6 +1260,10 @@ impl Movie {
     metadata_methods!();
     parent!(library, MovieLibrary, movie_state().library);
 
+    pub fn server(&self) -> Server {
+        self.server.clone()
+    }
+
     pub async fn write_metadata(&self, writer: &mut EventWriter) -> Result {
         self.with_state(|state| {
             writer.write(XmlEvent::start_element("movie"))?;
@@ -1366,6 +1374,20 @@ impl Video {
         }
     }
 
+    pub fn server(&self) -> Server {
+        match self {
+            Self::Movie(v) => v.server(),
+            Self::Episode(v) => v.server(),
+        }
+    }
+
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Movie(v) => &v.id,
+            Self::Episode(v) => &v.id,
+        }
+    }
+
     pub async fn title(&self) -> String {
         match self {
             Self::Movie(v) => v.title().await,
@@ -1418,6 +1440,18 @@ state_wrapper!(Playlist, PlaylistState, playlists);
 wrapper_builders!(Playlist, PlaylistState);
 
 impl Playlist {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn server(&self) -> Server {
+        self.server.clone()
+    }
+
+    pub async fn title(&self) -> String {
+        self.with_state(|ps| ps.title.clone()).await
+    }
+
     pub async fn videos(&self) -> Vec<Video> {
         self.with_server_state(|ss| {
             let ps = ss.playlists.get(&self.id).unwrap();
@@ -1622,6 +1656,14 @@ wrapper_builders!(MovieLibrary, LibraryState);
 impl MovieLibrary {
     children!(collections, collections, MovieCollection, library);
 
+    pub async fn title(&self) -> String {
+        self.with_state(|ls| ls.title.clone()).await
+    }
+
+    pub fn server(&self) -> Server {
+        self.server.clone()
+    }
+
     pub async fn movies(&self) -> Vec<Movie> {
         self.with_server_state(|ss| {
             ss.videos
@@ -1661,6 +1703,14 @@ wrapper_builders!(ShowLibrary, LibraryState);
 impl ShowLibrary {
     children!(collections, collections, ShowCollection, library);
     children!(shows, shows, Show, library);
+
+    pub async fn title(&self) -> String {
+        self.with_state(|ls| ls.title.clone()).await
+    }
+
+    pub fn server(&self) -> Server {
+        self.server.clone()
+    }
 }
 
 #[derive(Clone)]
@@ -1670,6 +1720,27 @@ pub enum Library {
 }
 
 impl Library {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Movie(l) => &l.id,
+            Self::Show(l) => &l.id,
+        }
+    }
+
+    pub fn server(&self) -> Server {
+        match self {
+            Self::Movie(l) => l.server(),
+            Self::Show(l) => l.server(),
+        }
+    }
+
+    pub async fn title(&self) -> String {
+        match self {
+            Self::Movie(l) => l.title().await,
+            Self::Show(l) => l.title().await,
+        }
+    }
+
     pub(crate) fn wrap(server: &Server, state: &LibraryState) -> Self {
         match state.library_type {
             LibraryType::Movie => Self::Movie(MovieLibrary::wrap(server, state)),

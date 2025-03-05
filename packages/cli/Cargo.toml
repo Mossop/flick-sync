@@ -24,3 +24,4 @@ tokio = { version = "1.29.1", features = ["rt", "macros", "rt-multi-thread"] }
 anyhow = "1.0.96"
 ctrlc = "3.4.5"
 async-trait = "0.1.87"
+mime = "0.3.17"

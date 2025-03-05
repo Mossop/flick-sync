@@ -1,5 +1,8 @@
-use std::io::Write;
+use std::{io::Write, time::Duration};
 
+use actix_web::http::StatusCode;
+use mime::Mime;
+use url::Url;
 use uuid::Uuid;
 
 use crate::cds::{
@@ -16,10 +19,53 @@ const NS_UPNP: &str = "urn:schemas-upnp-org:metadata-1-0/upnp/";
 const NS_DLNA: &str = "urn:schemas-dlna-org:metadata-1-0/";
 
 #[derive(Debug)]
+pub enum UpnpError {
+    InvalidAction,
+    InvalidArgs,
+    ActionFailed,
+    ArgumentInvalid,
+}
+
+impl UpnpError {
+    pub(crate) fn status_code(&self) -> StatusCode {
+        match self {
+            UpnpError::ActionFailed => StatusCode::INTERNAL_SERVER_ERROR,
+            _ => StatusCode::BAD_REQUEST,
+        }
+    }
+
+    pub(crate) fn status(&self) -> u16 {
+        match self {
+            UpnpError::InvalidAction => 401,
+            UpnpError::InvalidArgs => 402,
+            UpnpError::ActionFailed => 501,
+            UpnpError::ArgumentInvalid => 600,
+        }
+    }
+
+    pub fn unknown_object() -> Self {
+        Self::ArgumentInvalid
+    }
+}
+
+impl From<WriterError> for UpnpError {
+    fn from(_: WriterError) -> Self {
+        Self::ActionFailed
+    }
+}
+
+/// Represents a container on the server.
+#[derive(Debug)]
 pub struct Container {
+    /// The unique identifier for the container. The format is up to the caller however the value
+    /// `"0"` is used to represent the root container and the value `"-1"` represents its parent.
     pub id: String,
+    /// The parent identifier of this container, see the notes for `id`. Must be `"-1"` if the value
+    /// for `id` is `"0"`
     pub parent_id: String,
-    pub child_count: Option<u32>,
+    /// Optionally provide the number of children of this container.
+    pub child_count: Option<usize>,
+    /// The title of this container.
     pub title: String,
 }
 
@@ -44,10 +90,42 @@ impl<W: Write> ToXml<W> for Container {
 }
 
 #[derive(Debug)]
-pub struct Item {
+pub struct Resource {
     pub id: String,
+    pub mime: Mime,
+    pub size: Option<u64>,
+    pub duration: Option<Duration>,
+}
+
+impl<W: Write> ToXml<W> for Resource {
+    fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
+        let base = writer.base();
+        let uri = base.join(&format!("/resource/{}", self.id)).unwrap();
+
+        let mut builder = writer
+            .element_ns((NS_DIDL, "res"))
+            .attr("protocolInfo", format!("http-get:*:{}:*", self.mime));
+
+        if let Some(size) = self.size {
+            builder = builder.attr("size", size);
+        }
+
+        builder.text(uri)
+    }
+}
+
+/// Represents a media item on the server.
+#[derive(Debug)]
+pub struct Item {
+    /// The unique identifier for the container. The format is up to the caller however the value
+    /// `"0"` is used to represent the root container and the value `"-1"` represents its parent.
+    pub id: String,
+    /// The parent identifier of this item, see the notes for `id`. Must be `"-1"` if the value
+    /// for `id` is `"0"`
     pub parent_id: String,
+    /// The title of this item.
     pub title: String,
+    pub resources: Vec<Resource>,
 }
 
 impl<W: Write> ToXml<W> for Item {
@@ -59,7 +137,15 @@ impl<W: Write> ToXml<W> for Item {
             .attr("restricted", "1")
             .contents(|writer| {
                 writer.element_ns((NS_DC, "title")).text(&self.title)?;
-                writer.element_ns((NS_UPNP, "class")).text("object.item")
+                writer
+                    .element_ns((NS_UPNP, "class"))
+                    .text("object.item.videoItem")?;
+
+                for resource in &self.resources {
+                    resource.write_xml(writer)?;
+                }
+
+                Ok(())
             })
     }
 }
@@ -80,17 +166,37 @@ impl<W: Write> ToXml<W> for Object {
 }
 
 #[derive(Debug)]
-pub(crate) struct BrowseResult {
-    objects: Vec<Object>,
+pub(crate) struct DidlDocument<T> {
+    base: Url,
+    objects: Vec<T>,
 }
 
-impl From<Vec<Object>> for BrowseResult {
-    fn from(objects: Vec<Object>) -> Self {
-        Self { objects }
+impl<T> DidlDocument<T> {
+    pub(crate) fn new(base: Url, objects: Vec<T>) -> Self {
+        Self { base, objects }
     }
 }
 
-impl<W: Write> ToXml<W> for BrowseResult {
+impl<T> TryInto<String> for DidlDocument<T>
+where
+    T: for<'a> ToXml<&'a mut Vec<u8>>,
+{
+    type Error = WriterError;
+
+    fn try_into(self) -> Result<String, Self::Error> {
+        let mut sink = Vec::<u8>::new();
+
+        XmlWriter::write_document(&self, &mut sink, Some(self.base.clone()))?;
+
+        Ok(String::from_utf8(sink)?)
+    }
+}
+
+impl<W, T> ToXml<W> for DidlDocument<T>
+where
+    W: Write,
+    T: ToXml<W>,
+{
     fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
         writer
             .element_ns((NS_DIDL, "DIDL-Lite"))

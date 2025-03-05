@@ -17,6 +17,7 @@ use actix_web::{
 use bytes::Bytes;
 use thiserror::Error;
 use tracing::error;
+use url::Url;
 use xml::{
     EmitterConfig, EventReader, EventWriter,
     common::XmlVersion,
@@ -33,10 +34,15 @@ type Map<K, V> = std::collections::BTreeMap<K, V>;
 
 #[derive(Debug, Error)]
 pub(crate) enum WriterError {
-    #[error("{source}")]
+    #[error("Invalid XML: {source}")]
     Xml {
         #[from]
         source: xml::writer::Error,
+    },
+    #[error("Invalid string: {source}")]
+    InvalidString {
+        #[from]
+        source: std::string::FromUtf8Error,
     },
     #[error("{message}")]
     Custom { message: String },
@@ -361,12 +367,17 @@ impl<W: Write> ElementBuilder<'_, W> {
 }
 
 pub(crate) struct XmlWriter<W: Write> {
+    base: Option<Url>,
     writer: EventWriter<W>,
     known_prefixes: Map<String, String>,
 }
 
 impl<W: Write> XmlWriter<W> {
-    pub(crate) fn write_document<X: ToXml<W>>(source: &X, sink: W) -> Result<(), WriterError> {
+    pub(crate) fn write_document<X: ToXml<W>>(
+        source: &X,
+        sink: W,
+        base: Option<Url>,
+    ) -> Result<(), WriterError> {
         let mut writer = EmitterConfig::new()
             .perform_indent(true)
             .create_writer(sink);
@@ -378,9 +389,14 @@ impl<W: Write> XmlWriter<W> {
         })?;
 
         source.write_xml(&mut XmlWriter {
+            base,
             writer,
             known_prefixes: Map::new(),
         })
+    }
+
+    pub(crate) fn base(&self) -> &Url {
+        self.base.as_ref().unwrap()
     }
 
     pub(crate) fn serialize<S: Serialize>(
@@ -478,10 +494,10 @@ where
 {
     type Body = BoxBody;
 
-    fn respond_to(self, _req: &HttpRequest) -> HttpResponse<Self::Body> {
+    fn respond_to(self, req: &HttpRequest) -> HttpResponse<Self::Body> {
         let mut body = Vec::<u8>::new();
 
-        if let Err(e) = XmlWriter::write_document(&self.0, &mut body) {
+        if let Err(e) = XmlWriter::write_document(&self.0, &mut body, Some(req.full_url())) {
             error!(error=%e, "Failed to serialize XML document");
             return HttpResponseBuilder::new(StatusCode::INTERNAL_SERVER_ERROR).finish();
         }
@@ -503,7 +519,7 @@ where
     {
         let mut body = Vec::<u8>::new();
 
-        if let Err(e) = XmlWriter::write_document(&self.0, &mut body) {
+        if let Err(e) = XmlWriter::write_document(&self.0, &mut body, None) {
             return Err(S::Error::custom(format!(
                 "Failed to serialize XML document: {}",
                 e
@@ -625,7 +641,7 @@ mod test {
         F: for<'a> Fn(&mut XmlWriter<&'a mut Vec<u8>>) -> Result<(), WriterError>,
     {
         let mut body = Vec::<u8>::new();
-        XmlWriter::write_document(&source, &mut body).unwrap();
+        XmlWriter::write_document(&source, &mut body, None).unwrap();
         body.push(b'\n');
         String::from_utf8(body).unwrap()
     }

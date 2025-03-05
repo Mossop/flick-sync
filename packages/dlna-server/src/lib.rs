@@ -24,7 +24,7 @@ use crate::{
     ssdp::SsdpTask,
 };
 
-pub use cds::upnp::{Container, Item, Object};
+pub use cds::upnp::{Container, Item, Object, Resource, UpnpError};
 
 /// The default port to use for HTTP communication
 const HTTP_PORT: u16 = 1980;
@@ -43,7 +43,10 @@ pub trait DlnaRequestHandler
 where
     Self: Send + Sync + 'static,
 {
-    async fn list_children(&self, parent_id: &str) -> Vec<Object>;
+    /// Get the metadata for the object with the given ID.
+    async fn get_object(&self, object_id: &str) -> Result<Object, UpnpError>;
+    /// Get the metadata for the objects that are direct children of the object with the given ID.
+    async fn list_children(&self, parent_id: &str) -> Result<Vec<Object>, UpnpError>;
 }
 
 #[derive(Default)]

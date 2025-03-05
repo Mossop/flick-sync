@@ -899,6 +899,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "url",
  "uuid",
  "xml",
 ]
@@ -1042,6 +1043,7 @@ dependencies = [
  "flick-sync",
  "futures",
  "indicatif",
+ "mime",
  "thiserror 2.0.11",
  "tokio",
  "tracing",

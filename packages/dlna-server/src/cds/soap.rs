@@ -11,12 +11,16 @@ use actix_web::{
 use mime::Mime;
 use serde::{Serialize, de::DeserializeOwned};
 use tracing::{Instrument, Level, error, field, span};
+use url::Url;
 
 use crate::{
     DlnaRequestHandler, HttpAppData,
-    cds::xml::{
-        ClientXmlError, Element, FromXml, ToXml, WriterError, Xml, XmlElement, XmlName, XmlReader,
-        XmlWriter,
+    cds::{
+        upnp::UpnpError,
+        xml::{
+            ClientXmlError, Element, FromXml, ToXml, WriterError, Xml, XmlElement, XmlName,
+            XmlReader, XmlWriter,
+        },
     },
 };
 
@@ -79,6 +83,15 @@ pub(crate) struct ResponseWrapper<R: Serialize> {
     response: SoapResult<R>,
 }
 
+impl ResponseWrapper<()> {
+    pub(crate) fn error(err: UpnpError) -> Self {
+        Self {
+            name: ("", "").into(),
+            response: Err(err),
+        }
+    }
+}
+
 impl<R, W> ToXml<W> for ResponseWrapper<R>
 where
     W: Write,
@@ -109,18 +122,15 @@ where
 {
     type Body = BoxBody;
 
-    fn respond_to(self, _req: &HttpRequest) -> HttpResponse<Self::Body> {
+    fn respond_to(self, req: &HttpRequest) -> HttpResponse<Self::Body> {
         let mut body = Vec::<u8>::new();
 
         let status_code = match &self.response {
             Ok(_) => StatusCode::OK,
-            Err(error) => match error.status() {
-                400..500 => StatusCode::BAD_REQUEST,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            },
+            Err(error) => error.status_code(),
         };
 
-        if let Err(e) = XmlWriter::write_document(&self, &mut body) {
+        if let Err(e) = XmlWriter::write_document(&self, &mut body, Some(req.full_url())) {
             error!(error=%e, "Failed to serialize XML document");
             return HttpResponseBuilder::new(StatusCode::INTERNAL_SERVER_ERROR).finish();
         }
@@ -186,8 +196,13 @@ where
 
         span.record("arguments", format!("{:?}", envelope.action()));
 
+        let context = RequestContext {
+            base: request.full_url(),
+            handler: &*app_data.handler,
+        };
+
         let response = envelope
-            .execute(&*app_data.handler)
+            .execute(context)
             .instrument(span.clone())
             .await
             .inspect_err(|e| error!(parent: &span, error=?e));
@@ -227,6 +242,11 @@ impl fmt::Display for ArgDirection {
 
 pub(crate) type SoapArgument = (&'static str, ArgDirection);
 
+pub(crate) struct RequestContext<'a, H: DlnaRequestHandler + ?Sized> {
+    pub(crate) base: Url,
+    pub(crate) handler: &'a H,
+}
+
 pub(crate) trait SoapAction {
     type Response;
 
@@ -234,7 +254,7 @@ pub(crate) trait SoapAction {
     fn name() -> &'static str;
     async fn execute<H: DlnaRequestHandler + ?Sized>(
         &self,
-        handler: &H,
+        context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response>;
     fn arguments() -> &'static [SoapArgument];
 
@@ -279,23 +299,6 @@ pub(crate) trait SoapAction {
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum UpnpError {
-    InvalidAction,
-    InvalidArgs,
-    ActionFailed,
-}
-
-impl UpnpError {
-    fn status(&self) -> u16 {
-        match self {
-            UpnpError::InvalidAction => 401,
-            UpnpError::InvalidArgs => 402,
-            UpnpError::ActionFailed => 501,
-        }
-    }
-}
-
 impl<W: Write> ToXml<W> for UpnpError {
     fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
         let status = self.status();
@@ -323,14 +326,14 @@ impl<W: Write> ToXml<W> for UpnpError {
 
 pub(crate) type SoapResult<T> = Result<T, UpnpError>;
 
-impl Responder for UpnpError {
-    type Body = <ResponseWrapper<()> as Responder>::Body;
+// impl Responder for UpnpError {
+//     type Body = <ResponseWrapper<()> as Responder>::Body;
 
-    fn respond_to(self, req: &HttpRequest) -> HttpResponse<Self::Body> {
-        let wrapper = ResponseWrapper::<()> {
-            name: ("", "").into(),
-            response: Err(self),
-        };
-        wrapper.respond_to(req)
-    }
-}
+//     fn respond_to(self, req: &HttpRequest) -> HttpResponse<Self::Body> {
+//         let wrapper = ResponseWrapper::<()> {
+//             name: ("", "").into(),
+//             response: Err(self),
+//         };
+//         wrapper.respond_to(req)
+//     }
+// }

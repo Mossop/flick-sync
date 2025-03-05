@@ -8,10 +8,10 @@ use serde_with::serde_as;
 use uuid::Uuid;
 
 use crate::{
-    DlnaRequestHandler,
+    DlnaRequestHandler, UpnpError,
     cds::{
-        soap::{ArgDirection, SoapArgument, SoapResult, UpnpError},
-        upnp::BrowseResult,
+        soap::{ArgDirection, RequestContext, ResponseWrapper, SoapArgument, SoapResult},
+        upnp::DidlDocument,
         xml::Xml,
     },
 };
@@ -108,7 +108,7 @@ impl SoapAction for GetProtocolInfo {
 
     async fn execute<H: DlnaRequestHandler + ?Sized>(
         &self,
-        _handler: &H,
+        _context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
         Ok(GetProtocolInfoResponse {
             source: vec![
@@ -150,7 +150,7 @@ impl SoapAction for GetCurrentConnectionIDs {
 
     async fn execute<H: DlnaRequestHandler + ?Sized>(
         &self,
-        _handler: &H,
+        _context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
         Ok(GetCurrentConnectionIDsResponse {
             connection_ids: Vec::new(),
@@ -220,15 +220,15 @@ impl SoapAction for GetCurrentConnectionInfo {
         ]
     }
 
-    async fn execute<H: DlnaRequestHandler + ?Sized>(
+    async fn execute<'a, H: DlnaRequestHandler + ?Sized>(
         &self,
-        _handler: &H,
+        _context: RequestContext<'a, H>,
     ) -> SoapResult<Self::Response> {
         Err(UpnpError::ActionFailed)
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize)]
 enum BrowseFlag {
     BrowseMetadata,
     BrowseDirectChildren,
@@ -243,8 +243,8 @@ struct Browse {
     browse_flag: BrowseFlag,
     #[serde_as(as = "StringWithSeparator::<CommaSeparator, String>")]
     filter: Vec<String>,
-    starting_index: u32,
-    requested_count: u32,
+    starting_index: usize,
+    requested_count: usize,
     #[serde_as(as = "StringWithSeparator::<CommaSeparator, Sort>")]
     sort_criteria: Vec<Sort>,
 }
@@ -252,9 +252,9 @@ struct Browse {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
 struct BrowseResponse {
-    result: Xml<BrowseResult>,
-    number_returned: u32,
-    total_matches: u32,
+    result: String,
+    number_returned: usize,
+    total_matches: usize,
     #[serde(rename = "UpdateID")]
     update_id: u32,
 }
@@ -287,15 +287,32 @@ impl SoapAction for Browse {
 
     async fn execute<H: DlnaRequestHandler + ?Sized>(
         &self,
-        handler: &H,
+        context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
-        let objects = handler.list_children(&self.object_id).await;
+        let mut objects = if self.browse_flag == BrowseFlag::BrowseDirectChildren {
+            context.handler.list_children(&self.object_id).await?
+        } else {
+            vec![context.handler.get_object(&self.object_id).await?]
+        };
+
+        let total_matches = objects.len();
+
+        if self.starting_index > 0 {
+            objects = objects.split_off(self.starting_index);
+        }
+
+        if self.requested_count < objects.len() {
+            objects.truncate(self.requested_count);
+        }
+
+        let number_returned = objects.len();
+        let result = DidlDocument::new(context.base.clone(), objects);
 
         Ok(BrowseResponse {
-            number_returned: objects.len() as u32,
-            total_matches: objects.len() as u32,
+            number_returned,
+            total_matches,
             update_id: 1,
-            result: Xml::new(objects.into()),
+            result: result.try_into()?,
         })
     }
 }
@@ -329,7 +346,7 @@ impl SoapAction for GetSortCapabilities {
 
     async fn execute<H: DlnaRequestHandler + ?Sized>(
         &self,
-        _handler: &H,
+        _context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
         Ok(Default::default())
     }
@@ -364,7 +381,7 @@ impl SoapAction for GetSearchCapabilities {
 
     async fn execute<H: DlnaRequestHandler + ?Sized>(
         &self,
-        _handler: &H,
+        _context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
         Ok(Default::default())
     }
@@ -397,7 +414,7 @@ impl SoapAction for GetSystemUpdateID {
 
     async fn execute<H: DlnaRequestHandler + ?Sized>(
         &self,
-        _handler: &H,
+        _context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
         Ok(GetSystemUpdateIDResponse { id: 1 })
     }
@@ -456,15 +473,15 @@ impl SoapAction for Search {
 
     async fn execute<H: DlnaRequestHandler + ?Sized>(
         &self,
-        _handler: &H,
+        _context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
         Err(UpnpError::ActionFailed)
     }
 }
 
 #[post("")]
-async fn unknown_action() -> UpnpError {
-    UpnpError::InvalidAction
+async fn unknown_action() -> ResponseWrapper<()> {
+    ResponseWrapper::error(UpnpError::InvalidAction)
 }
 
 pub(super) fn services() -> impl HttpServiceFactory {
