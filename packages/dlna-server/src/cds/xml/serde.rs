@@ -6,7 +6,7 @@ use std::{
 
 use serde::{
     Deserializer, Serialize, Serializer,
-    de::{self, MapAccess, Visitor},
+    de::{self, EnumAccess, MapAccess, VariantAccess, Visitor},
     ser,
 };
 use xml::{EventReader, EventWriter, writer};
@@ -361,7 +361,9 @@ impl de::Error for ClientXmlError {
     where
         T: fmt::Display,
     {
-        msg.to_string().into()
+        ClientXmlError::ArgumentError {
+            message: msg.to_string(),
+        }
     }
 }
 
@@ -633,7 +635,7 @@ impl<'de, R: Read> Deserializer<'de> for XmlDeserializer<'_, R> {
     where
         V: Visitor<'de>,
     {
-        todo!()
+        visitor.visit_enum(self)
     }
 
     fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -651,6 +653,60 @@ impl<'de, R: Read> Deserializer<'de> for XmlDeserializer<'_, R> {
     }
 }
 
+impl<'de, R: Read> EnumAccess<'de> for XmlDeserializer<'_, R> {
+    type Error = ClientXmlError;
+
+    type Variant = UnitVariant;
+
+    fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
+    where
+        V: de::DeserializeSeed<'de>,
+    {
+        if let Some(str) = self.reader.text()? {
+            let inner = StringDeserializer { value: str };
+
+            Ok((seed.deserialize(inner)?, UnitVariant {}))
+        } else {
+            Err("Expected an enum variant but found an empty string".into())
+        }
+    }
+}
+
+pub(super) struct UnitVariant {}
+
+impl<'de> VariantAccess<'de> for UnitVariant {
+    type Error = ClientXmlError;
+
+    fn unit_variant(self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value, Self::Error>
+    where
+        T: de::DeserializeSeed<'de>,
+    {
+        todo!()
+    }
+
+    fn tuple_variant<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
+
+    fn struct_variant<V>(
+        self,
+        fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        todo!()
+    }
+}
+
 impl<'de, R: Read> MapAccess<'de> for XmlDeserializer<'_, R> {
     type Error = ClientXmlError;
 
@@ -659,7 +715,9 @@ impl<'de, R: Read> MapAccess<'de> for XmlDeserializer<'_, R> {
         K: de::DeserializeSeed<'de>,
     {
         if let Some(element) = self.reader.next_element()? {
-            let inner = NameDeserializer { name: element.name };
+            let inner = StringDeserializer {
+                value: element.name.local_name,
+            };
             Ok(Some(seed.deserialize(inner)?))
         } else {
             Ok(None)
@@ -677,11 +735,11 @@ impl<'de, R: Read> MapAccess<'de> for XmlDeserializer<'_, R> {
     }
 }
 
-struct NameDeserializer {
-    name: XmlName,
+struct StringDeserializer {
+    value: String,
 }
 
-impl<'de> Deserializer<'de> for NameDeserializer {
+impl<'de> Deserializer<'de> for StringDeserializer {
     type Error = ClientXmlError;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -779,7 +837,7 @@ impl<'de> Deserializer<'de> for NameDeserializer {
     where
         V: Visitor<'de>,
     {
-        visitor.visit_str(&self.name.local_name)
+        visitor.visit_str(&self.value)
     }
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>

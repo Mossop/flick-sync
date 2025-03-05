@@ -7,7 +7,12 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 
-use actix_web::{App, HttpServer, dev::ServerHandle, middleware::from_fn, web::Data};
+use actix_web::{
+    App, HttpServer,
+    dev::ServerHandle,
+    middleware::from_fn,
+    web::{self, Data},
+};
 use getifaddrs::{Interface, InterfaceFlags, getifaddrs};
 use tracing::debug;
 use uuid::Uuid;
@@ -106,7 +111,7 @@ impl DlnaServerBuilder {
                 .service(cds::device_root)
                 .service(cds::connection_manager)
                 .service(cds::content_directory)
-                .service(cds::services())
+                .service(web::scope("/soap").service(cds::services()))
         });
 
         let interfaces: Vec<Interface> = getifaddrs()?

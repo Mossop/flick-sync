@@ -22,7 +22,7 @@ impl<W: Write> ToXml<W> for Root {
             .contents(|writer| {
                 writer.element("specVersion").contents(|writer| {
                     writer.element("major").text(1)?;
-                    writer.element("minor").text(0)
+                    writer.element("minor").text(1)
                 })?;
 
                 writer.element("device").contents(|writer| {
@@ -41,11 +41,6 @@ impl<W: Write> ToXml<W> for Root {
                     writer
                         .element("modelDescription")
                         .text("Synced Flicks Media Server")?;
-                    writer.element("modelNumber").empty()?;
-                    writer
-                        .element("modelURL")
-                        .text("https://github.com/Mossop/flick-sync")?;
-                    writer.element("serialNumber").empty()?;
 
                     writer.element("serviceList").contents(|writer| {
                         writer.element("service").contents(|writer| {
@@ -71,7 +66,8 @@ impl<W: Write> ToXml<W> for Root {
                             writer
                                 .element("SCPDURL")
                                 .text("/service/ContentDirectory.xml")?;
-                            writer.element("controlURL").text("/soap")
+                            writer.element("controlURL").text("/soap")?;
+                            writer.element("eventSubURL").empty()
                         })
                     })
                 })
@@ -96,7 +92,7 @@ impl<W: Write> ToXml<W> for ServiceDescription {
             .contents(|writer| {
                 writer.element("specVersion").contents(|writer| {
                     writer.element("major").text(1)?;
-                    writer.element("minor").text(0)
+                    writer.element("minor").text(1)
                 })?;
 
                 writer.element("actionList").contents(|writer| {

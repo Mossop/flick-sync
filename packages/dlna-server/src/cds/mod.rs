@@ -1,11 +1,16 @@
-use actix_web::{dev::HttpServiceFactory, get, web::Data};
+use actix_web::{
+    HttpRequest, Responder,
+    dev::HttpServiceFactory,
+    get, post,
+    web::{Data, Payload},
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
     DlnaRequestHandler,
     cds::{
-        soap::{ArgDirection, SoapArgument, SoapResult},
+        soap::{ArgDirection, ResponseWrapper, SoapArgument, SoapResult, UpnpError},
         xml::Xml,
     },
 };
@@ -154,7 +159,7 @@ impl SoapAction for GetCurrentConnectionInfo {
     }
 
     async fn execute(&self) -> SoapResult<Self::Response> {
-        todo!()
+        Err(UpnpError::ActionFailed)
     }
 }
 
@@ -213,7 +218,7 @@ impl SoapAction for Browse {
     }
 
     async fn execute(&self) -> SoapResult<Self::Response> {
-        todo!()
+        Err(UpnpError::ActionFailed)
     }
 }
 
@@ -221,7 +226,7 @@ impl SoapAction for Browse {
 #[serde(rename_all = "PascalCase")]
 pub(super) struct GetSortCapabilities {}
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub(super) struct GetSortCapabilitiesResponse {
     sort_caps: String,
@@ -243,7 +248,7 @@ impl SoapAction for GetSortCapabilities {
     }
 
     async fn execute(&self) -> SoapResult<Self::Response> {
-        todo!()
+        Ok(Default::default())
     }
 }
 
@@ -251,7 +256,7 @@ impl SoapAction for GetSortCapabilities {
 #[serde(rename_all = "PascalCase")]
 pub(super) struct GetSearchCapabilities {}
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub(super) struct GetSearchCapabilitiesResponse {
     search_caps: String,
@@ -273,7 +278,7 @@ impl SoapAction for GetSearchCapabilities {
     }
 
     async fn execute(&self) -> SoapResult<Self::Response> {
-        todo!()
+        Ok(Default::default())
     }
 }
 
@@ -356,8 +361,13 @@ impl SoapAction for Search {
     }
 
     async fn execute(&self) -> SoapResult<Self::Response> {
-        todo!()
+        Err(UpnpError::ActionFailed)
     }
+}
+
+#[post("")]
+async fn unknown_action() -> UpnpError {
+    UpnpError::InvalidAction
 }
 
 pub(super) fn services() -> impl HttpServiceFactory {
@@ -370,5 +380,6 @@ pub(super) fn services() -> impl HttpServiceFactory {
         GetSearchCapabilities::factory(),
         GetSystemUpdateID::factory(),
         Search::factory(),
+        unknown_action,
     )
 }

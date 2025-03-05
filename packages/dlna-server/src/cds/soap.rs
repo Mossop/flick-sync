@@ -1,10 +1,12 @@
 use std::{fmt, io::Write, marker::PhantomData, ops::Deref, str::FromStr};
 
 use actix_web::{
-    Resource,
+    FromRequest, HttpRequest, HttpResponse, HttpResponseBuilder, Resource, Responder,
+    body::BoxBody,
     dev::{AppService, HttpServiceFactory},
     guard::{self, GuardContext},
-    web::Data,
+    http::{StatusCode, header},
+    web::{Data, Payload},
 };
 use mime::Mime;
 use serde::{Serialize, de::DeserializeOwned};
@@ -14,7 +16,7 @@ use crate::{
     HttpAppData,
     cds::xml::{
         ClientXmlError, Element, FromXml, ToXml, WriterError, Xml, XmlElement, XmlName, XmlReader,
-        XmlWriter,
+        XmlWriter, application_xml,
     },
 };
 
@@ -74,7 +76,7 @@ impl<A> Deref for ActionWrapper<A> {
     }
 }
 
-struct ResponseWrapper<R: Serialize> {
+pub(crate) struct ResponseWrapper<R: Serialize> {
     name: XmlName,
     response: SoapResult<R>,
 }
@@ -103,6 +105,35 @@ where
     }
 }
 
+impl<R> Responder for ResponseWrapper<R>
+where
+    R: Serialize,
+{
+    type Body = BoxBody;
+
+    fn respond_to(self, _req: &HttpRequest) -> HttpResponse<Self::Body> {
+        let mut body = Vec::<u8>::new();
+
+        let status_code = match &self.response {
+            Ok(_) => StatusCode::OK,
+            Err(error) => match error.status() {
+                400..500 => StatusCode::BAD_REQUEST,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            },
+        };
+
+        if let Err(e) = XmlWriter::write_document(self, &mut body) {
+            error!(error=%e, "Failed to serialize XML document");
+            return HttpResponseBuilder::new(StatusCode::INTERNAL_SERVER_ERROR).finish();
+        }
+
+        HttpResponseBuilder::new(status_code)
+            .insert_header(header::ContentType(application_xml()))
+            .insert_header(header::ContentLength(body.len()))
+            .body(body)
+    }
+}
+
 pub(crate) struct SoapFactory<T: SoapAction> {
     _type: PhantomData<T>,
 }
@@ -120,9 +151,35 @@ where
 {
     async fn service(
         app_data: Data<HttpAppData>,
-        envelope: Xml<ActionWrapper<T>>,
-    ) -> Xml<ResponseWrapper<T::Response>> {
+        request: HttpRequest,
+        payload: Payload,
+    ) -> ResponseWrapper<T::Response> {
         let span = span!(Level::INFO, "SOAP request", "action" = T::name());
+
+        let name: XmlName = (T::schema(), format!("{}Response", T::name()).as_str()).into();
+        let mut payload = payload.into_inner();
+
+        let parse_result = Xml::<ActionWrapper<T>>::from_request(&request, &mut payload)
+            .instrument(span.clone())
+            .await;
+
+        let envelope = match parse_result {
+            Ok(e) => e,
+            Err(ClientXmlError::ArgumentError { message }) => {
+                error!(parent: &span, error=message, "Client sent invalid arguments.");
+                return ResponseWrapper {
+                    name,
+                    response: Err(UpnpError::InvalidArgs),
+                };
+            }
+            Err(e) => {
+                error!(parent: &span, error=%e, "Unable to parse SOAP envelope.");
+                return ResponseWrapper {
+                    name,
+                    response: Err(UpnpError::InvalidArgs),
+                };
+            }
+        };
 
         trace!(parent: &span, request = ?envelope.inner().action());
         let response = envelope.execute().instrument(span.clone()).await;
@@ -135,9 +192,8 @@ where
                 error!(parent: &span, error=?e);
             }
         }
-        let name: XmlName = (T::schema(), format!("{}Response", T::name()).as_str()).into();
 
-        Xml::new(ResponseWrapper { name, response })
+        ResponseWrapper { name, response }
     }
 }
 
@@ -147,7 +203,7 @@ where
     T::Response: Serialize + fmt::Debug,
 {
     fn register(self, config: &mut AppService) {
-        let resource = Resource::new("/soap")
+        let resource = Resource::new("")
             .name(T::name())
             .guard(guard::Post())
             .guard(T::guard)
@@ -222,20 +278,57 @@ pub(crate) trait SoapAction {
 }
 
 #[derive(Debug)]
-pub(crate) struct SoapFault {
-    fault_code: String,
-    fault_string: String,
+pub(crate) enum UpnpError {
+    InvalidAction,
+    InvalidArgs,
+    ActionFailed,
 }
 
-impl<W: Write> ToXml<W> for SoapFault {
+impl UpnpError {
+    fn status(&self) -> u16 {
+        match self {
+            UpnpError::InvalidAction => 401,
+            UpnpError::InvalidArgs => 402,
+            UpnpError::ActionFailed => 501,
+        }
+    }
+}
+
+impl<W: Write> ToXml<W> for UpnpError {
     fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
+        let status = self.status();
+        let fault_code = if matches!(status, 400..500) {
+            "Client"
+        } else {
+            "Server"
+        };
+
         writer
             .element_ns((NS_SOAP_ENVELOPE, "Fault"))
             .contents(|writer| {
-                writer.element("faultcode").text(&self.fault_code)?;
-                writer.element("faultstring").text(&self.fault_string)
+                writer
+                    .element("faultcode")
+                    .text(format!("s:{fault_code}"))?;
+                writer.element("faultstring").text("UPnPError")?;
+                writer.element("detail").contents(|writer| {
+                    writer
+                        .element_ns(("urn:schemas-upnp-org:control-1-0", "UPnPError"))
+                        .contents(|writer| writer.element("errorCode").text(status))
+                })
             })
     }
 }
 
-pub(crate) type SoapResult<T> = Result<T, SoapFault>;
+pub(crate) type SoapResult<T> = Result<T, UpnpError>;
+
+impl Responder for UpnpError {
+    type Body = <ResponseWrapper<()> as Responder>::Body;
+
+    fn respond_to(self, req: &HttpRequest) -> HttpResponse<Self::Body> {
+        let wrapper = ResponseWrapper::<()> {
+            name: ("", "").into(),
+            response: Err(self),
+        };
+        wrapper.respond_to(req)
+    }
+}

@@ -33,7 +33,7 @@ mod serde;
 
 type Map<K, V> = std::collections::BTreeMap<K, V>;
 
-fn application_xml() -> Mime {
+pub(crate) fn application_xml() -> Mime {
     Mime::from_str("application/xml").unwrap()
 }
 
@@ -60,6 +60,14 @@ impl XmlName {
     pub(crate) fn qualified(namespace: &str, local_name: &str) -> Self {
         Self {
             namespace: Some(namespace.to_owned()),
+            local_name: local_name.to_owned(),
+        }
+    }
+
+    /// Creates an unqualified name.
+    pub(crate) fn local(local_name: &str) -> Self {
+        Self {
+            namespace: None,
             local_name: local_name.to_owned(),
         }
     }
@@ -357,7 +365,7 @@ pub(crate) struct XmlWriter<W: Write> {
 }
 
 impl<W: Write> XmlWriter<W> {
-    fn write_document<X: ToXml<W>>(source: X, sink: W) -> Result<(), WriterError> {
+    pub(crate) fn write_document<X: ToXml<W>>(source: X, sink: W) -> Result<(), WriterError> {
         let mut writer = EmitterConfig::new()
             .perform_indent(true)
             .create_writer(sink);
@@ -400,13 +408,16 @@ impl<W: Write> XmlWriter<W> {
 
     /// Creates a new element in this document using whatever is the current default namespace.
     pub(crate) fn element(&mut self, tag_name: &str) -> ElementBuilder<'_, W> {
-        let default_ns = self
+        let name = if let Some(default_ns) = self
             .known_prefixes
             .iter()
             .find(|(_, prefix)| prefix.is_empty())
             .map(|(url, _)| url)
-            .unwrap();
-        let name = XmlName::qualified(default_ns, tag_name);
+        {
+            XmlName::qualified(default_ns, tag_name)
+        } else {
+            XmlName::local(tag_name)
+        };
 
         self.element_ns(name)
     }
@@ -498,18 +509,26 @@ pub(crate) enum ClientXmlError {
         #[from]
         source: actix_web::Error,
     },
-    #[error("{source}")]
-    Float {
-        #[from]
-        source: ParseFloatError,
-    },
-    #[error("{source}")]
-    Int {
-        #[from]
-        source: ParseIntError,
-    },
+    #[error("{message}")]
+    ArgumentError { message: String },
     #[error("{message}")]
     Custom { message: String },
+}
+
+impl From<ParseIntError> for ClientXmlError {
+    fn from(err: ParseIntError) -> Self {
+        Self::ArgumentError {
+            message: err.to_string(),
+        }
+    }
+}
+
+impl From<ParseFloatError> for ClientXmlError {
+    fn from(err: ParseFloatError) -> Self {
+        Self::ArgumentError {
+            message: err.to_string(),
+        }
+    }
 }
 
 impl From<&str> for ClientXmlError {
