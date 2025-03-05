@@ -1,16 +1,17 @@
-use actix_web::{
-    HttpRequest, Responder,
-    dev::HttpServiceFactory,
-    get, post,
-    web::{Data, Payload},
-};
+use std::{convert::Infallible, str::FromStr};
+
+use actix_web::{dev::HttpServiceFactory, get, post, web::Data};
 use serde::{Deserialize, Serialize};
+use serde_with::StringWithSeparator;
+use serde_with::formats::CommaSeparator;
+use serde_with::serde_as;
 use uuid::Uuid;
 
 use crate::{
     DlnaRequestHandler,
     cds::{
-        soap::{ArgDirection, ResponseWrapper, SoapArgument, SoapResult, UpnpError},
+        soap::{ArgDirection, SoapArgument, SoapResult, UpnpError},
+        upnp::BrowseResult,
         xml::Xml,
     },
 };
@@ -18,7 +19,7 @@ pub(super) use soap::SoapAction;
 
 pub(super) mod middleware;
 mod soap;
-mod upnp;
+pub(crate) mod upnp;
 mod xml;
 
 const SCHEMA_CONNECTION_MANAGER: &str = "urn:schemas-upnp-org:service:ConnectionManager:1";
@@ -56,15 +57,38 @@ async fn content_directory() -> Xml<upnp::ServiceDescription> {
     ]))
 }
 
+#[derive(Debug)]
+enum Sort {
+    Ascending(String),
+    Descending(String),
+}
+
+impl FromStr for Sort {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(stripped) = s.strip_prefix('+') {
+            Ok(Sort::Ascending(stripped.to_owned()))
+        } else if let Some(stripped) = s.strip_prefix('-') {
+            Ok(Sort::Descending(stripped.to_owned()))
+        } else {
+            Ok(Sort::Ascending(s.to_owned()))
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct GetProtocolInfo {}
+struct GetProtocolInfo {}
 
+#[serde_as]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct GetProtocolInfoResponse {
-    source: String,
-    sink: String,
+struct GetProtocolInfoResponse {
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, String>")]
+    source: Vec<String>,
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, String>")]
+    sink: Vec<String>,
 }
 
 impl SoapAction for GetProtocolInfo {
@@ -82,23 +106,31 @@ impl SoapAction for GetProtocolInfo {
         &[("Source", ArgDirection::Out), ("Sink", ArgDirection::Out)]
     }
 
-    async fn execute(&self) -> SoapResult<Self::Response> {
+    async fn execute<H: DlnaRequestHandler + ?Sized>(
+        &self,
+        _handler: &H,
+    ) -> SoapResult<Self::Response> {
         Ok(GetProtocolInfoResponse {
-            source: "http-get:*:video/mp4:*".to_string(),
-            sink: "".to_string(),
+            source: vec![
+                "http-get:*:video/mp4:*".to_string(),
+                "http-get:*:video/x-matroska:*".to_string(),
+            ],
+            sink: vec![],
         })
     }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct GetCurrentConnectionIDs {}
+struct GetCurrentConnectionIDs {}
 
+#[serde_as]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct GetCurrentConnectionIDsResponse {
+struct GetCurrentConnectionIDsResponse {
     #[serde(rename = "ConnectionIDs")]
-    connection_ids: String,
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, u32>")]
+    connection_ids: Vec<u32>,
 }
 
 impl SoapAction for GetCurrentConnectionIDs {
@@ -116,23 +148,53 @@ impl SoapAction for GetCurrentConnectionIDs {
         &[("ConnectionIDs", ArgDirection::Out)]
     }
 
-    async fn execute(&self) -> SoapResult<Self::Response> {
+    async fn execute<H: DlnaRequestHandler + ?Sized>(
+        &self,
+        _handler: &H,
+    ) -> SoapResult<Self::Response> {
         Ok(GetCurrentConnectionIDsResponse {
-            connection_ids: String::new(),
+            connection_ids: Vec::new(),
         })
     }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct GetCurrentConnectionInfo {
+struct GetCurrentConnectionInfo {
     #[serde(rename = "ConnectionID")]
-    _connection_id: String,
+    _connection_id: u32,
+}
+
+#[derive(Debug, Serialize)]
+enum ConnectionDirection {
+    Output,
+    Input,
+}
+
+#[derive(Debug, Serialize)]
+enum ConnectionStatus {
+    #[serde(rename = "OK")]
+    Ok,
+    ContentFormatMismatch,
+    InsufficientBandwidth,
+    UnreliableChannel,
+    Unknown,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct GetCurrentConnectionInfoResponse {}
+struct GetCurrentConnectionInfoResponse {
+    #[serde(rename = "RcsID")]
+    rcs_id: u32,
+    #[serde(rename = "AVTransportID")]
+    av_transport_id: u32,
+    protocol_info: String,
+    peer_connection_manager: String,
+    #[serde(rename = "PeerConnectionID")]
+    peer_connection_id: u32,
+    direction: ConnectionDirection,
+    status: ConnectionStatus,
+}
 
 impl SoapAction for GetCurrentConnectionInfo {
     type Response = GetCurrentConnectionInfoResponse;
@@ -158,33 +220,39 @@ impl SoapAction for GetCurrentConnectionInfo {
         ]
     }
 
-    async fn execute(&self) -> SoapResult<Self::Response> {
+    async fn execute<H: DlnaRequestHandler + ?Sized>(
+        &self,
+        _handler: &H,
+    ) -> SoapResult<Self::Response> {
         Err(UpnpError::ActionFailed)
     }
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) enum BrowseFlag {
+enum BrowseFlag {
     BrowseMetadata,
     BrowseDirectChildren,
 }
 
+#[serde_as]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct Browse {
+struct Browse {
     #[serde(rename = "ObjectID")]
     object_id: String,
     browse_flag: BrowseFlag,
-    filter: String,
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, String>")]
+    filter: Vec<String>,
     starting_index: u32,
     requested_count: u32,
-    sort_criteria: String,
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, Sort>")]
+    sort_criteria: Vec<Sort>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct BrowseResponse {
-    result: String,
+struct BrowseResponse {
+    result: Xml<BrowseResult>,
     number_returned: u32,
     total_matches: u32,
     #[serde(rename = "UpdateID")]
@@ -217,19 +285,31 @@ impl SoapAction for Browse {
         ]
     }
 
-    async fn execute(&self) -> SoapResult<Self::Response> {
-        Err(UpnpError::ActionFailed)
+    async fn execute<H: DlnaRequestHandler + ?Sized>(
+        &self,
+        handler: &H,
+    ) -> SoapResult<Self::Response> {
+        let objects = handler.list_children(&self.object_id).await;
+
+        Ok(BrowseResponse {
+            number_returned: objects.len() as u32,
+            total_matches: objects.len() as u32,
+            update_id: 1,
+            result: Xml::new(objects.into()),
+        })
     }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct GetSortCapabilities {}
+struct GetSortCapabilities {}
 
+#[serde_as]
 #[derive(Debug, Serialize, Default)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct GetSortCapabilitiesResponse {
-    sort_caps: String,
+struct GetSortCapabilitiesResponse {
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, String>")]
+    sort_caps: Vec<String>,
 }
 
 impl SoapAction for GetSortCapabilities {
@@ -247,19 +327,24 @@ impl SoapAction for GetSortCapabilities {
         &[("SortCaps", ArgDirection::Out)]
     }
 
-    async fn execute(&self) -> SoapResult<Self::Response> {
+    async fn execute<H: DlnaRequestHandler + ?Sized>(
+        &self,
+        _handler: &H,
+    ) -> SoapResult<Self::Response> {
         Ok(Default::default())
     }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct GetSearchCapabilities {}
+struct GetSearchCapabilities {}
 
+#[serde_as]
 #[derive(Debug, Serialize, Default)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct GetSearchCapabilitiesResponse {
-    search_caps: String,
+struct GetSearchCapabilitiesResponse {
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, String>")]
+    search_caps: Vec<String>,
 }
 
 impl SoapAction for GetSearchCapabilities {
@@ -277,18 +362,21 @@ impl SoapAction for GetSearchCapabilities {
         &[("SearchCaps", ArgDirection::Out)]
     }
 
-    async fn execute(&self) -> SoapResult<Self::Response> {
+    async fn execute<H: DlnaRequestHandler + ?Sized>(
+        &self,
+        _handler: &H,
+    ) -> SoapResult<Self::Response> {
         Ok(Default::default())
     }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct GetSystemUpdateID {}
+struct GetSystemUpdateID {}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct GetSystemUpdateIDResponse {
+struct GetSystemUpdateIDResponse {
     id: u32,
 }
 
@@ -307,26 +395,32 @@ impl SoapAction for GetSystemUpdateID {
         &[("Id", ArgDirection::Out)]
     }
 
-    async fn execute(&self) -> SoapResult<Self::Response> {
+    async fn execute<H: DlnaRequestHandler + ?Sized>(
+        &self,
+        _handler: &H,
+    ) -> SoapResult<Self::Response> {
         Ok(GetSystemUpdateIDResponse { id: 1 })
     }
 }
 
+#[serde_as]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct Search {
+struct Search {
     #[serde(rename = "ContainerID")]
     container_id: String,
     search_criteria: String,
-    filter: String,
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, String>")]
+    filter: Vec<String>,
     starting_index: u32,
     requested_count: u32,
-    sort_criteria: String,
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, Sort>")]
+    sort_criteria: Vec<Sort>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "PascalCase")]
-pub(super) struct SearchResponse {
+struct SearchResponse {
     result: String,
     number_returned: u32,
     total_matches: u32,
@@ -360,7 +454,10 @@ impl SoapAction for Search {
         ]
     }
 
-    async fn execute(&self) -> SoapResult<Self::Response> {
+    async fn execute<H: DlnaRequestHandler + ?Sized>(
+        &self,
+        _handler: &H,
+    ) -> SoapResult<Self::Response> {
         Err(UpnpError::ActionFailed)
     }
 }

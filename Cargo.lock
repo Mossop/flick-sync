@@ -433,6 +433,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
 
 [[package]]
+name = "async-trait"
+version = "0.1.87"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d556ec1359574147ec0c4fc5eb525f3f23263a592b1a9c07e0a75b427de55c97"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -875,12 +886,14 @@ dependencies = [
  "actix-web",
  "anyhow",
  "async-std",
+ "async-trait",
  "bytes",
  "futures",
  "getifaddrs",
  "http 1.2.0",
  "mime",
  "serde",
+ "serde_with",
  "socket2",
  "thiserror 1.0.69",
  "tokio",
@@ -1019,6 +1032,7 @@ name = "flick-sync-cli"
 version = "1.6.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
  "console",
  "ctrlc",

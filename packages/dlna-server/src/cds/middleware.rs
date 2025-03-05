@@ -6,7 +6,7 @@ use actix_web::{
     dev::{ServiceRequest, ServiceResponse},
     middleware::Next,
 };
-use tracing::{Instrument, Level, debug, field, instrument, span, warn};
+use tracing::{Instrument, Level, field, instrument, span, trace, warn};
 
 fn is_safe(addr: SocketAddr) -> bool {
     match addr {
@@ -81,7 +81,7 @@ pub(crate) async fn middleware<B: MessageBody>(
     } else if status.is_client_error() {
         warn!(parent: &span, status = status.as_u16(), "Bad request")
     } else {
-        debug!(parent: &span, status = status.as_u16())
+        trace!(parent: &span, status = status.as_u16())
     }
 
     Ok(res)

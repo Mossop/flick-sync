@@ -10,6 +10,102 @@ use crate::cds::{
 
 const NS_UPNP_DEVICE: &str = "urn:schemas-upnp-org:device-1-0";
 pub(crate) const NS_UPNP_SERVICE: &str = "urn:schemas-upnp-org:service-1-0";
+const NS_DIDL: &str = "urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/";
+const NS_DC: &str = "http://purl.org/dc/elements/1.1/";
+const NS_UPNP: &str = "urn:schemas-upnp-org:metadata-1-0/upnp/";
+const NS_DLNA: &str = "urn:schemas-dlna-org:metadata-1-0/";
+
+#[derive(Debug)]
+pub struct Container {
+    pub id: String,
+    pub parent_id: String,
+    pub child_count: Option<u32>,
+    pub title: String,
+}
+
+impl<W: Write> ToXml<W> for Container {
+    fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
+        let mut builder = writer.element_ns((NS_DIDL, "container"));
+        if let Some(child_count) = self.child_count {
+            builder = builder.attr("childCount", child_count);
+        }
+        builder
+            .attr("id", &self.id)
+            .attr("parentID", &self.parent_id)
+            .attr("restricted", "1")
+            .attr("searchable", "0")
+            .contents(|writer| {
+                writer.element_ns((NS_DC, "title")).text(&self.title)?;
+                writer
+                    .element_ns((NS_UPNP, "class"))
+                    .text("object.container")
+            })
+    }
+}
+
+#[derive(Debug)]
+pub struct Item {
+    pub id: String,
+    pub parent_id: String,
+    pub title: String,
+}
+
+impl<W: Write> ToXml<W> for Item {
+    fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
+        writer
+            .element_ns((NS_DIDL, "item"))
+            .attr("id", &self.id)
+            .attr("parentID", &self.parent_id)
+            .attr("restricted", "1")
+            .contents(|writer| {
+                writer.element_ns((NS_DC, "title")).text(&self.title)?;
+                writer.element_ns((NS_UPNP, "class")).text("object.item")
+            })
+    }
+}
+
+#[derive(Debug)]
+pub enum Object {
+    Item(Item),
+    Container(Container),
+}
+
+impl<W: Write> ToXml<W> for Object {
+    fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
+        match self {
+            Self::Item(o) => o.write_xml(writer),
+            Self::Container(o) => o.write_xml(writer),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct BrowseResult {
+    objects: Vec<Object>,
+}
+
+impl From<Vec<Object>> for BrowseResult {
+    fn from(objects: Vec<Object>) -> Self {
+        Self { objects }
+    }
+}
+
+impl<W: Write> ToXml<W> for BrowseResult {
+    fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
+        writer
+            .element_ns((NS_DIDL, "DIDL-Lite"))
+            .prefix("dc", NS_DC)
+            .prefix("dlna", NS_DLNA)
+            .prefix("upnp", NS_UPNP)
+            .contents(|writer| {
+                for object in self.objects.iter() {
+                    object.write_xml(writer)?;
+                }
+
+                Ok(())
+            })
+    }
+}
 
 pub(crate) struct Root {
     pub(crate) uuid: Uuid,

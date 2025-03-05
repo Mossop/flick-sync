@@ -4,10 +4,9 @@ use std::{
     num::{ParseFloatError, ParseIntError},
     ops::Deref,
     pin::Pin,
-    str::FromStr,
 };
 
-use ::serde::{Serialize, de::DeserializeOwned};
+use ::serde::{Serialize, de::DeserializeOwned, ser::Error};
 use actix_web::{
     FromRequest, HttpMessage, HttpRequest, HttpResponse, HttpResponseBuilder, Responder,
     ResponseError,
@@ -16,9 +15,8 @@ use actix_web::{
     http::{StatusCode, header},
 };
 use bytes::Bytes;
-use mime::Mime;
 use thiserror::Error;
-use tracing::{debug, error};
+use tracing::error;
 use xml::{
     EmitterConfig, EventReader, EventWriter,
     common::XmlVersion,
@@ -32,10 +30,6 @@ use crate::cds::xml::serde::{XmlDeserializer, XmlSerializer};
 mod serde;
 
 type Map<K, V> = std::collections::BTreeMap<K, V>;
-
-pub(crate) fn application_xml() -> Mime {
-    Mime::from_str("application/xml").unwrap()
-}
 
 #[derive(Debug, Error)]
 pub(crate) enum WriterError {
@@ -322,7 +316,14 @@ impl<W: Write> ElementBuilder<'_, W> {
     }
 
     /// Adds an attribute to this element.
-    pub(crate) fn attr<N: Into<XmlName>, D: ToString>(mut self, name: N, value: D) -> Self {
+    pub(crate) fn attr<D: ToString>(mut self, name: &str, value: D) -> Self {
+        self.attributes
+            .insert(XmlName::local(name), value.to_string());
+        self
+    }
+
+    /// Adds an attribute with a namespace to this element.
+    pub(crate) fn attr_ns<N: Into<XmlName>, D: ToString>(mut self, name: N, value: D) -> Self {
         self.attributes.insert(name.into(), value.to_string());
         self
     }
@@ -365,7 +366,7 @@ pub(crate) struct XmlWriter<W: Write> {
 }
 
 impl<W: Write> XmlWriter<W> {
-    pub(crate) fn write_document<X: ToXml<W>>(source: X, sink: W) -> Result<(), WriterError> {
+    pub(crate) fn write_document<X: ToXml<W>>(source: &X, sink: W) -> Result<(), WriterError> {
         let mut writer = EmitterConfig::new()
             .perform_indent(true)
             .create_writer(sink);
@@ -454,6 +455,7 @@ pub(crate) trait XmlElement {
 }
 
 /// An XML document that can be read from a HTTP request body or written to a HTTP response body.
+#[derive(Debug)]
 pub(crate) struct Xml<T>(T);
 
 impl<T> Deref for Xml<T> {
@@ -468,10 +470,6 @@ impl<T> Xml<T> {
     pub(crate) fn new(document: T) -> Self {
         Self(document)
     }
-
-    pub(crate) fn inner(&self) -> &T {
-        &self.0
-    }
 }
 
 impl<T> Responder for Xml<T>
@@ -483,17 +481,42 @@ where
     fn respond_to(self, _req: &HttpRequest) -> HttpResponse<Self::Body> {
         let mut body = Vec::<u8>::new();
 
-        {
-            if let Err(e) = XmlWriter::write_document(self.0, &mut body) {
-                error!(error=%e, "Failed to serialize XML document");
-                return HttpResponseBuilder::new(StatusCode::INTERNAL_SERVER_ERROR).finish();
-            }
+        if let Err(e) = XmlWriter::write_document(&self.0, &mut body) {
+            error!(error=%e, "Failed to serialize XML document");
+            return HttpResponseBuilder::new(StatusCode::INTERNAL_SERVER_ERROR).finish();
         }
 
         HttpResponseBuilder::new(StatusCode::OK)
-            .insert_header(header::ContentType(application_xml()))
+            .insert_header(header::ContentType(mime::TEXT_XML))
             .insert_header(header::ContentLength(body.len()))
             .body(body)
+    }
+}
+
+impl<T> Serialize for Xml<T>
+where
+    T: for<'a> ToXml<&'a mut Vec<u8>>,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ::serde::Serializer,
+    {
+        let mut body = Vec::<u8>::new();
+
+        if let Err(e) = XmlWriter::write_document(&self.0, &mut body) {
+            return Err(S::Error::custom(format!(
+                "Failed to serialize XML document: {}",
+                e
+            )));
+        }
+
+        match String::from_utf8(body) {
+            Ok(st) => serializer.serialize_str(&st),
+            Err(e) => Err(S::Error::custom(format!(
+                "Failed to serialize XML document: {}",
+                e
+            ))),
+        }
     }
 }
 
@@ -565,13 +588,11 @@ where
 
         Box::pin(async move {
             let content_type = req.content_type();
-            debug!(content_type);
             if content_type != "application/xml" && content_type != "text/xml" {
                 return Err(format!("Unexpected content-type: {content_type}").into());
             }
 
             let bytes = Bytes::from_request(&req, &mut payload).await?;
-            debug!(bytes = bytes.len());
 
             let mut reader = XmlReader::new(bytes.as_ref());
 
@@ -604,7 +625,7 @@ mod test {
         F: for<'a> Fn(&mut XmlWriter<&'a mut Vec<u8>>) -> Result<(), WriterError>,
     {
         let mut body = Vec::<u8>::new();
-        XmlWriter::write_document(source, &mut body).unwrap();
+        XmlWriter::write_document(&source, &mut body).unwrap();
         body.push(b'\n');
         String::from_utf8(body).unwrap()
     }
@@ -664,8 +685,8 @@ mod test {
         let serialized = write_xml_to_string(|writer| {
             writer
                 .element_ns(("urn:schemas-upnp-org:device-1-0", "root"))
-                .attr(("urn:schemas-upnp-org:device-1-0", "test"), "56")
-                .attr(("urn:schemas-dlna-org:device-1-0", "other"), 45)
+                .attr_ns(("urn:schemas-upnp-org:device-1-0", "test"), "56")
+                .attr_ns(("urn:schemas-dlna-org:device-1-0", "other"), 45)
                 .contents(|writer| {
                     writer
                         .element_ns(("urn:schemas-upnp-org:device-1-0", "major"))

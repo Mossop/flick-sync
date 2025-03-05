@@ -10,26 +10,24 @@ use actix_web::{
 };
 use mime::Mime;
 use serde::{Serialize, de::DeserializeOwned};
-use tracing::{Instrument, Level, error, span, trace};
+use tracing::{Instrument, Level, error, field, span};
 
 use crate::{
-    HttpAppData,
+    DlnaRequestHandler, HttpAppData,
     cds::xml::{
         ClientXmlError, Element, FromXml, ToXml, WriterError, Xml, XmlElement, XmlName, XmlReader,
-        XmlWriter, application_xml,
+        XmlWriter,
     },
 };
 
 const NS_SOAP_ENVELOPE: &str = "http://schemas.xmlsoap.org/soap/envelope/";
 const SOAP_ENCODING: &str = "http://schemas.xmlsoap.org/soap/encoding/";
 
-struct ActionWrapper<A> {
-    action: A,
-}
+struct ActionWrapper<A>(A);
 
 impl<A> ActionWrapper<A> {
     fn action(&self) -> &A {
-        &self.action
+        &self.0
     }
 }
 
@@ -49,7 +47,7 @@ where
                     }
 
                     let action: A = reader.deserialize()?;
-                    Ok(Self { action })
+                    Ok(Self(action))
                 } else {
                     Err("Missing SOAP request element".into())
                 }
@@ -72,7 +70,7 @@ impl<A> Deref for ActionWrapper<A> {
     type Target = A;
 
     fn deref(&self) -> &Self::Target {
-        &self.action
+        &self.0
     }
 }
 
@@ -90,7 +88,7 @@ where
         writer
             .element_ns((NS_SOAP_ENVELOPE, "Envelope"))
             .prefix("s", NS_SOAP_ENVELOPE)
-            .attr((NS_SOAP_ENVELOPE, "encodingStyle"), SOAP_ENCODING)
+            .attr_ns((NS_SOAP_ENVELOPE, "encodingStyle"), SOAP_ENCODING)
             .contents(|writer| {
                 writer
                     .element_ns((NS_SOAP_ENVELOPE, "Body"))
@@ -122,13 +120,13 @@ where
             },
         };
 
-        if let Err(e) = XmlWriter::write_document(self, &mut body) {
+        if let Err(e) = XmlWriter::write_document(&self, &mut body) {
             error!(error=%e, "Failed to serialize XML document");
             return HttpResponseBuilder::new(StatusCode::INTERNAL_SERVER_ERROR).finish();
         }
 
         HttpResponseBuilder::new(status_code)
-            .insert_header(header::ContentType(application_xml()))
+            .insert_header(header::ContentType(mime::TEXT_XML))
             .insert_header(header::ContentLength(body.len()))
             .body(body)
     }
@@ -154,7 +152,12 @@ where
         request: HttpRequest,
         payload: Payload,
     ) -> ResponseWrapper<T::Response> {
-        let span = span!(Level::INFO, "SOAP request", "action" = T::name());
+        let span = span!(
+            Level::INFO,
+            "SOAP request",
+            "action" = T::name(),
+            "arguments" = field::Empty
+        );
 
         let name: XmlName = (T::schema(), format!("{}Response", T::name()).as_str()).into();
         let mut payload = payload.into_inner();
@@ -181,17 +184,13 @@ where
             }
         };
 
-        trace!(parent: &span, request = ?envelope.inner().action());
-        let response = envelope.execute().instrument(span.clone()).await;
+        span.record("arguments", format!("{:?}", envelope.action()));
 
-        match &response {
-            Ok(r) => {
-                trace!(parent: &span, response = ?r);
-            }
-            Err(e) => {
-                error!(parent: &span, error=?e);
-            }
-        }
+        let response = envelope
+            .execute(&*app_data.handler)
+            .instrument(span.clone())
+            .await
+            .inspect_err(|e| error!(parent: &span, error=?e));
 
         ResponseWrapper { name, response }
     }
@@ -233,7 +232,10 @@ pub(crate) trait SoapAction {
 
     fn schema() -> &'static str;
     fn name() -> &'static str;
-    async fn execute(&self) -> SoapResult<Self::Response>;
+    async fn execute<H: DlnaRequestHandler + ?Sized>(
+        &self,
+        handler: &H,
+    ) -> SoapResult<Self::Response>;
     fn arguments() -> &'static [SoapArgument];
 
     fn guard(ctx: &GuardContext) -> bool {

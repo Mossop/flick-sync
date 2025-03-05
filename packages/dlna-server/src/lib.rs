@@ -13,6 +13,7 @@ use actix_web::{
     middleware::from_fn,
     web::{self, Data},
 };
+use async_trait::async_trait;
 use getifaddrs::{Interface, InterfaceFlags, getifaddrs};
 use tracing::debug;
 use uuid::Uuid;
@@ -22,6 +23,8 @@ use crate::{
     rt::{TaskHandle, spawn},
     ssdp::SsdpTask,
 };
+
+pub use cds::upnp::{Container, Item, Object};
 
 /// The default port to use for HTTP communication
 const HTTP_PORT: u16 = 1980;
@@ -35,10 +38,12 @@ mod ssdp;
 #[cfg(not(any(feature = "rt-tokio", feature = "rt-async")))]
 compile_error!("An async runtime must be selected");
 
+#[async_trait]
 pub trait DlnaRequestHandler
 where
-    Self: Send + Sync,
+    Self: Send + Sync + 'static,
 {
+    async fn list_children(&self, parent_id: &str) -> Vec<Object>;
 }
 
 #[derive(Default)]
@@ -68,14 +73,14 @@ pub struct DlnaServer {
 impl DlnaServer {
     /// Builds a default DLNA server listing on all interfaces on IPv4 and
     /// starts it listening using the chosen runtime.
-    pub async fn new<H: DlnaRequestHandler + 'static>(handler: H) -> anyhow::Result<Self> {
+    pub async fn new<H: DlnaRequestHandler>(handler: H) -> anyhow::Result<Self> {
         Self::builder(handler)
             .bind(Ipv4Addr::UNSPECIFIED, HTTP_PORT)
             .build()
             .await
     }
 
-    pub fn builder<H: DlnaRequestHandler + 'static>(handler: H) -> DlnaServerBuilder {
+    pub fn builder<H: DlnaRequestHandler>(handler: H) -> DlnaServerBuilder {
         DlnaServerBuilder {
             uuid: Uuid::new_v4(),
             binds: Vec::new(),

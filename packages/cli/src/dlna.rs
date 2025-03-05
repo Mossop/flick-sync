@@ -1,7 +1,8 @@
 use std::{net::Ipv4Addr, sync::Arc};
 
+use async_trait::async_trait;
 use clap::Args;
-use dlna_server::{DlnaRequestHandler, DlnaServer};
+use dlna_server::{Container, DlnaRequestHandler, DlnaServer, Object};
 use flick_sync::FlickSync;
 use tokio::sync::Notify;
 
@@ -12,7 +13,29 @@ struct DlnaHandler {
     flick_sync: FlickSync,
 }
 
-impl DlnaRequestHandler for DlnaHandler {}
+#[async_trait]
+impl DlnaRequestHandler for DlnaHandler {
+    async fn list_children(&self, parent_id: &str) -> Vec<Object> {
+        if parent_id == "0" {
+            vec![
+                Object::Container(Container {
+                    id: "L".to_string(),
+                    parent_id: "0".to_string(),
+                    child_count: None,
+                    title: "Libraries".to_string(),
+                }),
+                Object::Container(Container {
+                    id: "P".to_string(),
+                    parent_id: "0".to_string(),
+                    child_count: None,
+                    title: "Playlists".to_string(),
+                }),
+            ]
+        } else {
+            Vec::new()
+        }
+    }
+}
 
 #[derive(Args)]
 pub struct Dlna {}
