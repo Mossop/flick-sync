@@ -1,10 +1,9 @@
 #![deny(unreachable_pub)]
 //! A basic implementation of a DLNA media server
 
-use std::net::IpAddr;
 use std::{
     collections::HashMap,
-    net::{Ipv4Addr, Ipv6Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
 use actix_web::{
@@ -16,27 +15,46 @@ use actix_web::{
 use async_trait::async_trait;
 use getifaddrs::{Interface, InterfaceFlags, getifaddrs};
 use tracing::debug;
+pub use upnp::{Container, Item, Object, Resource, UpnpError};
 use uuid::Uuid;
 
 use crate::{
-    cds::HttpAppData,
     rt::{TaskHandle, spawn},
+    services::HttpAppData,
     ssdp::SsdpTask,
 };
-
-pub use cds::upnp::{Container, Item, Object, Resource, UpnpError};
 
 /// The default port to use for HTTP communication
 const HTTP_PORT: u16 = 1980;
 
-mod cds;
 #[cfg_attr(feature = "rt-async", path = "rt/async_std.rs")]
 #[cfg_attr(feature = "rt-tokio", path = "rt/tokio.rs")]
 mod rt;
+mod services;
+mod soap;
 mod ssdp;
+mod upnp;
+mod xml;
 
 #[cfg(not(any(feature = "rt-tokio", feature = "rt-async")))]
 compile_error!("An async runtime must be selected");
+
+mod ns {
+    pub(crate) const CONNECTION_MANAGER: &str = "urn:schemas-upnp-org:service:ConnectionManager:1";
+    pub(crate) const CONTENT_DIRECTORY: &str = "urn:schemas-upnp-org:service:ContentDirectory:1";
+    pub(crate) const SOAP_ENVELOPE: &str = "http://schemas.xmlsoap.org/soap/envelope/";
+    pub(crate) const SOAP_ENCODING: &str = "http://schemas.xmlsoap.org/soap/encoding/";
+    pub(crate) const UPNP_ROOT: &str = "upnp:rootdevice";
+    pub(crate) const UPNP_MEDIASERVER: &str = "urn:schemas-upnp-org:device:MediaServer:1";
+    pub(crate) const UPNP_CONTENTDIRECTORY: &str =
+        "urn:schemas-upnp-org:service:ContentDirectory:1";
+    pub(crate) const UPNP_DEVICE: &str = "urn:schemas-upnp-org:device-1-0";
+    pub(crate) const UPNP_SERVICE: &str = "urn:schemas-upnp-org:service-1-0";
+    pub(crate) const DIDL: &str = "urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/";
+    pub(crate) const DC: &str = "http://purl.org/dc/elements/1.1/";
+    pub(crate) const UPNP: &str = "urn:schemas-upnp-org:metadata-1-0/upnp/";
+    pub(crate) const DLNA: &str = "urn:schemas-dlna-org:metadata-1-0/";
+}
 
 #[async_trait]
 pub trait DlnaRequestHandler
@@ -115,11 +133,11 @@ impl DlnaServerBuilder {
         let mut http_server = HttpServer::new(move || {
             App::new()
                 .app_data(app_data.clone())
-                .wrap(from_fn(cds::middleware::middleware))
-                .service(cds::device_root)
-                .service(cds::connection_manager)
-                .service(cds::content_directory)
-                .service(web::scope("/soap").service(cds::services()))
+                .wrap(from_fn(services::middleware))
+                .service(services::device_root)
+                .service(services::connection_manager)
+                .service(services::content_directory)
+                .service(web::scope("/soap").service(services::soap_services()))
         });
 
         let interfaces: Vec<Interface> = getifaddrs()?

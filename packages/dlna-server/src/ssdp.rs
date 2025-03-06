@@ -7,8 +7,7 @@ use std::{
 
 use anyhow::bail;
 use bytes::{Buf, BufMut, BytesMut};
-use futures::{FutureExt, sink::SinkExt};
-use futures::{select, stream::StreamExt};
+use futures::{FutureExt, select, sink::SinkExt, stream::StreamExt};
 use http::{HeaderMap, HeaderName, HeaderValue};
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::{net::UdpSocket, time::sleep};
@@ -19,13 +18,11 @@ use tokio_util::{
 use tracing::{debug, error, instrument, trace, warn};
 use uuid::Uuid;
 
+use crate::ns;
+
 const SSDP_IPV4: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
 const SSDP_IPV6: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xC);
 const SSDP_PORT: u16 = 1900;
-
-const UPNP_ROOT: &str = "upnp:rootdevice";
-const UPNP_MEDIASERVER: &str = "urn:schemas-upnp-org:device:MediaServer:1";
-const UPNP_CONTENTDIRECTORY: &str = "urn:schemas-upnp-org:service:ContentDirectory:1";
 
 #[derive(Debug, Clone)]
 enum SsdpMessage {
@@ -504,16 +501,20 @@ impl SsdpTask {
 
         let messages = vec![
             self.notify_message(address, &usn_base, &usn_base),
-            self.notify_message(address, &format!("{}::{}", usn_base, UPNP_ROOT), UPNP_ROOT),
             self.notify_message(
                 address,
-                &format!("{}::{}", usn_base, UPNP_MEDIASERVER),
-                UPNP_MEDIASERVER,
+                &format!("{}::{}", usn_base, ns::UPNP_ROOT),
+                ns::UPNP_ROOT,
             ),
             self.notify_message(
                 address,
-                &format!("{}::{}", usn_base, UPNP_CONTENTDIRECTORY),
-                UPNP_CONTENTDIRECTORY,
+                &format!("{}::{}", usn_base, ns::UPNP_MEDIASERVER),
+                ns::UPNP_MEDIASERVER,
+            ),
+            self.notify_message(
+                address,
+                &format!("{}::{}", usn_base, ns::UPNP_CONTENTDIRECTORY),
+                ns::UPNP_CONTENTDIRECTORY,
             ),
         ];
 
@@ -538,21 +539,24 @@ impl SsdpTask {
         let mut messages = Vec::new();
 
         match search_target {
-            UPNP_ROOT => {
+            ns::UPNP_ROOT => {
                 messages.push(self.response_message(&usn_base, &usn_base));
                 messages.push(
-                    self.response_message(&format!("{}::{}", usn_base, UPNP_ROOT), UPNP_ROOT),
+                    self.response_message(
+                        &format!("{}::{}", usn_base, ns::UPNP_ROOT),
+                        ns::UPNP_ROOT,
+                    ),
                 );
                 messages.push(self.response_message(
-                    &format!("{}::{}", usn_base, UPNP_MEDIASERVER),
-                    UPNP_MEDIASERVER,
+                    &format!("{}::{}", usn_base, ns::UPNP_MEDIASERVER),
+                    ns::UPNP_MEDIASERVER,
                 ));
                 messages.push(self.response_message(
-                    &format!("{}::{}", usn_base, UPNP_CONTENTDIRECTORY),
-                    UPNP_CONTENTDIRECTORY,
+                    &format!("{}::{}", usn_base, ns::UPNP_CONTENTDIRECTORY),
+                    ns::UPNP_CONTENTDIRECTORY,
                 ));
             }
-            UPNP_MEDIASERVER | UPNP_CONTENTDIRECTORY => {
+            ns::UPNP_MEDIASERVER | ns::UPNP_CONTENTDIRECTORY => {
                 messages.push(
                     self.response_message(
                         &format!("{}::{}", usn_base, search_target),

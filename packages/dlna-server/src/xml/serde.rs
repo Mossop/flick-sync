@@ -11,7 +11,7 @@ use serde::{
 };
 use xml::{EventReader, EventWriter, writer};
 
-use crate::cds::xml::{ClientXmlError, WriterError, XmlName, XmlReader};
+use crate::xml::{ClientXmlError, WriterError, XmlName, XmlReader};
 
 impl ser::Error for WriterError {
     fn custom<T>(msg: T) -> Self

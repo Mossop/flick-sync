@@ -5,18 +5,11 @@ use mime::Mime;
 use url::Url;
 use uuid::Uuid;
 
-use crate::cds::{
-    SCHEMA_CONNECTION_MANAGER, SCHEMA_CONTENT_DIRECTORY,
+use crate::{
+    ns,
     soap::SoapArgument,
     xml::{ToXml, WriterError, XmlWriter},
 };
-
-const NS_UPNP_DEVICE: &str = "urn:schemas-upnp-org:device-1-0";
-pub(crate) const NS_UPNP_SERVICE: &str = "urn:schemas-upnp-org:service-1-0";
-const NS_DIDL: &str = "urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/";
-const NS_DC: &str = "http://purl.org/dc/elements/1.1/";
-const NS_UPNP: &str = "urn:schemas-upnp-org:metadata-1-0/upnp/";
-const NS_DLNA: &str = "urn:schemas-dlna-org:metadata-1-0/";
 
 #[derive(Debug)]
 pub enum UpnpError {
@@ -71,7 +64,7 @@ pub struct Container {
 
 impl<W: Write> ToXml<W> for Container {
     fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
-        let mut builder = writer.element_ns((NS_DIDL, "container"));
+        let mut builder = writer.element_ns((ns::DIDL, "container"));
         if let Some(child_count) = self.child_count {
             builder = builder.attr("childCount", child_count);
         }
@@ -81,9 +74,9 @@ impl<W: Write> ToXml<W> for Container {
             .attr("restricted", "1")
             .attr("searchable", "0")
             .contents(|writer| {
-                writer.element_ns((NS_DC, "title")).text(&self.title)?;
+                writer.element_ns((ns::DC, "title")).text(&self.title)?;
                 writer
-                    .element_ns((NS_UPNP, "class"))
+                    .element_ns((ns::UPNP, "class"))
                     .text("object.container")
             })
     }
@@ -103,7 +96,7 @@ impl<W: Write> ToXml<W> for Resource {
         let uri = base.join(&format!("/resource/{}", self.id)).unwrap();
 
         let mut builder = writer
-            .element_ns((NS_DIDL, "res"))
+            .element_ns((ns::DIDL, "res"))
             .attr("protocolInfo", format!("http-get:*:{}:*", self.mime));
 
         if let Some(size) = self.size {
@@ -131,14 +124,14 @@ pub struct Item {
 impl<W: Write> ToXml<W> for Item {
     fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
         writer
-            .element_ns((NS_DIDL, "item"))
+            .element_ns((ns::DIDL, "item"))
             .attr("id", &self.id)
             .attr("parentID", &self.parent_id)
             .attr("restricted", "1")
             .contents(|writer| {
-                writer.element_ns((NS_DC, "title")).text(&self.title)?;
+                writer.element_ns((ns::DC, "title")).text(&self.title)?;
                 writer
-                    .element_ns((NS_UPNP, "class"))
+                    .element_ns((ns::UPNP, "class"))
                     .text("object.item.videoItem")?;
 
                 for resource in &self.resources {
@@ -199,10 +192,10 @@ where
 {
     fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
         writer
-            .element_ns((NS_DIDL, "DIDL-Lite"))
-            .prefix("dc", NS_DC)
-            .prefix("dlna", NS_DLNA)
-            .prefix("upnp", NS_UPNP)
+            .element_ns((ns::DIDL, "DIDL-Lite"))
+            .prefix("dc", ns::DC)
+            .prefix("dlna", ns::DLNA)
+            .prefix("upnp", ns::UPNP)
             .contents(|writer| {
                 for object in self.objects.iter() {
                     object.write_xml(writer)?;
@@ -220,7 +213,7 @@ pub(crate) struct Root {
 impl<W: Write> ToXml<W> for Root {
     fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
         writer
-            .element_ns((NS_UPNP_DEVICE, "root"))
+            .element_ns((ns::UPNP_DEVICE, "root"))
             .contents(|writer| {
                 writer.element("specVersion").contents(|writer| {
                     writer.element("major").text(1)?;
@@ -246,9 +239,7 @@ impl<W: Write> ToXml<W> for Root {
 
                     writer.element("serviceList").contents(|writer| {
                         writer.element("service").contents(|writer| {
-                            writer
-                                .element("serviceType")
-                                .text(SCHEMA_CONNECTION_MANAGER)?;
+                            writer.element("serviceType").text(ns::CONNECTION_MANAGER)?;
                             writer
                                 .element("serviceId")
                                 .text("urn:upnp-org:serviceId:ConnectionManager")?;
@@ -259,9 +250,7 @@ impl<W: Write> ToXml<W> for Root {
                         })?;
 
                         writer.element("service").contents(|writer| {
-                            writer
-                                .element("serviceType")
-                                .text(SCHEMA_CONTENT_DIRECTORY)?;
+                            writer.element("serviceType").text(ns::CONTENT_DIRECTORY)?;
                             writer
                                 .element("serviceId")
                                 .text("urn:upnp-org:serviceId:ContentDirectory")?;
@@ -290,7 +279,7 @@ impl ServiceDescription {
 impl<W: Write> ToXml<W> for ServiceDescription {
     fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
         writer
-            .element_ns((NS_UPNP_SERVICE, "scpd"))
+            .element_ns((ns::UPNP_SERVICE, "scpd"))
             .contents(|writer| {
                 writer.element("specVersion").contents(|writer| {
                     writer.element("major").text(1)?;
@@ -300,28 +289,25 @@ impl<W: Write> ToXml<W> for ServiceDescription {
                 writer.element("actionList").contents(|writer| {
                     for (name, args) in self.descriptors.iter() {
                         writer
-                            .element_ns((NS_UPNP_SERVICE, "action"))
+                            .element_ns((ns::UPNP_SERVICE, "action"))
                             .contents(|writer| {
-                                writer.element_ns((NS_UPNP_SERVICE, "name")).text(name)?;
+                                writer.element_ns((ns::UPNP_SERVICE, "name")).text(name)?;
 
                                 if !args.is_empty() {
                                     writer
-                                        .element_ns((NS_UPNP_SERVICE, "argumentList"))
+                                        .element_ns((ns::UPNP_SERVICE, "argumentList"))
                                         .contents(|writer| {
                                             for (name, direction) in *args {
                                                 writer
-                                                    .element_ns((NS_UPNP_SERVICE, "argument"))
+                                                    .element_ns((ns::UPNP_SERVICE, "argument"))
                                                     .contents(|writer| {
-                                                        writer
-                                                            .element_ns((NS_UPNP_SERVICE, "name"))
-                                                            .text(name)?;
-                                                        writer
-                                                            .element_ns((
-                                                                NS_UPNP_SERVICE,
-                                                                "direction",
-                                                            ))
-                                                            .text(direction)
-                                                    })?;
+                                                    writer
+                                                        .element_ns((ns::UPNP_SERVICE, "name"))
+                                                        .text(name)?;
+                                                    writer
+                                                        .element_ns((ns::UPNP_SERVICE, "direction"))
+                                                        .text(direction)
+                                                })?;
                                             }
 
                                             Ok(())

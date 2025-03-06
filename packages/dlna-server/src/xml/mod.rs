@@ -15,6 +15,7 @@ use actix_web::{
     http::{StatusCode, header},
 };
 use bytes::Bytes;
+use serde::{XmlDeserializer, XmlSerializer};
 use thiserror::Error;
 use tracing::error;
 use url::Url;
@@ -25,8 +26,6 @@ use xml::{
     reader::{self},
     writer,
 };
-
-use crate::cds::xml::serde::{XmlDeserializer, XmlSerializer};
 
 mod serde;
 
@@ -632,9 +631,7 @@ where
 mod test {
     use serde::{Deserialize, Serialize};
 
-    use crate::cds::xml::XmlReader;
-
-    use super::{WriterError, XmlWriter};
+    use super::{WriterError, XmlReader, XmlWriter};
 
     fn write_xml_to_string<F>(source: F) -> String
     where

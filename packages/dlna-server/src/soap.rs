@@ -14,18 +14,13 @@ use tracing::{Instrument, Level, error, field, span};
 use url::Url;
 
 use crate::{
-    DlnaRequestHandler, HttpAppData,
-    cds::{
-        upnp::UpnpError,
-        xml::{
-            ClientXmlError, Element, FromXml, ToXml, WriterError, Xml, XmlElement, XmlName,
-            XmlReader, XmlWriter,
-        },
+    DlnaRequestHandler, HttpAppData, ns,
+    upnp::UpnpError,
+    xml::{
+        ClientXmlError, Element, FromXml, ToXml, WriterError, Xml, XmlElement, XmlName, XmlReader,
+        XmlWriter,
     },
 };
-
-const NS_SOAP_ENVELOPE: &str = "http://schemas.xmlsoap.org/soap/envelope/";
-const SOAP_ENCODING: &str = "http://schemas.xmlsoap.org/soap/encoding/";
 
 struct ActionWrapper<A>(A);
 
@@ -44,7 +39,7 @@ where
         reader: &mut XmlReader<R>,
     ) -> Result<Self, ClientXmlError> {
         if let Some(element) = reader.next_element()? {
-            if element.name.as_ref() == (Some(NS_SOAP_ENVELOPE), "Body") {
+            if element.name.as_ref() == (Some(ns::SOAP_ENVELOPE), "Body") {
                 if let Some(element) = reader.next_element()? {
                     if element.name.as_ref() != (Some(A::schema()), A::name()) {
                         return Err("Unexpected body element".into());
@@ -66,7 +61,7 @@ where
 
 impl<A> XmlElement for ActionWrapper<A> {
     fn name() -> XmlName {
-        (NS_SOAP_ENVELOPE, "Envelope").into()
+        (ns::SOAP_ENVELOPE, "Envelope").into()
     }
 }
 
@@ -99,12 +94,12 @@ where
 {
     fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
         writer
-            .element_ns((NS_SOAP_ENVELOPE, "Envelope"))
-            .prefix("s", NS_SOAP_ENVELOPE)
-            .attr_ns((NS_SOAP_ENVELOPE, "encodingStyle"), SOAP_ENCODING)
+            .element_ns((ns::SOAP_ENVELOPE, "Envelope"))
+            .prefix("s", ns::SOAP_ENVELOPE)
+            .attr_ns((ns::SOAP_ENVELOPE, "encodingStyle"), ns::SOAP_ENCODING)
             .contents(|writer| {
                 writer
-                    .element_ns((NS_SOAP_ENVELOPE, "Body"))
+                    .element_ns((ns::SOAP_ENVELOPE, "Body"))
                     .contents(|writer| match &self.response {
                         Ok(response) => writer
                             .element_ns(self.name.clone())
@@ -309,7 +304,7 @@ impl<W: Write> ToXml<W> for UpnpError {
         };
 
         writer
-            .element_ns((NS_SOAP_ENVELOPE, "Fault"))
+            .element_ns((ns::SOAP_ENVELOPE, "Fault"))
             .contents(|writer| {
                 writer
                     .element("faultcode")

@@ -1,29 +1,104 @@
-use std::{convert::Infallible, str::FromStr};
+use std::{convert::Infallible, net::SocketAddr, str::FromStr};
 
-use actix_web::{dev::HttpServiceFactory, get, post, web::Data};
+use actix_web::{
+    Error, HttpRequest,
+    body::MessageBody,
+    dev::{HttpServiceFactory, ServiceRequest, ServiceResponse},
+    get,
+    middleware::Next,
+    post,
+    web::Data,
+};
 use serde::{Deserialize, Serialize};
-use serde_with::StringWithSeparator;
-use serde_with::formats::CommaSeparator;
-use serde_with::serde_as;
+use serde_with::{StringWithSeparator, formats::CommaSeparator, serde_as};
+use tracing::{Instrument, Level, field, instrument, span, trace, warn};
 use uuid::Uuid;
 
 use crate::{
-    DlnaRequestHandler, UpnpError,
-    cds::{
-        soap::{ArgDirection, RequestContext, ResponseWrapper, SoapArgument, SoapResult},
-        upnp::DidlDocument,
-        xml::Xml,
-    },
+    DlnaRequestHandler, UpnpError, ns,
+    soap::{ArgDirection, RequestContext, ResponseWrapper, SoapAction, SoapArgument, SoapResult},
+    upnp::{self, DidlDocument},
+    xml::Xml,
 };
-pub(super) use soap::SoapAction;
 
-pub(super) mod middleware;
-mod soap;
-pub(crate) mod upnp;
-mod xml;
+fn is_safe(addr: SocketAddr) -> bool {
+    match addr {
+        SocketAddr::V4(addr) => {
+            let ip = addr.ip();
+            ip.is_private() || ip.is_loopback() || ip.is_link_local()
+        }
+        SocketAddr::V6(addr) => addr.ip().is_loopback(),
+    }
+}
 
-const SCHEMA_CONNECTION_MANAGER: &str = "urn:schemas-upnp-org:service:ConnectionManager:1";
-const SCHEMA_CONTENT_DIRECTORY: &str = "urn:schemas-upnp-org:service:ContentDirectory:1";
+fn client_addr(req: &HttpRequest) -> Option<String> {
+    if let Some(addr) = req.peer_addr() {
+        if is_safe(addr) {
+            if let Some(ip) = req.connection_info().realip_remote_addr() {
+                return Some(ip.to_owned());
+            }
+        }
+
+        Some(addr.to_string())
+    } else {
+        None
+    }
+}
+
+#[instrument(skip_all)]
+pub(crate) async fn middleware<B: MessageBody>(
+    req: ServiceRequest,
+    next: Next<B>,
+) -> Result<ServiceResponse<B>, Error> {
+    let http_request = req.request();
+
+    let span = span!(
+        Level::INFO,
+        "HTTP request",
+        "client.address" = field::Empty,
+        "url.path" = req.path(),
+        "user_agent.original" = field::Empty,
+        "http.request.method" = %req.method(),
+        "http.request.content_type" = field::Empty,
+        "http.request.content_length" = field::Empty,
+        "http.response.status_code" = field::Empty,
+    );
+
+    let headers = http_request.headers();
+
+    if let Some(user_agent) = headers.get("user-agent").and_then(|h| h.to_str().ok()) {
+        span.record("user_agent.original", user_agent);
+    }
+
+    if let Some(content_type) = headers.get("content-type").and_then(|h| h.to_str().ok()) {
+        span.record("http.request.content_type", content_type);
+    }
+
+    if let Some(content_length) = headers.get("content-length").and_then(|h| h.to_str().ok()) {
+        span.record("http.request.content_length", content_length);
+    }
+
+    let client_addr = client_addr(req.request());
+
+    if let Some(ref ip) = client_addr {
+        span.record("client.address", ip);
+    }
+
+    let res = next.call(req).instrument(span.clone()).await?;
+
+    let status = res.status();
+    span.record("http.response.status_code", status.as_u16());
+
+    if status.is_server_error() {
+        warn!(parent: &span, status = status.as_u16(), "Server failure")
+    } else if status.is_client_error() {
+        warn!(parent: &span, status = status.as_u16(), "Bad request")
+    } else {
+        trace!(parent: &span, status = status.as_u16())
+    }
+
+    Ok(res)
+}
 
 pub(crate) struct HttpAppData {
     pub(crate) uuid: Uuid,
@@ -95,7 +170,7 @@ impl SoapAction for GetProtocolInfo {
     type Response = GetProtocolInfoResponse;
 
     fn schema() -> &'static str {
-        SCHEMA_CONNECTION_MANAGER
+        ns::CONNECTION_MANAGER
     }
 
     fn name() -> &'static str {
@@ -137,7 +212,7 @@ impl SoapAction for GetCurrentConnectionIDs {
     type Response = GetCurrentConnectionIDsResponse;
 
     fn schema() -> &'static str {
-        SCHEMA_CONNECTION_MANAGER
+        ns::CONNECTION_MANAGER
     }
 
     fn name() -> &'static str {
@@ -200,7 +275,7 @@ impl SoapAction for GetCurrentConnectionInfo {
     type Response = GetCurrentConnectionInfoResponse;
 
     fn schema() -> &'static str {
-        SCHEMA_CONNECTION_MANAGER
+        ns::CONNECTION_MANAGER
     }
 
     fn name() -> &'static str {
@@ -263,7 +338,7 @@ impl SoapAction for Browse {
     type Response = BrowseResponse;
 
     fn schema() -> &'static str {
-        SCHEMA_CONTENT_DIRECTORY
+        ns::CONTENT_DIRECTORY
     }
 
     fn name() -> &'static str {
@@ -333,7 +408,7 @@ impl SoapAction for GetSortCapabilities {
     type Response = GetSortCapabilitiesResponse;
 
     fn schema() -> &'static str {
-        SCHEMA_CONTENT_DIRECTORY
+        ns::CONTENT_DIRECTORY
     }
 
     fn name() -> &'static str {
@@ -368,7 +443,7 @@ impl SoapAction for GetSearchCapabilities {
     type Response = GetSearchCapabilitiesResponse;
 
     fn schema() -> &'static str {
-        SCHEMA_CONTENT_DIRECTORY
+        ns::CONTENT_DIRECTORY
     }
 
     fn name() -> &'static str {
@@ -401,7 +476,7 @@ impl SoapAction for GetSystemUpdateID {
     type Response = GetSystemUpdateIDResponse;
 
     fn schema() -> &'static str {
-        SCHEMA_CONTENT_DIRECTORY
+        ns::CONTENT_DIRECTORY
     }
 
     fn name() -> &'static str {
@@ -449,7 +524,7 @@ impl SoapAction for Search {
     type Response = SearchResponse;
 
     fn schema() -> &'static str {
-        SCHEMA_CONTENT_DIRECTORY
+        ns::CONTENT_DIRECTORY
     }
 
     fn name() -> &'static str {
@@ -484,7 +559,7 @@ async fn unknown_action() -> ResponseWrapper<()> {
     ResponseWrapper::error(UpnpError::InvalidAction)
 }
 
-pub(super) fn services() -> impl HttpServiceFactory {
+pub(super) fn soap_services() -> impl HttpServiceFactory {
     (
         GetProtocolInfo::factory(),
         GetCurrentConnectionIDs::factory(),
