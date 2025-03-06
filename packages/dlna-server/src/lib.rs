@@ -102,8 +102,14 @@ impl DlnaServer {
     }
 
     pub fn builder<H: DlnaRequestHandler>(handler: H) -> DlnaServerBuilder {
+        let server_version = format!(
+            "RustDlna/{}.{}",
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            env!("CARGO_PKG_VERSION_MINOR")
+        );
         DlnaServerBuilder {
             uuid: Uuid::new_v4(),
+            server_version,
             binds: Vec::new(),
             handler: Box::new(handler),
         }
@@ -118,6 +124,7 @@ impl DlnaServer {
 /// A builder allowing configuration of the DLNA server.
 pub struct DlnaServerBuilder {
     uuid: Uuid,
+    server_version: String,
     binds: Vec<(IpAddr, u16)>,
     handler: Box<dyn DlnaRequestHandler>,
 }
@@ -185,7 +192,8 @@ impl DlnaServerBuilder {
         let mut task_handles = TaskHandles::default();
 
         for (iface, http_port) in bound_interfaces.into_iter() {
-            let ssdp_task = SsdpTask::new(self.uuid, iface.into(), http_port).await;
+            let ssdp_task =
+                SsdpTask::new(self.uuid, iface.into(), &self.server_version, http_port).await;
             task_handles.add(spawn(ssdp_task.run()));
         }
 
@@ -193,6 +201,13 @@ impl DlnaServerBuilder {
             task_handles,
             web_handle,
         })
+    }
+
+    /// Sets a specific server version. Should match the form `Name/<major>.<minor>`. Defaults to
+    /// `RustDlna/<pkg major>.<pkg minor>`
+    pub fn server_version(mut self, version: &str) -> Self {
+        self.server_version = version.to_owned();
+        self
     }
 
     /// Sets a specific UUID. If not called a unique ID is generated everytime a new server is

@@ -1,4 +1,5 @@
 use std::{
+    env::consts,
     fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     str::{FromStr, from_utf8},
@@ -428,6 +429,7 @@ impl From<getifaddrs::Interface> for Box<dyn Interface> {
 pub(crate) struct SsdpTask {
     uuid: Uuid,
     interface: Box<dyn Interface + 'static>,
+    server: String,
     http_port: u16,
 }
 
@@ -435,11 +437,13 @@ impl SsdpTask {
     pub(crate) async fn new(
         uuid: Uuid,
         interface: Box<dyn Interface + 'static>,
+        server_version: &str,
         http_port: u16,
     ) -> Self {
         Self {
             uuid,
             interface,
+            server: format!("{}/0.0 UPnP/1.1 {}", consts::OS, server_version),
             http_port,
         }
     }
@@ -464,10 +468,6 @@ impl SsdpTask {
         }
     }
 
-    fn server_id(&self) -> String {
-        "macOS/5.1 UPnP/1.1 FlickSync/0.1".to_string()
-    }
-
     fn notify_message(
         &self,
         address: SocketAddr,
@@ -484,7 +484,7 @@ impl SsdpTask {
                 self.interface.address(),
                 self.http_port
             ),
-            server: self.server_id(),
+            server: self.server.clone(),
         }
     }
 
@@ -528,7 +528,7 @@ impl SsdpTask {
                 self.interface.address(),
                 self.http_port
             ),
-            server: self.server_id(),
+            server: self.server.clone(),
             search_target: search_target.to_owned(),
             unique_service_name: usn.to_owned(),
         }

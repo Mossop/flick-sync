@@ -219,6 +219,11 @@ impl Runnable for Dlna {
 
         let server = DlnaServer::builder(handler)
             .uuid(uuid)
+            .server_version(&format!(
+                "FlickSync/{}.{}",
+                env!("CARGO_PKG_VERSION_MAJOR"),
+                env!("CARGO_PKG_VERSION_MINOR")
+            ))
             .bind(Ipv4Addr::UNSPECIFIED, 1980)
             .build()
             .await?;
