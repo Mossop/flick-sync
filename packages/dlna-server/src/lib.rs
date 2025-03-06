@@ -101,7 +101,7 @@ impl DlnaServer {
             .await
     }
 
-    pub fn builder<H: DlnaRequestHandler>(handler: H) -> DlnaServerBuilder {
+    pub fn builder<H: DlnaRequestHandler>(handler: H) -> DlnaServerBuilder<H> {
         let server_version = format!(
             "RustDlna/{}.{}",
             env!("CARGO_PKG_VERSION_MAJOR"),
@@ -111,7 +111,7 @@ impl DlnaServer {
             uuid: Uuid::new_v4(),
             server_version,
             binds: Vec::new(),
-            handler: Box::new(handler),
+            handler,
         }
     }
 
@@ -122,14 +122,14 @@ impl DlnaServer {
 }
 
 /// A builder allowing configuration of the DLNA server.
-pub struct DlnaServerBuilder {
+pub struct DlnaServerBuilder<H: DlnaRequestHandler> {
     uuid: Uuid,
     server_version: String,
     binds: Vec<(IpAddr, u16)>,
-    handler: Box<dyn DlnaRequestHandler>,
+    handler: H,
 }
 
-impl DlnaServerBuilder {
+impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
     /// Builds the DLNA server and starts it listening using the chosen runtime.
     pub async fn build(self) -> anyhow::Result<DlnaServer> {
         let app_data = Data::new(HttpAppData {
@@ -141,10 +141,10 @@ impl DlnaServerBuilder {
             App::new()
                 .app_data(app_data.clone())
                 .wrap(from_fn(services::middleware))
-                .service(services::device_root)
+                .route("/device.xml", web::get().to(services::device_root::<H>))
                 .service(services::connection_manager)
                 .service(services::content_directory)
-                .service(web::scope("/soap").service(services::soap_services()))
+                .route("/soap", web::post().to(services::soap_request::<H>))
         });
 
         let interfaces: Vec<Interface> = getifaddrs()?

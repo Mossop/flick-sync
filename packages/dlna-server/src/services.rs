@@ -1,14 +1,15 @@
 use std::{convert::Infallible, net::SocketAddr, str::FromStr};
 
 use actix_web::{
-    Error, HttpRequest,
+    Error, HttpRequest, HttpResponse, Responder,
     body::MessageBody,
-    dev::{HttpServiceFactory, ServiceRequest, ServiceResponse},
+    dev::{ServiceRequest, ServiceResponse},
     get,
+    http::header,
     middleware::Next,
-    post,
-    web::Data,
+    web::{Data, Payload},
 };
+use mime::Mime;
 use serde::{Deserialize, Serialize};
 use serde_with::{StringWithSeparator, formats::CommaSeparator, serde_as};
 use tracing::{Instrument, Level, field, instrument, span, trace, warn};
@@ -16,7 +17,7 @@ use uuid::Uuid;
 
 use crate::{
     DlnaRequestHandler, UpnpError, ns,
-    soap::{ArgDirection, RequestContext, ResponseWrapper, SoapAction, SoapArgument, SoapResult},
+    soap::{ArgDirection, RequestContext, SoapAction, SoapArgument, SoapResult},
     upnp::{self, DidlDocument},
     xml::Xml,
 };
@@ -100,13 +101,14 @@ pub(crate) async fn middleware<B: MessageBody>(
     Ok(res)
 }
 
-pub(crate) struct HttpAppData {
+pub(crate) struct HttpAppData<H: DlnaRequestHandler> {
     pub(crate) uuid: Uuid,
-    pub(crate) handler: Box<dyn DlnaRequestHandler>,
+    pub(crate) handler: H,
 }
 
-#[get("/device.xml")]
-async fn device_root(app_data: Data<HttpAppData>) -> Xml<upnp::Root> {
+pub(crate) async fn device_root<H: DlnaRequestHandler>(
+    app_data: Data<HttpAppData<H>>,
+) -> Xml<upnp::Root> {
     Xml::new(upnp::Root {
         uuid: app_data.uuid,
     })
@@ -181,7 +183,7 @@ impl SoapAction for GetProtocolInfo {
         &[("Source", ArgDirection::Out), ("Sink", ArgDirection::Out)]
     }
 
-    async fn execute<H: DlnaRequestHandler + ?Sized>(
+    async fn execute<H: DlnaRequestHandler>(
         &self,
         _context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
@@ -223,7 +225,7 @@ impl SoapAction for GetCurrentConnectionIDs {
         &[("ConnectionIDs", ArgDirection::Out)]
     }
 
-    async fn execute<H: DlnaRequestHandler + ?Sized>(
+    async fn execute<H: DlnaRequestHandler>(
         &self,
         _context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
@@ -295,7 +297,7 @@ impl SoapAction for GetCurrentConnectionInfo {
         ]
     }
 
-    async fn execute<'a, H: DlnaRequestHandler + ?Sized>(
+    async fn execute<'a, H: DlnaRequestHandler>(
         &self,
         _context: RequestContext<'a, H>,
     ) -> SoapResult<Self::Response> {
@@ -360,7 +362,7 @@ impl SoapAction for Browse {
         ]
     }
 
-    async fn execute<H: DlnaRequestHandler + ?Sized>(
+    async fn execute<H: DlnaRequestHandler>(
         &self,
         context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
@@ -419,7 +421,7 @@ impl SoapAction for GetSortCapabilities {
         &[("SortCaps", ArgDirection::Out)]
     }
 
-    async fn execute<H: DlnaRequestHandler + ?Sized>(
+    async fn execute<H: DlnaRequestHandler>(
         &self,
         _context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
@@ -454,7 +456,7 @@ impl SoapAction for GetSearchCapabilities {
         &[("SearchCaps", ArgDirection::Out)]
     }
 
-    async fn execute<H: DlnaRequestHandler + ?Sized>(
+    async fn execute<H: DlnaRequestHandler>(
         &self,
         _context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
@@ -487,7 +489,7 @@ impl SoapAction for GetSystemUpdateID {
         &[("Id", ArgDirection::Out)]
     }
 
-    async fn execute<H: DlnaRequestHandler + ?Sized>(
+    async fn execute<H: DlnaRequestHandler>(
         &self,
         _context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
@@ -546,7 +548,7 @@ impl SoapAction for Search {
         ]
     }
 
-    async fn execute<H: DlnaRequestHandler + ?Sized>(
+    async fn execute<H: DlnaRequestHandler>(
         &self,
         _context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
@@ -554,21 +556,66 @@ impl SoapAction for Search {
     }
 }
 
-#[post("")]
-async fn unknown_action() -> ResponseWrapper<()> {
-    ResponseWrapper::error(UpnpError::InvalidAction)
-}
+pub(crate) async fn soap_request<H: DlnaRequestHandler>(
+    request: HttpRequest,
+    payload: Payload,
+    app_data: Data<HttpAppData<H>>,
+) -> HttpResponse {
+    let headers = request.headers();
 
-pub(super) fn soap_services() -> impl HttpServiceFactory {
-    (
-        GetProtocolInfo::factory(),
-        GetCurrentConnectionIDs::factory(),
-        GetCurrentConnectionInfo::factory(),
-        Browse::factory(),
-        GetSortCapabilities::factory(),
-        GetSearchCapabilities::factory(),
-        GetSystemUpdateID::factory(),
-        Search::factory(),
-        unknown_action,
-    )
+    let Some(mime) = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|hv| hv.to_str().ok())
+        .and_then(|st| Mime::from_str(st).ok())
+    else {
+        return HttpResponse::BadRequest().finish();
+    };
+
+    if mime.subtype() != mime::XML
+        || (mime.type_() != mime::APPLICATION && mime.type_() != mime::TEXT)
+    {
+        return HttpResponse::BadRequest().finish();
+    }
+
+    let Some(soap_action) = headers
+        .get("SOAPAction")
+        .and_then(|hv| hv.to_str().ok())
+        .map(|st| st.trim_matches('"'))
+    else {
+        return HttpResponse::BadRequest().finish();
+    };
+
+    if soap_action == GetProtocolInfo::soap_action() {
+        return GetProtocolInfo::service(request, payload, app_data).await;
+    }
+
+    if soap_action == GetCurrentConnectionIDs::soap_action() {
+        return GetCurrentConnectionIDs::service(request, payload, app_data).await;
+    }
+
+    if soap_action == GetCurrentConnectionInfo::soap_action() {
+        return GetCurrentConnectionInfo::service(request, payload, app_data).await;
+    }
+
+    if soap_action == Browse::soap_action() {
+        return Browse::service(request, payload, app_data).await;
+    }
+
+    if soap_action == GetSortCapabilities::soap_action() {
+        return GetSortCapabilities::service(request, payload, app_data).await;
+    }
+
+    if soap_action == GetSearchCapabilities::soap_action() {
+        return GetSearchCapabilities::service(request, payload, app_data).await;
+    }
+
+    if soap_action == GetSystemUpdateID::soap_action() {
+        return GetSystemUpdateID::service(request, payload, app_data).await;
+    }
+
+    if soap_action == Search::soap_action() {
+        return Search::service(request, payload, app_data).await;
+    }
+
+    UpnpError::InvalidAction.respond_to(&request)
 }
