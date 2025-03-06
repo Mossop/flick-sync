@@ -79,6 +79,19 @@ fn push_line<A: AsRef<[u8]>>(buf: &mut BytesMut, line: A) {
 }
 
 impl SsdpMessage {
+    fn is_uuid(&self, uuid: Uuid) -> bool {
+        match self {
+            SsdpMessage::Notify {
+                unique_service_name,
+                ..
+            } => {
+                let own_uuid = format!("uuid:{}", uuid.as_hyphenated());
+                unique_service_name.starts_with(&own_uuid)
+            }
+            _ => false,
+        }
+    }
+
     fn encode(&self, buffer: &mut BytesMut) {
         match self {
             SsdpMessage::MSearch {
@@ -610,6 +623,10 @@ impl SsdpTask {
                     return Ok(());
                 }
             };
+
+            if message.is_uuid(self.uuid) {
+                continue;
+            }
 
             trace!(?message, local_address=%self.interface.address(), %remote_address, "Received SSDP message");
 
