@@ -1,7 +1,6 @@
 use std::{
     cmp::Ordering,
     io::{self, SeekFrom},
-    net::Ipv4Addr,
     os::unix::fs::MetadataExt,
     path::PathBuf,
     pin::Pin,
@@ -1113,7 +1112,6 @@ impl Runnable for Dlna {
                 height: 256,
                 depth: 32,
             })
-            .bind(Ipv4Addr::UNSPECIFIED, 1980)
             .build()
             .await?;
 

@@ -2,9 +2,8 @@
 //! A basic implementation of a DLNA media server
 
 use std::{
-    collections::HashMap,
     io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::{Ipv4Addr, Ipv6Addr},
 };
 
 use actix_web::{
@@ -16,16 +15,14 @@ use actix_web::{
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
-use getifaddrs::{Interface, InterfaceFlags, getifaddrs};
 use mime::Mime;
-use tracing::debug;
 pub use upnp::{Container, Icon, Item, Object, Resource, UpnpError};
 use uuid::Uuid;
 
 use crate::{
     rt::{TaskHandle, spawn},
     services::HttpAppData,
-    ssdp::SsdpTask,
+    ssdp::Ssdp,
 };
 
 /// The default port to use for HTTP communication
@@ -106,27 +103,10 @@ where
     ) -> Result<StreamResponse<impl Stream<Item = Result<Bytes, io::Error>> + 'static>, UpnpError>;
 }
 
-#[derive(Default)]
-struct TaskHandles {
-    handles: Vec<TaskHandle>,
-}
-
-impl TaskHandles {
-    fn add(&mut self, handle: TaskHandle) {
-        self.handles.push(handle);
-    }
-
-    async fn shutdown(self) {
-        for handle in self.handles {
-            handle.shutdown().await;
-        }
-    }
-}
-
 /// A handle to the DLNA server allowing for discovering clients and shutting
 /// the server down.
 pub struct DlnaServer {
-    task_handles: TaskHandles,
+    ssdp_handle: Ssdp,
     web_handle: ServerHandle,
 }
 
@@ -134,10 +114,7 @@ impl DlnaServer {
     /// Builds a default DLNA server listing on all interfaces on IPv4 and
     /// starts it listening using the chosen runtime.
     pub async fn new<H: DlnaRequestHandler>(handler: H) -> anyhow::Result<Self> {
-        Self::builder(handler)
-            .bind(Ipv4Addr::UNSPECIFIED, HTTP_PORT)
-            .build()
-            .await
+        Self::builder(handler).build().await
     }
 
     pub fn builder<H: DlnaRequestHandler>(handler: H) -> DlnaServerBuilder<H> {
@@ -149,14 +126,13 @@ impl DlnaServer {
         DlnaServerBuilder {
             uuid: Uuid::new_v4(),
             server_version,
-            binds: Vec::new(),
             icons: Vec::new(),
             handler,
         }
     }
 
     pub async fn shutdown(self) {
-        self.task_handles.shutdown().await;
+        self.ssdp_handle.shutdown().await;
         self.web_handle.stop(true).await;
     }
 }
@@ -165,7 +141,6 @@ impl DlnaServer {
 pub struct DlnaServerBuilder<H: DlnaRequestHandler> {
     uuid: Uuid,
     server_version: String,
-    binds: Vec<(IpAddr, u16)>,
     icons: Vec<Icon>,
     handler: H,
 }
@@ -179,7 +154,7 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
             icons: self.icons,
         });
 
-        let mut http_server = HttpServer::new(move || {
+        let http_server = HttpServer::new(move || {
             App::new()
                 .app_data(app_data.clone())
                 .wrap(from_fn(services::middleware))
@@ -196,60 +171,17 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
                     "/resource/{path:.*}",
                     web::get().to(services::resource_get::<H>),
                 )
-        });
-
-        let interfaces: Vec<Interface> = getifaddrs()?
-            .filter(|iface| {
-                iface.flags.contains(InterfaceFlags::MULTICAST) && iface.address.is_ipv4()
-                    || iface.index.is_some()
-            })
-            .collect();
-
-        let mut bound_interfaces: HashMap<Interface, u16> = HashMap::new();
-
-        for (ipaddr, http_port) in self.binds {
-            let is_unspecified = match ipaddr {
-                IpAddr::V4(ipv4) => ipv4 == Ipv4Addr::UNSPECIFIED,
-                IpAddr::V6(ipv4) => ipv4 == Ipv6Addr::UNSPECIFIED,
-            };
-
-            let new_interfaces = interfaces
-                .iter()
-                .filter_map(|iface| {
-                    if bound_interfaces.contains_key(iface) {
-                        None
-                    } else if (is_unspecified && ipaddr.is_ipv4() == iface.address.is_ipv4())
-                        || ipaddr == iface.address
-                    {
-                        Some(iface.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<Interface>>();
-
-            for iface in new_interfaces {
-                debug!("Binding to {}", iface.address);
-                http_server = http_server.bind((iface.address, http_port))?;
-                bound_interfaces.insert(iface, http_port);
-            }
-        }
+        })
+        .bind((Ipv4Addr::UNSPECIFIED, HTTP_PORT))?
+        .bind((Ipv6Addr::UNSPECIFIED, HTTP_PORT))?;
 
         let server = http_server.run();
         let web_handle = server.handle();
 
         spawn(server);
 
-        let mut task_handles = TaskHandles::default();
-
-        for (iface, http_port) in bound_interfaces.into_iter() {
-            let ssdp_task =
-                SsdpTask::new(self.uuid, iface.into(), &self.server_version, http_port).await;
-            task_handles.add(spawn(ssdp_task.run()));
-        }
-
         Ok(DlnaServer {
-            task_handles,
+            ssdp_handle: Ssdp::new(self.uuid, &self.server_version, HTTP_PORT),
             web_handle,
         })
     }
@@ -272,14 +204,6 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
     /// resolutions and mimetypes.
     pub fn icon(mut self, icon: Icon) -> Self {
         self.icons.push(icon);
-        self
-    }
-
-    /// Binds to an IP address. You must give the HTTP port to use for this address.
-    /// This can be called multiple times to bind to different addresses, most commonly to bind
-    /// to IPv4 and IPv6 addresses.
-    pub fn bind<A: Into<IpAddr>>(mut self, addr: A, http_port: u16) -> Self {
-        self.binds.push((addr.into(), http_port));
         self
     }
 }

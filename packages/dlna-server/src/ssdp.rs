@@ -1,28 +1,27 @@
 use std::{
+    collections::HashMap,
     env::consts,
     fmt,
+    io::{self, ErrorKind},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     str::{FromStr, from_utf8},
     time::Duration,
 };
 
 use anyhow::bail;
-use bytes::{Buf, BufMut, BytesMut};
-use futures::{FutureExt, select, sink::SinkExt, stream::StreamExt};
+use bytes::{Buf, BytesMut};
+use getifaddrs::{InterfaceFlags, getifaddrs};
 use http::{HeaderMap, HeaderName, HeaderValue};
+use socket_pktinfo::PktInfoUdpSocket;
 use socket2::{Domain, Protocol, Socket, Type};
-use tokio::{net::UdpSocket, time::sleep};
-use tokio_util::{
-    codec::{Decoder, Encoder},
-    udp::UdpFramed,
-};
-use tracing::{debug, error, instrument, trace, warn};
+use tokio::{net::UdpSocket, time};
+use tracing::{error, info, instrument, trace, warn};
 use uuid::Uuid;
 
-use crate::ns;
+use crate::{TaskHandle, ns, rt};
 
-const SSDP_IPV4: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
-const SSDP_IPV6: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xC);
+pub(crate) const SSDP_IPV4: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
+pub(crate) const SSDP_IPV6: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xC);
 const SSDP_PORT: u16 = 1900;
 
 #[derive(Debug, Clone)]
@@ -73,9 +72,54 @@ where
 
 fn push_line<A: AsRef<[u8]>>(buf: &mut BytesMut, line: A) {
     let bytes = line.as_ref();
-    buf.reserve(bytes.len() + 2);
-    buf.put_slice(bytes);
-    buf.put_slice(&[13_u8, 10_u8]);
+    buf.extend_from_slice(bytes);
+    buf.extend_from_slice(&[13, 10]);
+}
+
+fn decode_line(src: &[u8], pos: usize) -> anyhow::Result<Option<(&str, usize)>> {
+    // This can't be a complete line without at least a CRLF.
+    if src.len() < 2 {
+        return Ok(None);
+    }
+
+    let mut end = pos;
+
+    while end < src.len() && src[end] != 13 {
+        end += 1;
+    }
+
+    if end >= src.len() - 1 || src[end + 1] != 10 {
+        // Not yet enough data to decode.
+        return Ok(None);
+    }
+
+    Ok(Some((from_utf8(&src[pos..end])?.trim(), end + 2)))
+}
+
+fn parse_method(line: &str) -> anyhow::Result<&str> {
+    if !line.ends_with("HTTP/1.1") {
+        bail!("Invalid protocol");
+    }
+
+    let line = line[..line.len() - 9].trim();
+
+    let Some(separator) = line.find(' ') else {
+        bail!("Missing method separator");
+    };
+
+    let method = line[0..separator].trim();
+    Ok(method)
+}
+
+fn parse_header(line: &str) -> anyhow::Result<(HeaderName, HeaderValue)> {
+    let Some(separator) = line.find(':') else {
+        bail!("Missing separator");
+    };
+
+    let name = HeaderName::try_from(line[0..separator].trim())?;
+    let value = HeaderValue::try_from(line[separator + 1..].trim())?;
+
+    Ok((name, value))
 }
 
 impl SsdpMessage {
@@ -222,81 +266,18 @@ impl SsdpMessage {
             }
         }
     }
-}
-
-fn decode_line(src: &BytesMut, pos: usize) -> anyhow::Result<Option<(&str, usize)>> {
-    // This can't be a complete line without at least a CRLF.
-    if src.len() < 2 {
-        return Ok(None);
-    }
-
-    let mut end = pos;
-
-    while end < src.len() && src[end] != 13 {
-        end += 1;
-    }
-
-    if end >= src.len() - 1 || src[end + 1] != 10 {
-        // Not yet enough data to decode.
-        return Ok(None);
-    }
-
-    Ok(Some((from_utf8(&src[pos..end])?.trim(), end + 2)))
-}
-
-fn parse_method(line: &str) -> anyhow::Result<&str> {
-    if !line.ends_with("HTTP/1.1") {
-        bail!("Invalid protocol");
-    }
-
-    let line = line[..line.len() - 9].trim();
-
-    let Some(separator) = line.find(' ') else {
-        bail!("Missing method separator");
-    };
-
-    let method = line[0..separator].trim();
-    Ok(method)
-}
-
-fn parse_header(line: &str) -> anyhow::Result<(HeaderName, HeaderValue)> {
-    let Some(separator) = line.find(':') else {
-        bail!("Missing separator");
-    };
-
-    let name = HeaderName::try_from(line[0..separator].trim())?;
-    let value = HeaderValue::try_from(line[separator + 1..].trim())?;
-
-    Ok((name, value))
-}
-
-struct SsdpCodec;
-
-impl Encoder<SsdpMessage> for SsdpCodec {
-    type Error = anyhow::Error;
-
-    fn encode(&mut self, item: SsdpMessage, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        item.encode(dst);
-        Ok(())
-    }
-}
-
-impl Decoder for SsdpCodec {
-    type Item = SsdpMessage;
-
-    type Error = anyhow::Error;
 
     #[instrument(skip_all)]
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<SsdpMessage>, Self::Error> {
+    fn decode(buffer: &mut BytesMut) -> anyhow::Result<Option<Self>> {
         // Terribly inefficient but we assume the entire packet is available in one go.
         let mut headers: HeaderMap<HeaderValue> = HeaderMap::new();
 
-        let Some((head_line, mut pos)) = decode_line(src, 0)? else {
+        let Some((head_line, mut pos)) = decode_line(buffer, 0)? else {
             return Ok(None);
         };
 
-        while pos < src.len() {
-            let Some((line, next_pos)) = decode_line(src, pos)? else {
+        while pos < buffer.len() {
+            let Some((line, next_pos)) = decode_line(buffer, pos)? else {
                 return Ok(None);
             };
             pos = next_pos;
@@ -331,182 +312,217 @@ impl Decoder for SsdpCodec {
             }
         };
 
-        src.advance(pos);
+        buffer.advance(pos);
 
         Ok(result)
     }
 }
 
-pub(crate) trait Interface: Send + Sync {
-    fn address(&self) -> IpAddr;
-    fn build_recv(&self) -> anyhow::Result<UdpSocket>;
-    fn build_unicast(&self) -> anyhow::Result<UdpSocket>;
-    fn build_multicast(&self) -> anyhow::Result<(UdpSocket, SocketAddr)>;
+enum Interface {
+    V4 {
+        address: Ipv4Addr,
+        index: u32,
+        multicast: bool,
+    },
+    V6 {
+        address: Ipv6Addr,
+        index: u32,
+        multicast: bool,
+    },
 }
 
-pub(crate) struct Ipv6Interface {
-    address: Ipv6Addr,
-    interface: u32,
-}
+impl Interface {
+    fn is_ipv4(&self) -> bool {
+        matches!(self, Interface::V4 { .. })
+    }
 
-impl Interface for Ipv6Interface {
+    fn index(&self) -> u32 {
+        match self {
+            Interface::V4 { index, .. } => *index,
+            Interface::V6 { index, .. } => *index,
+        }
+    }
+
+    fn multicast(&self) -> bool {
+        match self {
+            Interface::V4 { multicast, .. } => *multicast,
+            Interface::V6 { multicast, .. } => *multicast,
+        }
+    }
+
     fn address(&self) -> IpAddr {
-        IpAddr::V6(self.address)
+        match self {
+            Interface::V4 { address, .. } => IpAddr::V4(*address),
+            Interface::V6 { address, .. } => IpAddr::V6(*address),
+        }
     }
 
-    fn build_recv(&self) -> anyhow::Result<UdpSocket> {
-        let raw_socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
-        raw_socket.set_reuse_address(true)?;
-        raw_socket.set_nonblocking(true)?;
-        raw_socket.bind(&SocketAddr::from((SSDP_IPV6, SSDP_PORT)).into())?;
-        raw_socket.join_multicast_v6(&SSDP_IPV6, self.interface)?;
-        raw_socket.set_multicast_loop_v6(false)?;
+    fn build_unicast_socket(&self) -> Result<UdpSocket, io::Error> {
+        let raw_socket = if self.is_ipv4() {
+            let raw_socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+            raw_socket.set_nonblocking(true)?;
+            raw_socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)).into())?;
+            raw_socket
+        } else {
+            let raw_socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+            raw_socket.set_only_v6(true)?;
+            raw_socket.set_nonblocking(true)?;
+            raw_socket.bind(&SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0)).into())?;
+            raw_socket
+        };
 
-        Ok(UdpSocket::from_std(raw_socket.into())?)
+        UdpSocket::from_std(raw_socket.into())
     }
 
-    fn build_unicast(&self) -> anyhow::Result<UdpSocket> {
-        let raw_socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
-        raw_socket.set_nonblocking(true)?;
-        raw_socket.bind(&SocketAddr::from((self.address, 0)).into())?;
+    fn build_announce_socket(&self) -> Result<(UdpSocket, SocketAddr), io::Error> {
+        let raw_socket = Socket::new(
+            if self.is_ipv4() {
+                Domain::IPV4
+            } else {
+                Domain::IPV6
+            },
+            Type::DGRAM,
+            Some(Protocol::UDP),
+        )?;
 
-        Ok(UdpSocket::from_std(raw_socket.into())?)
-    }
+        match self {
+            Interface::V4 { address, .. } => {
+                raw_socket.set_multicast_if_v4(address)?;
+            }
+            Interface::V6 { index, .. } => {
+                raw_socket.set_only_v6(true)?;
+                raw_socket.set_multicast_if_v6(*index)?
+            }
+        }
 
-    fn build_multicast(&self) -> anyhow::Result<(UdpSocket, SocketAddr)> {
-        let raw_socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
         raw_socket.set_nonblocking(true)?;
-        raw_socket.bind(&SocketAddr::from((self.address, 0)).into())?;
-        raw_socket.set_multicast_if_v6(self.interface)?;
+        raw_socket.bind(&SocketAddr::from((self.address(), 0)).into())?;
 
         Ok((
             UdpSocket::from_std(raw_socket.into())?,
-            (SSDP_IPV6, SSDP_PORT).into(),
+            if self.is_ipv4() {
+                (SSDP_IPV4, SSDP_PORT).into()
+            } else {
+                (SSDP_IPV6, SSDP_PORT).into()
+            },
         ))
     }
-}
 
-pub(crate) struct Ipv4Interface {
-    address: Ipv4Addr,
-}
+    fn from(iface: getifaddrs::Interface) -> Option<Self> {
+        let multicast = iface.flags.contains(InterfaceFlags::MULTICAST);
 
-impl Interface for Ipv4Interface {
-    fn address(&self) -> IpAddr {
-        IpAddr::V4(self.address)
-    }
-
-    fn build_recv(&self) -> anyhow::Result<UdpSocket> {
-        let raw_socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-        raw_socket.set_reuse_address(true)?;
-        raw_socket.set_nonblocking(true)?;
-        raw_socket.set_multicast_if_v4(&self.address)?;
-        raw_socket.join_multicast_v4(&SSDP_IPV4, &self.address)?;
-        raw_socket.set_multicast_loop_v4(false)?;
-        raw_socket.bind(&SocketAddr::from((SSDP_IPV4, SSDP_PORT)).into())?;
-
-        Ok(UdpSocket::from_std(raw_socket.into())?)
-    }
-
-    fn build_unicast(&self) -> anyhow::Result<UdpSocket> {
-        let raw_socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-        raw_socket.set_nonblocking(true)?;
-        raw_socket.bind(&SocketAddr::from((self.address, 0)).into())?;
-
-        Ok(UdpSocket::from_std(raw_socket.into())?)
-    }
-
-    fn build_multicast(&self) -> anyhow::Result<(UdpSocket, SocketAddr)> {
-        let raw_socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
-        raw_socket.set_nonblocking(true)?;
-        raw_socket.set_multicast_if_v4(&self.address)?;
-        raw_socket.bind(&SocketAddr::from((self.address, 0)).into())?;
-
-        Ok((
-            UdpSocket::from_std(raw_socket.into())?,
-            (SSDP_IPV4, SSDP_PORT).into(),
-        ))
-    }
-}
-
-impl From<getifaddrs::Interface> for Box<dyn Interface> {
-    fn from(value: getifaddrs::Interface) -> Self {
-        match value.address {
-            IpAddr::V4(ipv4) => Box::new(Ipv4Interface { address: ipv4 }),
-            IpAddr::V6(ipv6) => Box::new(Ipv6Interface {
-                address: ipv6,
-                interface: value.index.unwrap(),
+        match (iface.address, iface.index) {
+            (IpAddr::V4(address), Some(index)) => Some(Interface::V4 {
+                address,
+                index,
+                multicast,
             }),
+            (IpAddr::V6(address), Some(index)) => Some(Interface::V6 {
+                address,
+                index,
+                multicast,
+            }),
+            _ => None,
         }
     }
 }
 
-pub(crate) struct SsdpTask {
+fn get_interfaces() -> Vec<Interface> {
+    match getifaddrs() {
+        Ok(ifaces) => ifaces.filter_map(Interface::from).collect(),
+        Err(e) => {
+            warn!(error=%e, "Failed to enumerate interfaces");
+            Vec::new()
+        }
+    }
+}
+
+async fn send_to(socket: &UdpSocket, address: SocketAddr, mut data: &[u8]) -> anyhow::Result<()> {
+    while !data.is_empty() {
+        let len = socket.send_to(data, address).await?;
+        data = &data[len..];
+    }
+
+    Ok(())
+}
+
+#[derive(Clone)]
+struct SsdpTask {
     uuid: Uuid,
-    interface: Box<dyn Interface + 'static>,
     server: String,
     http_port: u16,
 }
 
 impl SsdpTask {
-    pub(crate) async fn new(
-        uuid: Uuid,
-        interface: Box<dyn Interface + 'static>,
-        server_version: &str,
-        http_port: u16,
-    ) -> Self {
+    fn new(uuid: Uuid, server_version: &str, http_port: u16) -> Self {
         Self {
             uuid,
-            interface,
             server: format!("{}/0.0 UPnP/1.1 {}", consts::OS, server_version),
             http_port,
         }
     }
 
-    async fn send_messages<I>(&self, socket: UdpSocket, address: SocketAddr, messages: I)
-    where
-        I: IntoIterator<Item = SsdpMessage>,
-    {
-        let mut framed = UdpFramed::new(socket, SsdpCodec);
-
+    async fn send_messages(
+        socket: &UdpSocket,
+        local_interface: &Interface,
+        target: SocketAddr,
+        messages: Vec<SsdpMessage>,
+    ) {
+        let mut buffer = BytesMut::new();
         for message in messages {
             trace!(
                 ?message,
-                local_address = %self.interface.address(),
-                remote_address = %address,
+                local_address = %local_interface.address(),
+                remote_address = %target,
                 "Sending SSDP message"
             );
 
-            if let Err(e) = framed.send((message, address)).await {
-                error!(error=%e, local_address=%self.interface.address(), remote_address=%address, "Failed to send unicast message");
+            message.encode(&mut buffer);
+            let packet = buffer.split();
+
+            if let Err(e) = send_to(socket, target, &packet).await {
+                error!(error=%e, local_address = %local_interface.address(), remote_address=%target, "Failed to send unicast message");
             }
         }
     }
 
     fn notify_message(
         &self,
-        address: SocketAddr,
+        interface: &Interface,
         usn: &str,
         notification_type: &str,
     ) -> SsdpMessage {
+        let host = if interface.is_ipv4() {
+            SSDP_IPV4.to_string()
+        } else {
+            SSDP_IPV6.to_string()
+        };
+
         SsdpMessage::Notify {
-            host: address.to_string(),
+            host,
             notification_type: notification_type.to_owned(),
             unique_service_name: usn.to_owned(),
             availability: "ssdp:alive".to_string(),
             location: format!(
                 "http://{}:{}/device.xml",
-                self.interface.address(),
+                interface.address(),
                 self.http_port
             ),
             server: self.server.clone(),
         }
     }
 
-    async fn send_notify(&self) {
-        let (socket, address) = match self.interface.build_multicast() {
-            Ok(r) => r,
+    async fn announce(&self, interface: &Interface) {
+        let (socket, target) = match interface.build_announce_socket() {
+            Ok(s) => s,
             Err(e) => {
-                error!(error=%e, local_address=%self.interface.address(), "Failed to build multicast socket");
+                match e.kind() {
+                    ErrorKind::AddrNotAvailable => {}
+                    _ => {
+                        warn!(error=%e, local_address=%interface.address(), "Failed to connect SSDP announcement socket");
+                    }
+                }
+
                 return;
             }
         };
@@ -514,32 +530,51 @@ impl SsdpTask {
         let usn_base = format!("uuid:{}", self.uuid.as_hyphenated());
 
         let messages = vec![
-            self.notify_message(address, &usn_base, &usn_base),
+            self.notify_message(interface, &usn_base, &usn_base),
             self.notify_message(
-                address,
+                interface,
                 &format!("{}::{}", usn_base, ns::UPNP_ROOT),
                 ns::UPNP_ROOT,
             ),
             self.notify_message(
-                address,
+                interface,
                 &format!("{}::{}", usn_base, ns::UPNP_MEDIASERVER),
                 ns::UPNP_MEDIASERVER,
             ),
             self.notify_message(
-                address,
+                interface,
                 &format!("{}::{}", usn_base, ns::UPNP_CONTENTDIRECTORY),
                 ns::UPNP_CONTENTDIRECTORY,
             ),
         ];
 
-        self.send_messages(socket, address, messages).await;
+        Self::send_messages(&socket, interface, target, messages).await;
     }
 
-    fn response_message(&self, usn: &str, search_target: &str) -> SsdpMessage {
+    async fn announce_task(self) {
+        loop {
+            for interface in get_interfaces() {
+                if !interface.multicast() {
+                    continue;
+                }
+
+                self.announce(&interface).await
+            }
+
+            time::sleep(Duration::from_secs(60)).await;
+        }
+    }
+
+    fn response_message(
+        &self,
+        local_interface: &Interface,
+        usn: &str,
+        search_target: &str,
+    ) -> SsdpMessage {
         SsdpMessage::SearchResponse {
             location: format!(
                 "http://{}:{}/device.xml",
-                self.interface.address(),
+                local_interface.address(),
                 self.http_port
             ),
             server: self.server.clone(),
@@ -548,104 +583,192 @@ impl SsdpTask {
         }
     }
 
-    async fn send_search_response(&self, search_target: &str, address: SocketAddr) {
+    async fn send_search_response(
+        &self,
+        local_interface: &Interface,
+        search_target: &str,
+        address: SocketAddr,
+    ) {
         let usn_base = format!("uuid:{}", self.uuid.as_hyphenated());
         let mut messages = Vec::new();
 
         match search_target {
             ns::UPNP_ROOT => {
-                messages.push(self.response_message(&usn_base, &usn_base));
-                messages.push(
-                    self.response_message(
-                        &format!("{}::{}", usn_base, ns::UPNP_ROOT),
-                        ns::UPNP_ROOT,
-                    ),
-                );
+                messages.push(self.response_message(local_interface, &usn_base, &usn_base));
                 messages.push(self.response_message(
+                    local_interface,
+                    &format!("{}::{}", usn_base, ns::UPNP_ROOT),
+                    ns::UPNP_ROOT,
+                ));
+                messages.push(self.response_message(
+                    local_interface,
                     &format!("{}::{}", usn_base, ns::UPNP_MEDIASERVER),
                     ns::UPNP_MEDIASERVER,
                 ));
                 messages.push(self.response_message(
+                    local_interface,
                     &format!("{}::{}", usn_base, ns::UPNP_CONTENTDIRECTORY),
                     ns::UPNP_CONTENTDIRECTORY,
                 ));
             }
             ns::UPNP_MEDIASERVER | ns::UPNP_CONTENTDIRECTORY => {
-                messages.push(
-                    self.response_message(
-                        &format!("{}::{}", usn_base, search_target),
-                        search_target,
-                    ),
-                );
+                messages.push(self.response_message(
+                    local_interface,
+                    &format!("{}::{}", usn_base, search_target),
+                    search_target,
+                ));
             }
             _ => {}
         }
 
         if search_target.to_lowercase() == usn_base {
-            messages.push(self.response_message(&usn_base, &usn_base));
+            messages.push(self.response_message(local_interface, &usn_base, &usn_base));
         }
 
         if messages.is_empty() {
             return;
         }
 
-        let socket = match self.interface.build_unicast() {
+        let socket = match local_interface.build_unicast_socket() {
             Ok(s) => s,
             Err(e) => {
-                error!(error=%e, local_address=%self.interface.address(), "Failed to build unicast socket");
+                error!(error=%e, local_address=%local_interface.address(), "Failed to build unicast socket");
                 return;
             }
         };
 
-        self.send_messages(socket, address, messages).await;
+        Self::send_messages(&socket, local_interface, address, messages).await;
     }
 
-    async fn announce_loop(&self) {
-        loop {
-            self.send_notify().await;
-
-            sleep(Duration::from_secs(60)).await;
+    fn build_recv_socket(is_ipv4: bool) -> Result<PktInfoUdpSocket, io::Error> {
+        let socket = PktInfoUdpSocket::new(if is_ipv4 { Domain::IPV4 } else { Domain::IPV6 })?;
+        socket.set_nonblocking(true)?;
+        socket.set_reuse_address(true)?;
+        socket.set_reuse_port(true)?;
+        if is_ipv4 {
+            socket.bind(&SocketAddr::from((SSDP_IPV4, SSDP_PORT)).into())?;
+            socket.join_multicast_v4(&SSDP_IPV4, &Ipv4Addr::UNSPECIFIED)?;
+            socket.set_multicast_loop_v4(false)?;
+        } else {
+            socket.bind(&SocketAddr::from((SSDP_IPV6, SSDP_PORT)).into())?;
+            socket.join_multicast_v6(&SSDP_IPV6, 0)?;
+            socket.set_multicast_loop_v6(false)?;
         }
+
+        Ok(socket)
     }
 
-    async fn recv_loop(&self) -> anyhow::Result<()> {
-        let socket = self.interface.build_recv()?;
-        let mut framed = UdpFramed::new(socket, SsdpCodec);
-
+    async fn receive_task(self, is_ipv4: bool) {
         loop {
-            let (message, remote_address) = match framed.next().await {
-                Some(Ok(r)) => r,
-                Some(Err(e)) => {
-                    error!(error=%e, "Failed to decode SSDP packet");
-                    return Ok(());
-                }
-                None => {
-                    debug!("Socket closed unexpectedly");
-                    return Ok(());
+            let socket = match Self::build_recv_socket(is_ipv4) {
+                Ok(s) => s,
+                Err(e) => {
+                    match e.kind() {
+                        ErrorKind::AddrNotAvailable => {
+                            // IP version not supported.
+                            return;
+                        }
+                        _ => {
+                            error!(error=%e, "Failed to build multicast receiver socket");
+                            time::sleep(Duration::from_secs(5)).await;
+
+                            continue;
+                        }
+                    }
                 }
             };
 
-            if message.is_uuid(self.uuid) {
-                continue;
-            }
+            let mut buffers: HashMap<SocketAddr, BytesMut> = HashMap::new();
+            let mut receive_buffer = [0_u8; 4096];
 
-            trace!(?message, local_address=%self.interface.address(), %remote_address, "Received SSDP message");
+            loop {
+                let (len, info) = match socket.recv(&mut receive_buffer) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        if matches!(
+                            e.kind(),
+                            ErrorKind::WouldBlock
+                                | ErrorKind::Interrupted
+                                | ErrorKind::ResourceBusy
+                        ) {
+                            time::sleep(Duration::from_millis(100)).await;
 
-            if let SsdpMessage::MSearch { search_target, .. } = message {
-                self.send_search_response(&search_target, remote_address)
-                    .await;
+                            continue;
+                        }
+
+                        warn!(error=%e, "Socket receive error. Terminating thread.");
+                        return;
+                    }
+                };
+
+                if len == 0 {
+                    continue;
+                }
+
+                let Some(local_interface) = get_interfaces().into_iter().find(|iface| {
+                    iface.is_ipv4() == info.addr_src.is_ipv4()
+                        && iface.index() as u64 == info.if_index
+                }) else {
+                    warn!(remote_address = %info.addr_src, "Received SSDP packet on unknown local interface");
+                    continue;
+                };
+
+                let buffer = buffers.entry(info.addr_src).or_default();
+                buffer.extend_from_slice(&receive_buffer[0..len]);
+
+                while !buffer.is_empty() {
+                    match SsdpMessage::decode(buffer) {
+                        Ok(Some(message)) => {
+                            if message.is_uuid(self.uuid) {
+                                continue;
+                            }
+
+                            trace!(?message, local_address = %local_interface.address(), remote_address = %info.addr_src, "Received SSDP message");
+
+                            if let SsdpMessage::MSearch { search_target, .. } = message {
+                                self.send_search_response(
+                                    &local_interface,
+                                    &search_target,
+                                    info.addr_src,
+                                )
+                                .await;
+                            }
+                        }
+                        Ok(None) => {
+                            // Not enough data
+                            break;
+                        }
+                        Err(e) => {
+                            warn!(error=%e, remote_address = %info.addr_src, "Failed to decode SSDP packet");
+                            break;
+                        }
+                    }
+                }
             }
         }
     }
+}
 
-    pub(crate) async fn run(self) {
-        select! {
-            result = self.recv_loop().fuse() => {
-                if let Err(e) = result {
-                    error!(error=%e, local_address=%self.interface.address(), "Failed listening to multicast traffic");
-                }
-            },
-            _ = self.announce_loop().fuse() => {},
+pub(crate) struct Ssdp {
+    announce: TaskHandle,
+    ipv4: TaskHandle,
+    ipv6: TaskHandle,
+}
+
+impl Ssdp {
+    pub(crate) fn new(uuid: Uuid, server_version: &str, http_port: u16) -> Self {
+        let task = SsdpTask::new(uuid, server_version, http_port);
+
+        Self {
+            announce: rt::spawn(task.clone().announce_task()),
+            ipv4: rt::spawn(task.clone().receive_task(true)),
+            ipv6: rt::spawn(task.receive_task(false)),
         }
+    }
+
+    pub(crate) async fn shutdown(self) {
+        self.announce.shutdown().await;
+        self.ipv4.shutdown().await;
+        self.ipv6.shutdown().await;
     }
 }
