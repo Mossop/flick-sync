@@ -85,8 +85,9 @@ impl<W: Write> ToXml<W> for Container {
 #[derive(Debug)]
 pub struct Resource {
     pub id: String,
-    pub mime: Mime,
+    pub mime_type: Mime,
     pub size: Option<u64>,
+    pub seekable: bool,
     pub duration: Option<Duration>,
 }
 
@@ -97,7 +98,7 @@ impl<W: Write> ToXml<W> for Resource {
 
         let mut builder = writer
             .element_ns((ns::DIDL, "res"))
-            .attr("protocolInfo", format!("http-get:*:{}:*", self.mime));
+            .attr("protocolInfo", format!("http-get:*:{}:*", self.mime_type));
 
         if let Some(size) = self.size {
             builder = builder.attr("size", size);

@@ -217,6 +217,17 @@ impl Server {
         server_config.max_transcodes.unwrap_or(3)
     }
 
+    pub async fn video(&self, id: &str) -> Option<wrappers::Video> {
+        let state = self.inner.state.read().await;
+        state
+            .servers
+            .get(&self.id)
+            .unwrap()
+            .videos
+            .get(id)
+            .map(|vs| wrappers::Video::wrap(self, vs))
+    }
+
     pub async fn videos(&self) -> Vec<wrappers::Video> {
         let state = self.inner.state.read().await;
         state
@@ -227,6 +238,63 @@ impl Server {
             .values()
             .map(|vs| wrappers::Video::wrap(self, vs))
             .collect()
+    }
+
+    pub async fn show(&self, id: &str) -> Option<wrappers::Show> {
+        let state = self.inner.state.read().await;
+        state
+            .servers
+            .get(&self.id)
+            .unwrap()
+            .shows
+            .get(id)
+            .map(|ls| wrappers::Show::wrap(self, ls))
+    }
+
+    pub async fn shows(&self) -> Vec<wrappers::Show> {
+        let state = self.inner.state.read().await;
+        state
+            .servers
+            .get(&self.id)
+            .unwrap()
+            .shows
+            .values()
+            .map(|ls| wrappers::Show::wrap(self, ls))
+            .collect()
+    }
+
+    pub async fn season(&self, id: &str) -> Option<wrappers::Season> {
+        let state = self.inner.state.read().await;
+        state
+            .servers
+            .get(&self.id)
+            .unwrap()
+            .seasons
+            .get(id)
+            .map(|ls| wrappers::Season::wrap(self, ls))
+    }
+
+    pub async fn seasons(&self) -> Vec<wrappers::Season> {
+        let state = self.inner.state.read().await;
+        state
+            .servers
+            .get(&self.id)
+            .unwrap()
+            .seasons
+            .values()
+            .map(|ls| wrappers::Season::wrap(self, ls))
+            .collect()
+    }
+
+    pub async fn library(&self, id: &str) -> Option<wrappers::Library> {
+        let state = self.inner.state.read().await;
+        state
+            .servers
+            .get(&self.id)
+            .unwrap()
+            .libraries
+            .get(id)
+            .map(|ls| wrappers::Library::wrap(self, ls))
     }
 
     pub async fn libraries(&self) -> Vec<wrappers::Library> {
@@ -241,6 +309,17 @@ impl Server {
             .collect()
     }
 
+    pub async fn playlist(&self, id: &str) -> Option<wrappers::Playlist> {
+        let state = self.inner.state.read().await;
+        state
+            .servers
+            .get(&self.id)
+            .unwrap()
+            .playlists
+            .get(id)
+            .map(|state| wrappers::Playlist::wrap(self, state))
+    }
+
     pub async fn playlists(&self) -> Vec<wrappers::Playlist> {
         let state = self.inner.state.read().await;
         state
@@ -251,6 +330,24 @@ impl Server {
             .values()
             .map(|state| wrappers::Playlist::wrap(self, state))
             .collect()
+    }
+
+    pub async fn collection(&self, id: &str) -> Option<wrappers::Collection> {
+        let state = self.inner.state.read().await;
+        let server_state = state.servers.get(&self.id).unwrap();
+
+        server_state.collections.get(id).map(|cs| {
+            let library = server_state.libraries.get(&cs.library).unwrap();
+
+            match library.library_type {
+                LibraryType::Movie => {
+                    wrappers::Collection::Movie(wrappers::MovieCollection::wrap(self, cs))
+                }
+                LibraryType::Show => {
+                    wrappers::Collection::Show(wrappers::ShowCollection::wrap(self, cs))
+                }
+            }
+        })
     }
 
     pub async fn collections(&self) -> Vec<wrappers::Collection> {

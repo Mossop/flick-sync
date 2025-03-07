@@ -114,6 +114,7 @@ impl<'a> From<(&'a str, &'a str)> for XmlName {
 /// Represents an element in an XML document including its tag name and any attributes.
 pub(crate) struct Element {
     pub(crate) name: XmlName,
+    #[allow(unused)]
     pub(crate) attributes: Map<XmlName, String>,
 }
 

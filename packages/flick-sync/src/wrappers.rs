@@ -60,6 +60,20 @@ trait StateWrapper<S> {
 
 macro_rules! state_wrapper {
     ($typ:ident, $st_typ:ident, $prop:ident) => {
+        impl $typ {
+            pub fn id(&self) -> &str {
+                &self.id
+            }
+
+            pub fn server(&self) -> Server {
+                self.server.clone()
+            }
+
+            pub async fn title(&self) -> String {
+                self.with_state(|s| s.title.clone()).await
+            }
+        }
+
         impl StateWrapper<$st_typ> for $typ {
             async fn with_server_state<F, R>(&self, cb: F) -> R
             where
@@ -1126,10 +1140,6 @@ impl Episode {
     metadata_methods!();
     parent!(season, Season, episode_state().season);
 
-    pub fn server(&self) -> Server {
-        self.server.clone()
-    }
-
     pub async fn write_metadata(&self, writer: &mut EventWriter) -> Result {
         let season = self.season().await.with_state(|ss| ss.index).await;
         let show = self.show().await.with_state(|ss| ss.title.clone()).await;
@@ -1174,10 +1184,6 @@ impl Episode {
 
     pub async fn library(&self) -> ShowLibrary {
         self.show().await.library().await
-    }
-
-    pub async fn title(&self) -> String {
-        self.with_state(|s| s.title.clone()).await
     }
 
     pub async fn parts(&self) -> Vec<VideoPart> {
@@ -1260,10 +1266,6 @@ impl Movie {
     metadata_methods!();
     parent!(library, MovieLibrary, movie_state().library);
 
-    pub fn server(&self) -> Server {
-        self.server.clone()
-    }
-
     pub async fn write_metadata(&self, writer: &mut EventWriter) -> Result {
         self.with_state(|state| {
             writer.write(XmlEvent::start_element("movie"))?;
@@ -1283,10 +1285,6 @@ impl Movie {
         let server = self.server.connect().await?;
         let item = server.item_by_id(&self.id).await?;
         VideoStats::try_from(item, self.parts().await).await
-    }
-
-    pub async fn title(&self) -> String {
-        self.with_state(|s| s.title.clone()).await
     }
 
     pub async fn parts(&self) -> Vec<VideoPart> {
@@ -1358,6 +1356,16 @@ impl Video {
             VideoDetail::Movie(_) => Self::Movie(Movie::wrap(server, state)),
             VideoDetail::Episode(_) => Self::Episode(Episode::wrap(server, state)),
         }
+    }
+
+    pub async fn is_downloaded(&self) -> bool {
+        for part in self.parts().await {
+            if !part.is_downloaded().await {
+                return false;
+            }
+        }
+
+        true
     }
 
     pub async fn library(&self) -> Library {
@@ -1440,18 +1448,6 @@ state_wrapper!(Playlist, PlaylistState, playlists);
 wrapper_builders!(Playlist, PlaylistState);
 
 impl Playlist {
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    pub fn server(&self) -> Server {
-        self.server.clone()
-    }
-
-    pub async fn title(&self) -> String {
-        self.with_state(|ps| ps.title.clone()).await
-    }
-
     pub async fn videos(&self) -> Vec<Video> {
         self.with_server_state(|ss| {
             let ps = ss.playlists.get(&self.id).unwrap();
@@ -1656,14 +1652,6 @@ wrapper_builders!(MovieLibrary, LibraryState);
 impl MovieLibrary {
     children!(collections, collections, MovieCollection, library);
 
-    pub async fn title(&self) -> String {
-        self.with_state(|ls| ls.title.clone()).await
-    }
-
-    pub fn server(&self) -> Server {
-        self.server.clone()
-    }
-
     pub async fn movies(&self) -> Vec<Movie> {
         self.with_server_state(|ss| {
             ss.videos
@@ -1703,14 +1691,6 @@ wrapper_builders!(ShowLibrary, LibraryState);
 impl ShowLibrary {
     children!(collections, collections, ShowCollection, library);
     children!(shows, shows, Show, library);
-
-    pub async fn title(&self) -> String {
-        self.with_state(|ls| ls.title.clone()).await
-    }
-
-    pub fn server(&self) -> Server {
-        self.server.clone()
-    }
 }
 
 #[derive(Clone)]
