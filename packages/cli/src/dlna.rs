@@ -26,6 +26,7 @@ use image::image_dimensions;
 use mime::Mime;
 use pathdiff::diff_paths;
 use pin_project::pin_project;
+use rust_embed::{Embed, EmbeddedFile};
 use std::str::FromStr;
 use tokio::{
     fs,
@@ -36,6 +37,10 @@ use tokio_util::io::ReaderStream;
 use tracing::debug;
 
 use crate::{Console, Runnable, error::Error};
+
+#[derive(Embed)]
+#[folder = "../../resources"]
+struct Resources;
 
 #[pin_project]
 struct StreamLimiter<S> {
@@ -82,6 +87,55 @@ where
                 Poll::Ready(Some(Ok(bytes)))
             }
             o => o,
+        }
+    }
+}
+
+#[pin_project]
+struct EmbeddedFileStream {
+    position: usize,
+    file: EmbeddedFile,
+}
+
+impl EmbeddedFileStream {
+    fn new(file: EmbeddedFile) -> Self {
+        Self { file, position: 0 }
+    }
+}
+
+impl Stream for EmbeddedFileStream {
+    type Item = Result<Bytes, io::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+
+        if *this.position >= this.file.data.len() {
+            Poll::Ready(None)
+        } else {
+            let bytes = Bytes::copy_from_slice(&this.file.data);
+            *this.position = this.file.data.len();
+            Poll::Ready(Some(Ok(bytes)))
+        }
+    }
+}
+
+#[pin_project(project = EitherProj)]
+enum EitherStream<A, B> {
+    A(#[pin] A),
+    B(#[pin] B),
+}
+
+impl<A, B, C> Stream for EitherStream<A, B>
+where
+    A: Stream<Item = C>,
+    B: Stream<Item = C>,
+{
+    type Item = C;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.project() {
+            EitherProj::A(s) => s.poll_next(cx),
+            EitherProj::B(s) => s.poll_next(cx),
         }
     }
 }
@@ -327,7 +381,13 @@ impl ToObject for Playlist {
             parent_id: "P".to_string(),
             child_count: Some(self.videos().await.len()),
             title: self.title().await,
-            thumbnail: None,
+            thumbnail: Some(Icon {
+                id: "resource/media-256.png".to_string(),
+                mime_type: mime::IMAGE_PNG,
+                width: 256,
+                height: 256,
+                depth: 32,
+            }),
         })
     }
 
@@ -469,7 +529,13 @@ impl ToObject for MovieLibrary {
             parent_id: "L".to_string(),
             child_count: Some(self.movies().await.len()),
             title: self.title().await,
-            thumbnail: None,
+            thumbnail: Some(Icon {
+                id: "resource/movie-256.png".to_string(),
+                mime_type: mime::IMAGE_PNG,
+                width: 256,
+                height: 256,
+                depth: 32,
+            }),
         })
     }
 
@@ -496,7 +562,13 @@ impl ToObject for ShowLibrary {
             parent_id: "L".to_string(),
             child_count: Some(self.shows().await.len()),
             title: self.title().await,
-            thumbnail: None,
+            thumbnail: Some(Icon {
+                id: "resource/television-256.png".to_string(),
+                mime_type: mime::IMAGE_PNG,
+                width: 256,
+                height: 256,
+                depth: 32,
+            }),
         })
     }
 
@@ -630,7 +702,13 @@ impl ToObject for Libraries {
             parent_id: "0".to_string(),
             child_count: Some(library_count),
             title: "Libraries".to_string(),
-            thumbnail: None,
+            thumbnail: Some(Icon {
+                id: "resource/library-256.png".to_string(),
+                mime_type: mime::IMAGE_PNG,
+                width: 256,
+                height: 256,
+                depth: 32,
+            }),
         })
     }
 
@@ -663,7 +741,13 @@ impl ToObject for Playlists {
             parent_id: "0".to_string(),
             child_count: Some(playlist_count),
             title: "Playlists".to_string(),
-            thumbnail: None,
+            thumbnail: Some(Icon {
+                id: "resource/media-256.png".to_string(),
+                mime_type: mime::IMAGE_PNG,
+                width: 256,
+                height: 256,
+                depth: 32,
+            }),
         })
     }
 
@@ -696,7 +780,13 @@ impl ToObject for Collections {
             parent_id: "0".to_string(),
             child_count: Some(collection_count),
             title: "Collections".to_string(),
-            thumbnail: None,
+            thumbnail: Some(Icon {
+                id: "resource/library-256.png".to_string(),
+                mime_type: mime::IMAGE_PNG,
+                width: 256,
+                height: 256,
+                depth: 32,
+            }),
         })
     }
 
@@ -841,7 +931,10 @@ impl DlnaRequestHandler for DlnaHandler {
     async fn stream_icon(
         &self,
         icon_id: &str,
-    ) -> Result<StreamResponse<ReaderStream<BufReader<fs::File>>>, UpnpError> {
+    ) -> Result<
+        StreamResponse<EitherStream<EmbeddedFileStream, ReaderStream<BufReader<fs::File>>>>,
+        UpnpError,
+    > {
         if let Some(path) = icon_id.strip_prefix("thumbnail/") {
             let target = self.flick_sync.root().await.join(path);
 
@@ -865,7 +958,18 @@ impl DlnaRequestHandler for DlnaHandler {
                 mime_type,
                 range: None,
                 resource_size: Some(metadata.size()),
-                stream: ReaderStream::new(BufReader::new(file)),
+                stream: EitherStream::B(ReaderStream::new(BufReader::new(file))),
+            })
+        } else if let Some(resource) = icon_id.strip_prefix("resource/") {
+            let Some(icon_file) = Resources::get(resource) else {
+                return Err(UpnpError::unknown_object());
+            };
+
+            Ok(StreamResponse {
+                mime_type: mime::IMAGE_PNG,
+                range: None,
+                resource_size: Some(icon_file.data.len() as u64),
+                stream: EitherStream::A(EmbeddedFileStream::new(icon_file)),
             })
         } else {
             return Err(UpnpError::unknown_object());
@@ -981,6 +1085,34 @@ impl Runnable for Dlna {
                 env!("CARGO_PKG_VERSION_MAJOR"),
                 env!("CARGO_PKG_VERSION_MINOR")
             ))
+            .icon(Icon {
+                id: "resource/logo-32.png".to_string(),
+                mime_type: mime::IMAGE_PNG,
+                width: 32,
+                height: 32,
+                depth: 32,
+            })
+            .icon(Icon {
+                id: "resource/logo-64.png".to_string(),
+                mime_type: mime::IMAGE_PNG,
+                width: 64,
+                height: 64,
+                depth: 32,
+            })
+            .icon(Icon {
+                id: "resource/logo-128.png".to_string(),
+                mime_type: mime::IMAGE_PNG,
+                width: 128,
+                height: 128,
+                depth: 32,
+            })
+            .icon(Icon {
+                id: "resource/logo-256.png".to_string(),
+                mime_type: mime::IMAGE_PNG,
+                width: 256,
+                height: 256,
+                depth: 32,
+            })
             .bind(Ipv4Addr::UNSPECIFIED, 1980)
             .build()
             .await?;

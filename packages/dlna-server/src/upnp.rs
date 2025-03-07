@@ -84,6 +84,7 @@ pub struct Container {
     pub child_count: Option<usize>,
     /// The title of this container.
     pub title: String,
+    /// An optional icon identifier for this container. Will be passed in the `stream_icon` method.
     pub thumbnail: Option<Icon>,
 }
 
@@ -115,10 +116,16 @@ impl<W: Write> ToXml<W> for Container {
 
 #[derive(Debug)]
 pub struct Resource {
+    /// A unique identifier for this resource. This will be passed in the `get_resource` or
+    /// `stream_resource` methods.
     pub id: String,
+    /// The content type of this resource.
     pub mime_type: Mime,
+    /// The size in bytes if known.
     pub size: Option<u64>,
+    /// Whether it is possible to seek to a specific position when streaming this resource.
     pub seekable: bool,
+    /// The duration if known.
     pub duration: Option<Duration>,
 }
 
@@ -165,7 +172,9 @@ pub struct Item {
     pub parent_id: String,
     /// The title of this item.
     pub title: String,
+    /// Different resources available for this item.
     pub resources: Vec<Resource>,
+    /// An optional icon identifier for this container. Will be passed in the `stream_icon` method.
     pub thumbnail: Option<Icon>,
 }
 

@@ -60,6 +60,7 @@ mod ns {
     pub(crate) const DLNA: &str = "urn:schemas-dlna-org:metadata-1-0/";
 }
 
+/// The range included in the stream.
 pub struct Range {
     pub start: u64,
     pub length: u64,
@@ -87,13 +88,16 @@ where
     /// Get the metadata for the objects that are direct children of the object with the given ID.
     async fn list_children(&self, parent_id: &str) -> Result<Vec<Object>, UpnpError>;
 
+    /// Requests a stream for an icon.
     async fn stream_icon(
         &self,
         icon_id: &str,
     ) -> Result<StreamResponse<impl Stream<Item = Result<Bytes, io::Error>> + 'static>, UpnpError>;
 
+    /// Gets the information for a resource, used for HEAD requests.
     async fn get_resource(&self, resource_id: &str) -> Result<Resource, UpnpError>;
 
+    /// Requests a stream for a resource.
     async fn stream_resource(
         &self,
         resource_id: &str,

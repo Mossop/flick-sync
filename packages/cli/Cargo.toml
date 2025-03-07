@@ -37,3 +37,4 @@ file-format = { version = "0.26.0", features = [
 image = "0.25.5"
 pathdiff = "0.2.3"
 pin-project = "1.1.10"
+rust-embed = "8.6.0"
