@@ -1,4 +1,4 @@
-use std::{net::Ipv4Addr, sync::Arc};
+use std::{cmp::Ordering, net::Ipv4Addr, sync::Arc};
 
 use async_trait::async_trait;
 use clap::Args;
@@ -29,6 +29,22 @@ use crate::{Console, Runnable, error::Error};
 //     <server>/P:<id>       - Playlist
 //       <server>/V:<id>     - Video
 
+fn uniform_title(obj: &Object) -> String {
+    let title = match obj {
+        Object::Container(o) => o.title.to_lowercase(),
+        Object::Item(o) => o.title.to_lowercase(),
+    };
+
+    let mut trimmed = title.trim().trim_start_matches("a ").trim();
+    trimmed = trimmed.trim().trim_start_matches("the ").trim();
+
+    trimmed.to_string()
+}
+
+fn sort_by_title(a: &Object, b: &Object) -> Ordering {
+    uniform_title(a).cmp(&uniform_title(b))
+}
+
 trait ToObject
 where
     Self: Sized,
@@ -38,12 +54,18 @@ where
     async fn to_object(self) -> Object;
     async fn to_children(self) -> Vec<Self::Children>;
 
+    fn sort_children(children: &mut Vec<Object>) {
+        children.sort_by(sort_by_title);
+    }
+
     async fn collect_children(self) -> Vec<Object> {
         let mut result = Vec::new();
 
         for child in self.to_children().await {
             result.push(child.to_object().await);
         }
+
+        Self::sort_children(&mut result);
 
         result
     }
@@ -99,6 +121,7 @@ impl FromId for VideoPart {
 
 impl ToObject for VideoPart {
     type Children = Object;
+
     async fn to_object(self) -> Object {
         let video = self.video().await;
         let parts = video.parts().await;
@@ -162,6 +185,8 @@ impl ToObject for Video {
 
         if parts.len() == 1 { Vec::new() } else { parts }
     }
+
+    fn sort_children(_: &mut Vec<Object>) {}
 }
 
 impl FromId for Playlist {
@@ -193,6 +218,8 @@ impl ToObject for Playlist {
 
         result
     }
+
+    fn sort_children(_: &mut Vec<Object>) {}
 }
 
 impl FromId for Collection {
@@ -215,6 +242,13 @@ impl ToObject for Collection {
     }
 
     async fn to_children(self) -> Vec<Self::Children> {
+        match self {
+            Collection::Movie(c) => c.collect_children().await,
+            Collection::Show(c) => c.collect_children().await,
+        }
+    }
+
+    async fn collect_children(self) -> Vec<Object> {
         match self {
             Collection::Movie(c) => c.collect_children().await,
             Collection::Show(c) => c.collect_children().await,
@@ -246,6 +280,8 @@ impl ToObject for MovieCollection {
 
         result
     }
+
+    fn sort_children(_: &mut Vec<Object>) {}
 }
 
 impl ToObject for ShowCollection {
@@ -282,6 +318,13 @@ impl ToObject for Library {
     }
 
     async fn to_children(self) -> Vec<Self::Children> {
+        match self {
+            Library::Movie(l) => l.collect_children().await,
+            Library::Show(l) => l.collect_children().await,
+        }
+    }
+
+    async fn collect_children(self) -> Vec<Object> {
         match self {
             Library::Movie(l) => l.collect_children().await,
             Library::Show(l) => l.collect_children().await,
@@ -389,6 +432,8 @@ impl ToObject for Season {
 
         result
     }
+
+    fn sort_children(_: &mut Vec<Object>) {}
 }
 
 struct Root {
@@ -426,6 +471,8 @@ impl ToObject for Root {
             .await,
         ]
     }
+
+    fn sort_children(_: &mut Vec<Object>) {}
 }
 
 struct Libraries {
