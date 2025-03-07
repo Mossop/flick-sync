@@ -399,9 +399,10 @@ impl Interface for Ipv4Interface {
         let raw_socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
         raw_socket.set_reuse_address(true)?;
         raw_socket.set_nonblocking(true)?;
-        raw_socket.bind(&SocketAddr::from((SSDP_IPV4, SSDP_PORT)).into())?;
+        raw_socket.set_multicast_if_v4(&self.address)?;
         raw_socket.join_multicast_v4(&SSDP_IPV4, &self.address)?;
         raw_socket.set_multicast_loop_v4(false)?;
+        raw_socket.bind(&SocketAddr::from((SSDP_IPV4, SSDP_PORT)).into())?;
 
         Ok(UdpSocket::from_std(raw_socket.into())?)
     }
@@ -417,8 +418,8 @@ impl Interface for Ipv4Interface {
     fn build_multicast(&self) -> anyhow::Result<(UdpSocket, SocketAddr)> {
         let raw_socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
         raw_socket.set_nonblocking(true)?;
-        raw_socket.bind(&SocketAddr::from((self.address, 0)).into())?;
         raw_socket.set_multicast_if_v4(&self.address)?;
+        raw_socket.bind(&SocketAddr::from((self.address, 0)).into())?;
 
         Ok((
             UdpSocket::from_std(raw_socket.into())?,
@@ -476,7 +477,7 @@ impl SsdpTask {
             );
 
             if let Err(e) = framed.send((message, address)).await {
-                error!(error=%e, "Failed to build unicast socket");
+                error!(error=%e, local_address=%self.interface.address(), remote_address=%address, "Failed to send unicast message");
             }
         }
     }
@@ -505,7 +506,7 @@ impl SsdpTask {
         let (socket, address) = match self.interface.build_multicast() {
             Ok(r) => r,
             Err(e) => {
-                error!(error=%e, "Failed to build multiicast socket");
+                error!(error=%e, local_address=%self.interface.address(), "Failed to build multicast socket");
                 return;
             }
         };
@@ -591,7 +592,7 @@ impl SsdpTask {
         let socket = match self.interface.build_unicast() {
             Ok(s) => s,
             Err(e) => {
-                error!(error=%e, "Failed to build unicast socket");
+                error!(error=%e, local_address=%self.interface.address(), "Failed to build unicast socket");
                 return;
             }
         };
@@ -641,7 +642,7 @@ impl SsdpTask {
         select! {
             result = self.recv_loop().fuse() => {
                 if let Err(e) = result {
-                    error!(error=%e, "Failed listening to multicast traffic");
+                    error!(error=%e, local_address=%self.interface.address(), "Failed listening to multicast traffic");
                 }
             },
             _ = self.announce_loop().fuse() => {},
