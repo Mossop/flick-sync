@@ -19,6 +19,7 @@ use futures::Stream;
 use getifaddrs::{Interface, InterfaceFlags, getifaddrs};
 use mime::Mime;
 use tracing::debug;
+pub use upnp::{Container, Icon, Item, Object, Resource, UpnpError};
 use uuid::Uuid;
 
 use crate::{
@@ -26,7 +27,6 @@ use crate::{
     services::HttpAppData,
     ssdp::SsdpTask,
 };
-pub use upnp::{Container, Icon, Item, Object, Resource, UpnpError};
 
 /// The default port to use for HTTP communication
 const HTTP_PORT: u16 = 1980;

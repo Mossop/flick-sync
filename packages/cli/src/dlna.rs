@@ -5,6 +5,7 @@ use std::{
     os::unix::fs::MetadataExt,
     path::PathBuf,
     pin::Pin,
+    str::FromStr,
     sync::Arc,
     task::{Context, Poll},
 };
@@ -27,7 +28,6 @@ use mime::Mime;
 use pathdiff::diff_paths;
 use pin_project::pin_project;
 use rust_embed::{Embed, EmbeddedFile};
-use std::str::FromStr;
 use tokio::{
     fs,
     io::{AsyncSeekExt, BufReader},
