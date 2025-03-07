@@ -163,7 +163,7 @@ async fn main() -> Result {
     let console = Console::default();
 
     let log_filter = env::var("RUST_LOG")
-        .unwrap_or_else(|_| "flick_sync=trace,warn,dlna_server=trace".to_string());
+        .unwrap_or_else(|_| "flick_sync=trace,warn,dlna_server=debug".to_string());
 
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(&log_filter)

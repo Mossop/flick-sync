@@ -241,7 +241,7 @@ fn decode_line(src: &BytesMut, pos: usize) -> anyhow::Result<Option<(&str, usize
         return Ok(None);
     }
 
-    Ok(Some((from_utf8(&src[pos..end])?, end + 2)))
+    Ok(Some((from_utf8(&src[pos..end])?.trim(), end + 2)))
 }
 
 fn parse_method(line: &str) -> anyhow::Result<&str> {
