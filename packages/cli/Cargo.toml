@@ -3,6 +3,9 @@ name = "flick-sync-cli"
 version = "1.6.0"
 edition = "2024"
 
+[features]
+vendored-openssl = ["dep:openssl"]
+
 [[bin]]
 name = "flick-sync"
 path = "src/main.rs"
@@ -38,3 +41,4 @@ image = "0.25.5"
 pathdiff = "0.2.3"
 pin-project = "1.1.10"
 rust-embed = "8.6.0"
+openssl = { version = "0.10", features = ["vendored"], optional = true }

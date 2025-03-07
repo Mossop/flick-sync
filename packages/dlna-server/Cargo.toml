@@ -12,7 +12,10 @@ rt-async = ["dep:async-std"]
 tokio = { version = "1.43.0", features = ["net"] }
 tokio-util = { version = "0.7.13", features = ["net", "codec"] }
 anyhow = "1.0.96"
-actix-web = "4.9.0"
+actix-web = { version = "4.9.0", default-features = false, features = [
+  "macros",
+  "compat",
+] }
 async-std = { version = "1.13.0", optional = true }
 http = "1.2.0"
 tracing = "0.1.41"
