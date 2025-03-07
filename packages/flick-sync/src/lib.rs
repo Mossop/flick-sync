@@ -166,6 +166,10 @@ impl FlickSync {
         })
     }
 
+    pub async fn root(&self) -> PathBuf {
+        self.inner.path.read().await.clone()
+    }
+
     /// Adds a new server
     pub async fn add_server(
         &self,

@@ -26,7 +26,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use xml::{EmitterConfig, writer::XmlEvent};
 
 use crate::{
-    Error, Result, Server,
+    Error, FlickSync, Result, Server,
     state::{
         CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, RelatedFileState,
         SeasonState, ServerState, ShowState, VideoDetail, VideoPartState, VideoState,
@@ -63,6 +63,12 @@ macro_rules! state_wrapper {
         impl $typ {
             pub fn id(&self) -> &str {
                 &self.id
+            }
+
+            pub fn flick_sync(&self) -> FlickSync {
+                FlickSync {
+                    inner: self.server.inner.clone(),
+                }
             }
 
             pub fn server(&self) -> Server {
@@ -126,6 +132,14 @@ macro_rules! wrapper_builders {
 
 macro_rules! thumbnail_methods {
     () => {
+        pub async fn thumbnail_file(&self) -> Option<PathBuf> {
+            if let Some(relative_file) = self.thumbnail().await.file() {
+                Some(self.server.inner.path.read().await.join(relative_file))
+            } else {
+                None
+            }
+        }
+
         pub(crate) async fn thumbnail(&self) -> RelatedFileState {
             self.with_state(|s| s.thumbnail.clone()).await
         }
@@ -531,6 +545,12 @@ impl VideoPart {
             DownloadState::Transcoding { .. } => TransferState::Transcoding,
             _ => TransferState::Downloaded,
         }
+    }
+
+    pub async fn file(&self) -> Option<PathBuf> {
+        let file = self.download_state().await.file()?;
+
+        Some(self.server.inner.path.read().await.join(file))
     }
 
     #[instrument(level = "trace", skip(self), fields(video=self.id, part=self.index))]
@@ -1366,6 +1386,20 @@ impl Video {
         }
 
         true
+    }
+
+    pub fn flick_sync(&self) -> FlickSync {
+        match self {
+            Self::Movie(v) => v.flick_sync(),
+            Self::Episode(v) => v.flick_sync(),
+        }
+    }
+
+    pub async fn thumbnail_file(&self) -> Option<PathBuf> {
+        match self {
+            Self::Movie(v) => v.thumbnail_file().await,
+            Self::Episode(v) => v.thumbnail_file().await,
+        }
     }
 
     pub async fn library(&self) -> Library {

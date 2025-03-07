@@ -7,7 +7,7 @@ use actix_web::{
     get,
     http::header,
     middleware::Next,
-    web::{Data, Payload},
+    web::{Data, Path, Payload},
 };
 use mime::Mime;
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::{
     DlnaRequestHandler, UpnpError, ns,
     soap::{ArgDirection, RequestContext, SoapAction, SoapArgument, SoapResult},
-    upnp::{self, DidlDocument},
+    upnp,
     xml::Xml,
 };
 
@@ -62,6 +62,7 @@ pub(crate) async fn middleware<B: MessageBody>(
         "http.request.method" = %req.method(),
         "http.request.content_type" = field::Empty,
         "http.request.content_length" = field::Empty,
+        "http.request.range" = field::Empty,
         "http.response.status_code" = field::Empty,
     );
 
@@ -77,6 +78,10 @@ pub(crate) async fn middleware<B: MessageBody>(
 
     if let Some(content_length) = headers.get("content-length").and_then(|h| h.to_str().ok()) {
         span.record("http.request.content_length", content_length);
+    }
+
+    if let Some(range) = headers.get("range").and_then(|h| h.to_str().ok()) {
+        span.record("http.request.range", range);
     }
 
     let client_addr = client_addr(req.request());
@@ -104,6 +109,7 @@ pub(crate) async fn middleware<B: MessageBody>(
 pub(crate) struct HttpAppData<H: DlnaRequestHandler> {
     pub(crate) uuid: Uuid,
     pub(crate) handler: H,
+    pub(crate) icons: Vec<upnp::Icon>,
 }
 
 pub(crate) async fn device_root<H: DlnaRequestHandler>(
@@ -111,6 +117,7 @@ pub(crate) async fn device_root<H: DlnaRequestHandler>(
 ) -> Xml<upnp::Root> {
     Xml::new(upnp::Root {
         uuid: app_data.uuid,
+        icons: app_data.icons.clone(),
     })
 }
 
@@ -132,6 +139,125 @@ async fn content_directory() -> Xml<upnp::ServiceDescription> {
         GetSystemUpdateID::descriptor(),
         Search::descriptor(),
     ]))
+}
+
+pub(crate) async fn icon<H: DlnaRequestHandler>(
+    app_data: Data<HttpAppData<H>>,
+    id: Path<String>,
+) -> HttpResponse {
+    match app_data.handler.stream_icon(&id).await {
+        Ok(stream_result) => {
+            let mut builder = HttpResponse::Ok();
+
+            if let Some(length) = stream_result.resource_size {
+                builder.append_header(header::ContentLength(length as usize));
+            }
+
+            builder.append_header(header::ContentType(stream_result.mime_type));
+
+            builder.streaming(stream_result.stream)
+        }
+        Err(err) => {
+            let status = err.status_code();
+            if status.is_client_error() {
+                HttpResponse::NotFound().finish()
+            } else {
+                HttpResponse::BadRequest().finish()
+            }
+        }
+    }
+}
+
+pub(crate) async fn resource_head<H: DlnaRequestHandler>(
+    app_data: Data<HttpAppData<H>>,
+    id: Path<String>,
+) -> HttpResponse {
+    match app_data.handler.get_resource(&id).await {
+        Ok(resource) => {
+            let mut builder = HttpResponse::Ok();
+            builder.append_header(header::ContentType(resource.mime_type));
+
+            if let Some(size) = resource.size {
+                builder.append_header(header::ContentLength(size as usize));
+            }
+
+            if resource.seekable {
+                builder.append_header((header::ACCEPT_RANGES, "bytes"));
+            }
+
+            builder.finish()
+        }
+        Err(err) => {
+            let status = err.status_code();
+            if status.is_client_error() {
+                HttpResponse::NotFound().finish()
+            } else {
+                HttpResponse::BadRequest().finish()
+            }
+        }
+    }
+}
+
+pub(crate) async fn resource_get<H: DlnaRequestHandler>(
+    app_data: Data<HttpAppData<H>>,
+    req: HttpRequest,
+    id: Path<String>,
+) -> HttpResponse {
+    let (seek, length) = if let Some(header::Range::Bytes(spec)) = req
+        .headers()
+        .get(header::RANGE)
+        .and_then(|hv| hv.to_str().ok())
+        .and_then(|hv| header::Range::from_str(hv).ok())
+    {
+        if spec.len() == 1 {
+            match spec[0] {
+                header::ByteRangeSpec::From(start) => (start, None),
+                header::ByteRangeSpec::Last(end) => (0, Some(end + 1)),
+                header::ByteRangeSpec::FromTo(start, end) => (start, Some(end - start + 1)),
+            }
+        } else {
+            (0, None)
+        }
+    } else {
+        (0, None)
+    };
+
+    match app_data.handler.stream_resource(&id, seek, length).await {
+        Ok(stream_result) => {
+            let mut builder = if let Some(range) = stream_result.range {
+                let mut builder = HttpResponse::PartialContent();
+
+                builder.append_header(header::ContentLength(range.length as usize));
+
+                builder.append_header(header::ContentRange(header::ContentRangeSpec::Bytes {
+                    range: Some((range.start, range.length + range.start - 1)),
+                    instance_length: stream_result.resource_size,
+                }));
+
+                builder
+            } else {
+                let mut builder = HttpResponse::Ok();
+
+                if let Some(length) = stream_result.resource_size {
+                    builder.append_header(header::ContentLength(length as usize));
+                }
+
+                builder
+            };
+
+            builder.append_header(header::ContentType(stream_result.mime_type));
+
+            builder.streaming(stream_result.stream)
+        }
+        Err(err) => {
+            let status = err.status_code();
+            if status.is_client_error() {
+                HttpResponse::NotFound().finish()
+            } else {
+                HttpResponse::BadRequest().finish()
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -383,7 +509,7 @@ impl SoapAction for Browse {
         }
 
         let number_returned = objects.len();
-        let result = DidlDocument::new(context.base.clone(), objects);
+        let result = upnp::DidlDocument::new(context.base.clone(), objects);
 
         Ok(BrowseResponse {
             number_returned,

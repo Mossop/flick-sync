@@ -3,6 +3,7 @@
 
 use std::{
     collections::HashMap,
+    io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
@@ -13,9 +14,11 @@ use actix_web::{
     web::{self, Data},
 };
 use async_trait::async_trait;
+use bytes::Bytes;
+use futures::Stream;
 use getifaddrs::{Interface, InterfaceFlags, getifaddrs};
+use mime::Mime;
 use tracing::debug;
-pub use upnp::{Container, Item, Object, Resource, UpnpError};
 use uuid::Uuid;
 
 use crate::{
@@ -23,6 +26,7 @@ use crate::{
     services::HttpAppData,
     ssdp::SsdpTask,
 };
+pub use upnp::{Container, Icon, Item, Object, Resource, UpnpError};
 
 /// The default port to use for HTTP communication
 const HTTP_PORT: u16 = 1980;
@@ -56,6 +60,23 @@ mod ns {
     pub(crate) const DLNA: &str = "urn:schemas-dlna-org:metadata-1-0/";
 }
 
+pub struct Range {
+    pub start: u64,
+    pub length: u64,
+}
+
+/// A response to a request to stream some data.
+pub struct StreamResponse<S> {
+    /// The content type of the data.
+    pub mime_type: Mime,
+    /// If the content is not the full resource then this indicates the range included.
+    pub range: Option<Range>,
+    /// If known the full size of the resource.
+    pub resource_size: Option<u64>,
+    /// The resource stream.
+    pub stream: S,
+}
+
 #[async_trait]
 pub trait DlnaRequestHandler
 where
@@ -65,6 +86,20 @@ where
     async fn get_object(&self, object_id: &str) -> Result<Object, UpnpError>;
     /// Get the metadata for the objects that are direct children of the object with the given ID.
     async fn list_children(&self, parent_id: &str) -> Result<Vec<Object>, UpnpError>;
+
+    async fn stream_icon(
+        &self,
+        icon_id: &str,
+    ) -> Result<StreamResponse<impl Stream<Item = Result<Bytes, io::Error>> + 'static>, UpnpError>;
+
+    async fn get_resource(&self, resource_id: &str) -> Result<Resource, UpnpError>;
+
+    async fn stream_resource(
+        &self,
+        resource_id: &str,
+        seek: u64,
+        length: Option<u64>,
+    ) -> Result<StreamResponse<impl Stream<Item = Result<Bytes, io::Error>> + 'static>, UpnpError>;
 }
 
 #[derive(Default)]
@@ -111,6 +146,7 @@ impl DlnaServer {
             uuid: Uuid::new_v4(),
             server_version,
             binds: Vec::new(),
+            icons: Vec::new(),
             handler,
         }
     }
@@ -126,6 +162,7 @@ pub struct DlnaServerBuilder<H: DlnaRequestHandler> {
     uuid: Uuid,
     server_version: String,
     binds: Vec<(IpAddr, u16)>,
+    icons: Vec<Icon>,
     handler: H,
 }
 
@@ -135,6 +172,7 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
         let app_data = Data::new(HttpAppData {
             uuid: self.uuid,
             handler: self.handler,
+            icons: self.icons,
         });
 
         let mut http_server = HttpServer::new(move || {
@@ -145,6 +183,15 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
                 .service(services::connection_manager)
                 .service(services::content_directory)
                 .route("/soap", web::post().to(services::soap_request::<H>))
+                .route("/icon/{path:.*}", web::get().to(services::icon::<H>))
+                .route(
+                    "/resource/{path:.*}",
+                    web::head().to(services::resource_head::<H>),
+                )
+                .route(
+                    "/resource/{path:.*}",
+                    web::get().to(services::resource_get::<H>),
+                )
         });
 
         let interfaces: Vec<Interface> = getifaddrs()?
@@ -214,6 +261,13 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
     /// created.
     pub fn uuid(mut self, uuid: Uuid) -> Self {
         self.uuid = uuid;
+        self
+    }
+
+    /// Adds an icon to represent this server. Can be called multiple times for different
+    /// resolutions and mimetypes.
+    pub fn icon(mut self, icon: Icon) -> Self {
+        self.icons.push(icon);
         self
     }
 

@@ -1,16 +1,90 @@
-use std::{cmp::Ordering, net::Ipv4Addr, sync::Arc};
+use std::{
+    cmp::Ordering,
+    io::{self, SeekFrom},
+    net::Ipv4Addr,
+    os::unix::fs::MetadataExt,
+    path::PathBuf,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use clap::Args;
-use dlna_server::{Container, DlnaRequestHandler, DlnaServer, Item, Object, Resource, UpnpError};
+use dlna_server::{
+    Container, DlnaRequestHandler, DlnaServer, Icon, Item, Object, Range, Resource, StreamResponse,
+    UpnpError,
+};
+use file_format::FileFormat;
 use flick_sync::{
     Collection, FlickSync, Library, MovieCollection, MovieLibrary, Playlist, Season, Server, Show,
     ShowCollection, ShowLibrary, Video, VideoPart,
 };
+use futures::Stream;
+use image::image_dimensions;
+use mime::Mime;
+use pathdiff::diff_paths;
+use pin_project::pin_project;
 use std::str::FromStr;
-use tokio::sync::Notify;
+use tokio::{
+    fs,
+    io::{AsyncSeekExt, BufReader},
+    sync::Notify,
+};
+use tokio_util::io::ReaderStream;
+use tracing::debug;
 
 use crate::{Console, Runnable, error::Error};
+
+#[pin_project]
+struct StreamLimiter<S> {
+    remaining: Option<u64>,
+    #[pin]
+    inner: S,
+}
+
+impl<S> StreamLimiter<S> {
+    fn new(stream: S, limit: Option<u64>) -> Self {
+        Self {
+            remaining: limit,
+            inner: stream,
+        }
+    }
+}
+
+impl<S> Stream for StreamLimiter<S>
+where
+    S: Stream<Item = Result<Bytes, io::Error>>,
+{
+    type Item = Result<Bytes, io::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(remaining) = self.remaining {
+            if remaining == 0 {
+                return Poll::Ready(None);
+            }
+        }
+
+        let this = self.project();
+
+        match this.inner.poll_next(cx) {
+            Poll::Ready(Some(Ok(mut bytes))) => {
+                if let Some(limit) = this.remaining.take() {
+                    if limit < bytes.len() as u64 {
+                        bytes.truncate(limit as usize);
+                        *this.remaining = Some(0);
+                    } else {
+                        *this.remaining = Some(limit - bytes.len() as u64);
+                    }
+                }
+
+                Poll::Ready(Some(Ok(bytes)))
+            }
+            o => o,
+        }
+    }
+}
 
 // Object ID forms and hierarchy:
 //
@@ -43,6 +117,41 @@ fn uniform_title(obj: &Object) -> String {
 
 fn sort_by_title(a: &Object, b: &Object) -> Ordering {
     uniform_title(a).cmp(&uniform_title(b))
+}
+
+async fn icon_resource(root: PathBuf, path: Option<PathBuf>) -> Option<Icon> {
+    let path = path?;
+
+    let format = FileFormat::from_file(&path).ok()?;
+    let mime_type = Mime::from_str(format.media_type()).ok()?;
+
+    let (width, height) = image_dimensions(&path).ok()?;
+
+    Some(Icon {
+        id: format!("thumbnail/{}", diff_paths(&path, root).unwrap().display()),
+        mime_type,
+        width,
+        height,
+        depth: 24,
+    })
+}
+
+async fn file_resource(video_part: &VideoPart, path: Option<PathBuf>) -> Option<Resource> {
+    let path = path?;
+
+    let format = FileFormat::from_file(&path).ok()?;
+    let mime_type = Mime::from_str(format.media_type()).ok()?;
+    let metadata = fs::metadata(&path).await.ok()?;
+    let video = video_part.video().await;
+    let root = video.flick_sync().root().await;
+
+    Some(Resource {
+        id: format!("video/{}", diff_paths(&path, root).unwrap().display()),
+        mime_type,
+        duration: Some(video_part.duration().await),
+        size: Some(metadata.size()),
+        seekable: true,
+    })
 }
 
 trait ToObject
@@ -126,26 +235,35 @@ impl ToObject for VideoPart {
         let video = self.video().await;
         let parts = video.parts().await;
 
-        let (title, parent_id) = if parts.len() == 1 {
-            (video.title().await, video_parent(&video).await)
+        let mut resources = Vec::new();
+        if let Some(resource) = file_resource(&self, self.file().await).await {
+            resources.push(resource);
+        }
+
+        let (id, title, parent_id) = if parts.len() == 1 {
+            (
+                format!("{}/V:{}", video.server().id(), video.id()),
+                video.title().await,
+                video_parent(&video).await,
+            )
         } else {
             (
+                format!("{}/VP:{}/{}", video.server().id(), video.id(), self.index()),
                 format!("{} - Pt {}", video.title().await, self.index() + 1),
                 format!("{}/V:{}", video.server().id(), video.id()),
             )
         };
 
         Object::Item(Item {
-            id: format!("{}/VP:{}/{}", video.server().id(), video.id(), self.index()),
+            thumbnail: icon_resource(
+                video.flick_sync().root().await,
+                video.thumbnail_file().await,
+            )
+            .await,
+            id,
             parent_id,
             title,
-            resources: vec![Resource {
-                id: video.id().to_owned(),
-                mime_type: "video/mp4".parse().unwrap(),
-                duration: Some(self.duration().await),
-                size: None,
-                seekable: true,
-            }],
+            resources,
         })
     }
 
@@ -176,6 +294,11 @@ impl ToObject for Video {
                 parent_id: video_parent(&self).await,
                 title: self.title().await,
                 child_count: Some(parts.len()),
+                thumbnail: icon_resource(
+                    self.flick_sync().root().await,
+                    self.thumbnail_file().await,
+                )
+                .await,
             })
         }
     }
@@ -204,6 +327,7 @@ impl ToObject for Playlist {
             parent_id: "P".to_string(),
             child_count: Some(self.videos().await.len()),
             title: self.title().await,
+            thumbnail: None,
         })
     }
 
@@ -265,6 +389,8 @@ impl ToObject for MovieCollection {
             parent_id: "C".to_string(),
             child_count: Some(self.movies().await.len()),
             title: self.title().await,
+            thumbnail: icon_resource(self.flick_sync().root().await, self.thumbnail_file().await)
+                .await,
         })
     }
 
@@ -293,6 +419,8 @@ impl ToObject for ShowCollection {
             parent_id: "C".to_string(),
             child_count: Some(self.shows().await.len()),
             title: self.title().await,
+            thumbnail: icon_resource(self.flick_sync().root().await, self.thumbnail_file().await)
+                .await,
         })
     }
 
@@ -341,6 +469,7 @@ impl ToObject for MovieLibrary {
             parent_id: "L".to_string(),
             child_count: Some(self.movies().await.len()),
             title: self.title().await,
+            thumbnail: None,
         })
     }
 
@@ -367,6 +496,7 @@ impl ToObject for ShowLibrary {
             parent_id: "L".to_string(),
             child_count: Some(self.shows().await.len()),
             title: self.title().await,
+            thumbnail: None,
         })
     }
 
@@ -392,12 +522,16 @@ impl ToObject for Show {
             parent_id: format!("{}/L:{}", library.server().id(), library.id()),
             child_count: Some(self.seasons().await.len()),
             title: self.title().await,
+            thumbnail: icon_resource(self.flick_sync().root().await, self.thumbnail_file().await)
+                .await,
         })
     }
 
     async fn to_children(self) -> Vec<Self::Children> {
         self.seasons().await
     }
+
+    fn sort_children(_: &mut Vec<Object>) {}
 }
 
 impl FromId for Season {
@@ -417,6 +551,8 @@ impl ToObject for Season {
             parent_id: format!("{}/S:{}", show.server().id(), show.id()),
             child_count: Some(self.episodes().await.len()),
             title: self.title().await,
+            thumbnail: icon_resource(self.flick_sync().root().await, show.thumbnail_file().await)
+                .await,
         })
     }
 
@@ -449,6 +585,7 @@ impl ToObject for Root {
             parent_id: "-1".to_string(),
             child_count: Some(3),
             title: "Flick Sync Synced Media".to_string(),
+            thumbnail: None,
         })
     }
 
@@ -493,6 +630,7 @@ impl ToObject for Libraries {
             parent_id: "0".to_string(),
             child_count: Some(library_count),
             title: "Libraries".to_string(),
+            thumbnail: None,
         })
     }
 
@@ -525,6 +663,7 @@ impl ToObject for Playlists {
             parent_id: "0".to_string(),
             child_count: Some(playlist_count),
             title: "Playlists".to_string(),
+            thumbnail: None,
         })
     }
 
@@ -557,6 +696,7 @@ impl ToObject for Collections {
             parent_id: "0".to_string(),
             child_count: Some(collection_count),
             title: "Collections".to_string(),
+            thumbnail: None,
         })
     }
 
@@ -696,6 +836,133 @@ impl DlnaRequestHandler for DlnaHandler {
                 _ => Err(UpnpError::unknown_object()),
             }
         }
+    }
+
+    async fn stream_icon(
+        &self,
+        icon_id: &str,
+    ) -> Result<StreamResponse<ReaderStream<BufReader<fs::File>>>, UpnpError> {
+        if let Some(path) = icon_id.strip_prefix("thumbnail/") {
+            let target = self.flick_sync.root().await.join(path);
+
+            let Ok(format) = FileFormat::from_file(&target) else {
+                return Err(UpnpError::unknown_object());
+            };
+
+            let Ok(mime_type) = Mime::from_str(format.media_type()) else {
+                return Err(UpnpError::unknown_object());
+            };
+
+            let Ok(metadata) = fs::metadata(&target).await else {
+                return Err(UpnpError::unknown_object());
+            };
+
+            let Ok(file) = fs::File::open(target).await else {
+                return Err(UpnpError::unknown_object());
+            };
+
+            Ok(StreamResponse {
+                mime_type,
+                range: None,
+                resource_size: Some(metadata.size()),
+                stream: ReaderStream::new(BufReader::new(file)),
+            })
+        } else {
+            return Err(UpnpError::unknown_object());
+        }
+    }
+
+    async fn get_resource(&self, resource_id: &str) -> Result<Resource, UpnpError> {
+        let Some(path) = resource_id.strip_prefix("video/") else {
+            return Err(UpnpError::unknown_object());
+        };
+
+        let target = self.flick_sync.root().await.join(path);
+
+        let Ok(format) = FileFormat::from_file(&target) else {
+            return Err(UpnpError::unknown_object());
+        };
+
+        let Ok(mime_type) = Mime::from_str(format.media_type()) else {
+            return Err(UpnpError::unknown_object());
+        };
+
+        let Ok(metadata) = fs::metadata(&target).await else {
+            return Err(UpnpError::unknown_object());
+        };
+
+        Ok(Resource {
+            id: resource_id.to_owned(),
+            mime_type,
+            size: Some(metadata.size()),
+            seekable: true,
+            duration: None,
+        })
+    }
+
+    async fn stream_resource(
+        &self,
+        resource_id: &str,
+        seek: u64,
+        length: Option<u64>,
+    ) -> Result<StreamResponse<StreamLimiter<ReaderStream<BufReader<fs::File>>>>, UpnpError> {
+        let Some(path) = resource_id.strip_prefix("video/") else {
+            debug!("Bad prefix");
+            return Err(UpnpError::unknown_object());
+        };
+
+        let target = self.flick_sync.root().await.join(path);
+
+        let Ok(format) = FileFormat::from_file(&target) else {
+            debug!("Bad format");
+            return Err(UpnpError::unknown_object());
+        };
+
+        let Ok(mime_type) = Mime::from_str(format.media_type()) else {
+            debug!("Bad mime");
+            return Err(UpnpError::unknown_object());
+        };
+
+        let Ok(metadata) = fs::metadata(&target).await else {
+            debug!("Bad meta");
+            return Err(UpnpError::unknown_object());
+        };
+
+        let Ok(mut file) = fs::File::open(target).await else {
+            debug!("Bad open");
+            return Err(UpnpError::unknown_object());
+        };
+
+        let range = match (seek, length) {
+            (0, None) => None,
+            (start, None) => {
+                if file.seek(SeekFrom::Start(start)).await.is_ok() {
+                    Some(Range {
+                        start,
+                        length: metadata.size() - start,
+                    })
+                } else {
+                    None
+                }
+            }
+            (0, Some(length)) => Some(Range { start: 0, length }),
+            (start, Some(length)) => {
+                if file.seek(SeekFrom::Start(start)).await.is_ok() {
+                    Some(Range { start, length })
+                } else {
+                    None
+                }
+            }
+        };
+
+        let limit = range.as_ref().map(|r| r.length);
+
+        Ok(StreamResponse {
+            mime_type,
+            range,
+            resource_size: Some(metadata.size()),
+            stream: StreamLimiter::new(ReaderStream::new(BufReader::new(file)), limit),
+        })
     }
 }
 

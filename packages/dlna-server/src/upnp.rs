@@ -47,6 +47,30 @@ impl From<WriterError> for UpnpError {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Icon {
+    pub id: String,
+    pub mime_type: Mime,
+    pub width: u32,
+    pub height: u32,
+    pub depth: u8,
+}
+
+impl Icon {
+    fn write_xml<W: Write>(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
+        let base = writer.base();
+        let uri = base.join(&format!("/icon/{}", self.id)).unwrap();
+
+        writer.element_ns((ns::UPNP, "icon")).text(&uri)?;
+        writer.element_ns((ns::UPNP, "albumArtURI")).text(&uri)?;
+        writer
+            .element_ns((ns::DIDL, "res"))
+            .attr("protocolInfo", format!("http-get:*:{}:*", self.mime_type))
+            .attr("resolution", format!("{}x{}", self.width, self.height))
+            .text(&uri)
+    }
+}
+
 /// Represents a container on the server.
 #[derive(Debug)]
 pub struct Container {
@@ -60,6 +84,7 @@ pub struct Container {
     pub child_count: Option<usize>,
     /// The title of this container.
     pub title: String,
+    pub thumbnail: Option<Icon>,
 }
 
 impl<W: Write> ToXml<W> for Container {
@@ -77,7 +102,13 @@ impl<W: Write> ToXml<W> for Container {
                 writer.element_ns((ns::DC, "title")).text(&self.title)?;
                 writer
                     .element_ns((ns::UPNP, "class"))
-                    .text("object.container")
+                    .text("object.container")?;
+
+                if let Some(thumbnail) = &self.thumbnail {
+                    thumbnail.write_xml(writer)?;
+                }
+
+                Ok(())
             })
     }
 }
@@ -100,6 +131,21 @@ impl<W: Write> ToXml<W> for Resource {
             .element_ns((ns::DIDL, "res"))
             .attr("protocolInfo", format!("http-get:*:{}:*", self.mime_type));
 
+        if let Some(duration) = self.duration {
+            let mut total = duration.as_millis();
+            let millis = total % 1000;
+            total /= 1000;
+            let seconds = total % 60;
+            total /= 60;
+            let minutes = total % 60;
+            let hours = total / 60;
+
+            builder = builder.attr(
+                "duration",
+                format!("{}:{:02}:{:02}.{:03}", hours, minutes, seconds, millis),
+            );
+        }
+
         if let Some(size) = self.size {
             builder = builder.attr("size", size);
         }
@@ -120,6 +166,7 @@ pub struct Item {
     /// The title of this item.
     pub title: String,
     pub resources: Vec<Resource>,
+    pub thumbnail: Option<Icon>,
 }
 
 impl<W: Write> ToXml<W> for Item {
@@ -134,6 +181,10 @@ impl<W: Write> ToXml<W> for Item {
                 writer
                     .element_ns((ns::UPNP, "class"))
                     .text("object.item.videoItem")?;
+
+                if let Some(thumbnail) = &self.thumbnail {
+                    thumbnail.write_xml(writer)?;
+                }
 
                 for resource in &self.resources {
                     resource.write_xml(writer)?;
@@ -209,6 +260,7 @@ where
 
 pub(crate) struct Root {
     pub(crate) uuid: Uuid,
+    pub(crate) icons: Vec<Icon>,
 }
 
 impl<W: Write> ToXml<W> for Root {
@@ -237,6 +289,22 @@ impl<W: Write> ToXml<W> for Root {
                     writer
                         .element("modelDescription")
                         .text("Synced Flicks Media Server")?;
+
+                    if !self.icons.is_empty() {
+                        writer.element("iconList").contents(|writer| {
+                            for icon in &self.icons {
+                                writer.element("icon").contents(|writer| {
+                                    writer.element("mimetype").text(&icon.mime_type)?;
+                                    writer.element("width").text(icon.width)?;
+                                    writer.element("height").text(icon.height)?;
+                                    writer.element("depth").text(icon.depth)?;
+                                    writer.element("url").text(format!("/icon/{}", icon.id))
+                                })?;
+                            }
+
+                            Ok(())
+                        })?;
+                    }
 
                     writer.element("serviceList").contents(|writer| {
                         writer.element("service").contents(|writer| {
