@@ -10,19 +10,20 @@ use anyhow::bail;
 use bytes::{Buf, BufMut, BytesMut};
 use futures::{FutureExt, select, sink::SinkExt, stream::StreamExt};
 use http::{HeaderMap, HeaderName, HeaderValue};
+use socket_pktinfo::PktInfoUdpSocket;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::{net::UdpSocket, time::sleep};
 use tokio_util::{
     codec::{Decoder, Encoder},
     udp::UdpFramed,
 };
-use tracing::{debug, error, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::Uuid;
 
 use crate::ns;
 
-const SSDP_IPV4: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
-const SSDP_IPV6: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xC);
+pub(crate) const SSDP_IPV4: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
+pub(crate) const SSDP_IPV6: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xC);
 const SSDP_PORT: u16 = 1900;
 
 #[derive(Debug, Clone)]
@@ -647,5 +648,23 @@ impl SsdpTask {
             },
             _ = self.announce_loop().fuse() => {},
         }
+    }
+}
+
+pub(crate) fn ssdp_task() {
+    let socket = PktInfoUdpSocket::new(Domain::IPV4).unwrap();
+    socket
+        .bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, SSDP_PORT)).into())
+        .unwrap();
+
+    socket
+        .join_multicast_v4(&SSDP_IPV4, &Ipv4Addr::UNSPECIFIED)
+        .unwrap();
+
+    let mut buffer = [0_u8; 4096];
+    loop {
+        let (len, info) = socket.recv(&mut buffer).unwrap();
+
+        info!(len, if=%info.if_index, source=%info.addr_src, destination=%info.addr_dst, "Received data");
     }
 }

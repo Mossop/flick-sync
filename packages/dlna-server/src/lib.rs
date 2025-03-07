@@ -5,6 +5,7 @@ use std::{
     collections::HashMap,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    thread,
 };
 
 use actix_web::{
@@ -18,14 +19,14 @@ use bytes::Bytes;
 use futures::Stream;
 use getifaddrs::{Interface, InterfaceFlags, getifaddrs};
 use mime::Mime;
-use tracing::debug;
+use tracing::{debug, info};
 pub use upnp::{Container, Icon, Item, Object, Resource, UpnpError};
 use uuid::Uuid;
 
 use crate::{
     rt::{TaskHandle, spawn},
     services::HttpAppData,
-    ssdp::SsdpTask,
+    ssdp::{SSDP_IPV4, ssdp_task},
 };
 
 /// The default port to use for HTTP communication
@@ -200,6 +201,9 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
 
         let interfaces: Vec<Interface> = getifaddrs()?
             .filter(|iface| {
+                if let Some(index) = iface.index {
+                    info!(index, address=%iface.address, "Found interface");
+                }
                 iface.flags.contains(InterfaceFlags::MULTICAST) && iface.address.is_ipv4()
                     || iface.index.is_some()
             })
@@ -242,11 +246,12 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
 
         let mut task_handles = TaskHandles::default();
 
-        for (iface, http_port) in bound_interfaces.into_iter() {
-            let ssdp_task =
-                SsdpTask::new(self.uuid, iface.into(), &self.server_version, http_port).await;
-            task_handles.add(spawn(ssdp_task.run()));
-        }
+        // for (iface, http_port) in bound_interfaces.into_iter() {
+        //     let ssdp_task =
+        //         SsdpTask::new(self.uuid, iface.into(), &self.server_version, http_port).await;
+        //     task_handles.add(spawn(ssdp_task.run()));
+        // }
+        thread::spawn(ssdp_task);
 
         Ok(DlnaServer {
             task_handles,
