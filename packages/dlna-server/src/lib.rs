@@ -1,10 +1,7 @@
 #![deny(unreachable_pub)]
 //! A basic implementation of a DLNA media server
 
-use std::{
-    io,
-    net::{Ipv4Addr, Ipv6Addr},
-};
+use std::{io, net::Ipv4Addr};
 
 use actix_web::{
     App, HttpServer,
@@ -172,8 +169,7 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
                     web::get().to(services::resource_get::<H>),
                 )
         })
-        .bind((Ipv4Addr::UNSPECIFIED, HTTP_PORT))?
-        .bind((Ipv6Addr::UNSPECIFIED, HTTP_PORT))?;
+        .bind((Ipv4Addr::UNSPECIFIED, HTTP_PORT))?;
 
         let server = http_server.run();
         let web_handle = server.handle();

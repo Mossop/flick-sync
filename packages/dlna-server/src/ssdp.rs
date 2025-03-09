@@ -517,9 +517,9 @@ impl SsdpTask {
             Ok(s) => s,
             Err(e) => {
                 match e.kind() {
-                    ErrorKind::AddrNotAvailable => {}
+                    ErrorKind::AddrNotAvailable | ErrorKind::InvalidInput => {}
                     _ => {
-                        warn!(error=%e, local_address=%interface.address(), "Failed to connect SSDP announcement socket");
+                        warn!(error=%e, kind=?e.kind(), local_address=%interface.address(), "Failed to connect SSDP announcement socket");
                     }
                 }
 
@@ -664,12 +664,12 @@ impl SsdpTask {
                 Ok(s) => s,
                 Err(e) => {
                     match e.kind() {
-                        ErrorKind::AddrNotAvailable => {
+                        ErrorKind::AddrNotAvailable | ErrorKind::InvalidInput => {
                             // IP version not supported.
                             return;
                         }
                         _ => {
-                            error!(error=%e, "Failed to build multicast receiver socket");
+                            error!(error=%e, kind=?e.kind(), is_ipv4, "Failed to build multicast receiver socket");
                             time::sleep(Duration::from_secs(5)).await;
 
                             continue;
@@ -696,7 +696,7 @@ impl SsdpTask {
                             continue;
                         }
 
-                        warn!(error=%e, "Socket receive error. Terminating thread.");
+                        warn!(error=%e, kind=?e.kind(), "Socket receive error. Terminating thread.");
                         return;
                     }
                 };
