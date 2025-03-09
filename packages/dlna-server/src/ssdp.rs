@@ -15,7 +15,7 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 use socket_pktinfo::PktInfoUdpSocket;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::{net::UdpSocket, time};
-use tracing::{error, info, instrument, trace, warn};
+use tracing::{error, instrument, trace, warn};
 use uuid::Uuid;
 
 use crate::{TaskHandle, ns, rt};

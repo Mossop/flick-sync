@@ -1084,6 +1084,7 @@ impl Runnable for Dlna {
                 env!("CARGO_PKG_VERSION_MAJOR"),
                 env!("CARGO_PKG_VERSION_MINOR")
             ))
+            .server_name("Synced Flicks")
             .icon(Icon {
                 id: "resource/logo-32.png".to_string(),
                 mime_type: mime::IMAGE_PNG,

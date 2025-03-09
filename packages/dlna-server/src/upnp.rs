@@ -1,6 +1,7 @@
 use std::{io::Write, time::Duration};
 
 use actix_web::http::StatusCode;
+use gethostname::gethostname;
 use mime::Mime;
 use url::Url;
 use uuid::Uuid;
@@ -269,11 +270,24 @@ where
 
 pub(crate) struct Root {
     pub(crate) uuid: Uuid,
+    pub(crate) server_name: String,
     pub(crate) icons: Vec<Icon>,
 }
 
 impl<W: Write> ToXml<W> for Root {
     fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
+        let server_name = if let Some(hostname) = gethostname().to_str().map(|st| {
+            if let Some((name, _)) = st.split_once('.') {
+                name
+            } else {
+                st
+            }
+        }) {
+            format!("{} ({})", &self.server_name, hostname)
+        } else {
+            self.server_name.clone()
+        };
+
         writer
             .element_ns((ns::UPNP_DEVICE, "root"))
             .contents(|writer| {
@@ -286,7 +300,7 @@ impl<W: Write> ToXml<W> for Root {
                     writer
                         .element("UDN")
                         .text(format!("uuid:{}", self.uuid.as_hyphenated()))?;
-                    writer.element("friendlyName").text("Synced Flicks")?;
+                    writer.element("friendlyName").text(&server_name)?;
                     writer
                         .element("deviceType")
                         .text("urn:schemas-upnp-org:device:MediaServer:1")?;
@@ -294,10 +308,10 @@ impl<W: Write> ToXml<W> for Root {
                     writer
                         .element("manufacturerURL")
                         .text("https://github.com/Mossop/flick-sync")?;
-                    writer.element("modelName").text("Synced Flicks")?;
+                    writer.element("modelName").text(&self.server_name)?;
                     writer
                         .element("modelDescription")
-                        .text("Synced Flicks Media Server")?;
+                        .text(format!("{} Media Server", self.server_name))?;
 
                     if !self.icons.is_empty() {
                         writer.element("iconList").contents(|writer| {

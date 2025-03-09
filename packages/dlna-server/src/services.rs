@@ -108,6 +108,7 @@ pub(crate) async fn middleware<B: MessageBody>(
 
 pub(crate) struct HttpAppData<H: DlnaRequestHandler> {
     pub(crate) uuid: Uuid,
+    pub(crate) server_name: String,
     pub(crate) handler: H,
     pub(crate) icons: Vec<upnp::Icon>,
 }
@@ -117,6 +118,7 @@ pub(crate) async fn device_root<H: DlnaRequestHandler>(
 ) -> Xml<upnp::Root> {
     Xml::new(upnp::Root {
         uuid: app_data.uuid,
+        server_name: app_data.server_name.clone(),
         icons: app_data.icons.clone(),
     })
 }

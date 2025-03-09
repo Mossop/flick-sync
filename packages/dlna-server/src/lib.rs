@@ -120,8 +120,10 @@ impl DlnaServer {
             env!("CARGO_PKG_VERSION_MAJOR"),
             env!("CARGO_PKG_VERSION_MINOR")
         );
+
         DlnaServerBuilder {
             uuid: Uuid::new_v4(),
+            server_name: "Dlna".to_string(),
             server_version,
             icons: Vec::new(),
             handler,
@@ -138,6 +140,7 @@ impl DlnaServer {
 pub struct DlnaServerBuilder<H: DlnaRequestHandler> {
     uuid: Uuid,
     server_version: String,
+    server_name: String,
     icons: Vec<Icon>,
     handler: H,
 }
@@ -147,6 +150,7 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
     pub async fn build(self) -> anyhow::Result<DlnaServer> {
         let app_data = Data::new(HttpAppData {
             uuid: self.uuid,
+            server_name: self.server_name,
             handler: self.handler,
             icons: self.icons,
         });
@@ -186,6 +190,12 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
     /// `RustDlna/<pkg major>.<pkg minor>`
     pub fn server_version(mut self, version: &str) -> Self {
         self.server_version = version.to_owned();
+        self
+    }
+
+    /// Sets a base name for the server.
+    pub fn server_name(mut self, name: &str) -> Self {
+        self.server_name = name.to_owned();
         self
     }
 
