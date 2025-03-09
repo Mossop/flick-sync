@@ -1,2 +1,5 @@
+[tools]
+node = "22"
+
 [tasks.crossbuild]
 run = "cross build --release --features vendored-openssl --target arm-unknown-linux-gnueabihf"

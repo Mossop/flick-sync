@@ -400,7 +400,7 @@ function Thumbnail({ item, type }: { item: ChildItem; type: ThumbnailType }) {
   }>();
 
   let uri =
-    !(item instanceof Playlist) && item.thumbnail.state == "downloaded"
+    !(item instanceof Playlist) && item.thumbnail.state == "stored"
       ? storagePath(item.thumbnail.path)
       : undefined;
 

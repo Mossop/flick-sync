@@ -1,6 +1,6 @@
 export type ThumbnailState =
   | { state: "none" }
-  | { state: "downloaded"; path: string };
+  | { state: "stored"; path: string };
 
 export type DownloadState =
   | { state: "none" }

@@ -28,10 +28,10 @@ const ThumbnailStateDecoder = JsonDecoder.oneOf<ThumbnailState>(
     ),
     JsonDecoder.object(
       {
-        state: JsonDecoder.isExactly("downloaded"),
+        state: JsonDecoder.isExactly("stored"),
         path: JsonDecoder.string,
       },
-      "downloaded",
+      "stored",
     ),
   ],
   "ThumbnailState",
