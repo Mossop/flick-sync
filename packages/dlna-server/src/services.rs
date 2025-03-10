@@ -1,22 +1,30 @@
-use std::{convert::Infallible, net::SocketAddr, str::FromStr};
+use std::{
+    convert::Infallible,
+    net::SocketAddr,
+    str::FromStr,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use actix_web::{
-    Error, HttpRequest, HttpResponse, Responder,
-    body::MessageBody,
+    Error, FromRequest, HttpMessage, HttpRequest, HttpResponse, Responder,
+    body::BoxBody,
     dev::{ServiceRequest, ServiceResponse},
     get,
-    http::header,
+    http::header::{self, HeaderMap, HeaderName, HeaderValue},
     middleware::Next,
-    web::{Data, Path, Payload},
+    web::{Data, Path, Payload, ReqData},
 };
 use mime::Mime;
 use serde::{Deserialize, Serialize};
 use serde_with::{StringWithSeparator, formats::CommaSeparator, serde_as};
-use tracing::{Instrument, Level, field, instrument, span, trace, warn};
+use tracing::{Instrument, Level, Span, field, instrument, span, trace, warn};
 use uuid::Uuid;
 
 use crate::{
-    DlnaRequestHandler, UpnpError, ns,
+    DlnaContext, DlnaRequestHandler, UpnpError, ns,
     soap::{ArgDirection, RequestContext, SoapAction, SoapArgument, SoapResult},
     upnp,
     xml::Xml,
@@ -46,43 +54,64 @@ fn client_addr(req: &HttpRequest) -> Option<String> {
     }
 }
 
+fn record_header(span: &Span, headers: &HeaderMap, header: HeaderName, field: &'static str) {
+    if let Some(value) = headers.get(header).and_then(|h| h.to_str().ok()) {
+        span.record(field, value);
+    }
+}
+
 #[instrument(skip_all)]
-pub(crate) async fn middleware<B: MessageBody>(
+pub(crate) async fn middleware<H: DlnaRequestHandler>(
     req: ServiceRequest,
-    next: Next<B>,
-) -> Result<ServiceResponse<B>, Error> {
+    next: Next<BoxBody>,
+) -> Result<ServiceResponse<BoxBody>, Error> {
     let http_request = req.request();
+
+    let app_data = Data::<HttpAppData<H>>::extract(http_request).await?;
+
+    static REQUEST_ID: AtomicU64 = AtomicU64::new(0);
+    let request_id = REQUEST_ID.fetch_add(1, Ordering::SeqCst);
+
+    let request_data = RequestAppData {
+        request_id,
+        app_data: app_data.into_inner(),
+    };
 
     let span = span!(
         Level::INFO,
         "HTTP request",
         "client.address" = field::Empty,
         "url.path" = req.path(),
+        "request_id" = request_data.request_id,
         "user_agent.original" = field::Empty,
         "http.request.method" = %req.method(),
         "http.request.content_type" = field::Empty,
         "http.request.content_length" = field::Empty,
         "http.request.range" = field::Empty,
         "http.response.status_code" = field::Empty,
+        "http.response.content_length" = field::Empty,
+        "http.response.content_type" = field::Empty,
+        "http.response.content_range" = field::Empty,
     );
+
+    req.extensions_mut().insert(request_data);
 
     let headers = http_request.headers();
 
-    if let Some(user_agent) = headers.get("user-agent").and_then(|h| h.to_str().ok()) {
-        span.record("user_agent.original", user_agent);
-    }
-
-    if let Some(content_type) = headers.get("content-type").and_then(|h| h.to_str().ok()) {
-        span.record("http.request.content_type", content_type);
-    }
-
-    if let Some(content_length) = headers.get("content-length").and_then(|h| h.to_str().ok()) {
-        span.record("http.request.content_length", content_length);
-    }
-
-    if let Some(range) = headers.get("range").and_then(|h| h.to_str().ok()) {
-        span.record("http.request.range", range);
-    }
+    record_header(&span, headers, header::USER_AGENT, "user_agent.original");
+    record_header(
+        &span,
+        headers,
+        header::CONTENT_TYPE,
+        "http.request.content_type",
+    );
+    record_header(
+        &span,
+        headers,
+        header::CONTENT_LENGTH,
+        "http.request.content_length",
+    );
+    record_header(&span, headers, header::RANGE, "http.request.range");
 
     let client_addr = client_addr(req.request());
 
@@ -90,10 +119,34 @@ pub(crate) async fn middleware<B: MessageBody>(
         span.record("client.address", ip);
     }
 
-    let res = next.call(req).instrument(span.clone()).await?;
+    let mut res = next.call(req).instrument(span.clone()).await?;
 
     let status = res.status();
     span.record("http.response.status_code", status.as_u16());
+    res.response_mut()
+        .headers_mut()
+        .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+
+    let headers = res.response().headers();
+
+    record_header(
+        &span,
+        headers,
+        header::CONTENT_TYPE,
+        "http.response.content_type",
+    );
+    record_header(
+        &span,
+        headers,
+        header::CONTENT_LENGTH,
+        "http.response.content_length",
+    );
+    record_header(
+        &span,
+        headers,
+        header::CONTENT_RANGE,
+        "http.response.content_range",
+    );
 
     if status.is_server_error() {
         warn!(parent: &span, status = status.as_u16(), "Server failure")
@@ -111,6 +164,20 @@ pub(crate) struct HttpAppData<H: DlnaRequestHandler> {
     pub(crate) server_name: String,
     pub(crate) handler: H,
     pub(crate) icons: Vec<upnp::Icon>,
+}
+
+pub(crate) struct RequestAppData<H: DlnaRequestHandler> {
+    pub(crate) request_id: u64,
+    pub(crate) app_data: Arc<HttpAppData<H>>,
+}
+
+impl<H: DlnaRequestHandler> Clone for RequestAppData<H> {
+    fn clone(&self) -> Self {
+        Self {
+            request_id: self.request_id,
+            app_data: self.app_data.clone(),
+        }
+    }
 }
 
 pub(crate) async fn device_root<H: DlnaRequestHandler>(
@@ -183,10 +250,6 @@ pub(crate) async fn resource_head<H: DlnaRequestHandler>(
                 builder.append_header(header::ContentLength(size as usize));
             }
 
-            if resource.seekable {
-                builder.append_header((header::ACCEPT_RANGES, "bytes"));
-            }
-
             builder.finish()
         }
         Err(err) => {
@@ -201,7 +264,7 @@ pub(crate) async fn resource_head<H: DlnaRequestHandler>(
 }
 
 pub(crate) async fn resource_get<H: DlnaRequestHandler>(
-    app_data: Data<HttpAppData<H>>,
+    req_data: ReqData<RequestAppData<H>>,
     req: HttpRequest,
     id: Path<String>,
 ) -> HttpResponse {
@@ -213,18 +276,27 @@ pub(crate) async fn resource_get<H: DlnaRequestHandler>(
     {
         if spec.len() == 1 {
             match spec[0] {
-                header::ByteRangeSpec::From(start) => (start, None),
-                header::ByteRangeSpec::Last(end) => (0, Some(end + 1)),
-                header::ByteRangeSpec::FromTo(start, end) => (start, Some(end - start + 1)),
+                header::ByteRangeSpec::From(start) => (Some(start), None),
+                header::ByteRangeSpec::Last(end) => (None, Some(end + 1)),
+                header::ByteRangeSpec::FromTo(start, end) => (Some(start), Some(end - start + 1)),
             }
         } else {
-            (0, None)
+            (None, None)
         }
     } else {
-        (0, None)
+        (None, None)
     };
 
-    match app_data.handler.stream_resource(&id, seek, length).await {
+    let context = DlnaContext {
+        request_id: req_data.request_id,
+    };
+
+    match req_data
+        .app_data
+        .handler
+        .stream_resource(&id, seek, length, context)
+        .await
+    {
         Ok(stream_result) => {
             let mut builder = if let Some(range) = stream_result.range {
                 let mut builder = HttpResponse::PartialContent();

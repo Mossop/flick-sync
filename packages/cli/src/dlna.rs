@@ -1,5 +1,5 @@
 use std::{
-    cmp::Ordering,
+    cmp::{self, Ordering},
     io::{self, SeekFrom},
     os::unix::fs::MetadataExt,
     path::PathBuf,
@@ -13,8 +13,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use clap::Args;
 use dlna_server::{
-    Container, DlnaRequestHandler, DlnaServer, Icon, Item, Object, Range, Resource, StreamResponse,
-    UpnpError,
+    Container, DlnaContext, DlnaRequestHandler, DlnaServer, Icon, Item, Object, Range, Resource,
+    StreamResponse, UpnpError,
 };
 use file_format::FileFormat;
 use flick_sync::{
@@ -25,7 +25,7 @@ use futures::Stream;
 use image::image_dimensions;
 use mime::Mime;
 use pathdiff::diff_paths;
-use pin_project::pin_project;
+use pin_project::{pin_project, pinned_drop};
 use rust_embed::{Embed, EmbeddedFile};
 use tokio::{
     fs,
@@ -33,27 +33,54 @@ use tokio::{
     sync::Notify,
 };
 use tokio_util::io::ReaderStream;
-use tracing::debug;
+use tracing::{Level, Span, debug, field, instrument, span, warn};
 
-use crate::{Console, Runnable, error::Error};
+use crate::{
+    Console, Runnable,
+    console::{Bar, ProgressType},
+    error::Error,
+};
 
 #[derive(Embed)]
 #[folder = "../../resources"]
 struct Resources;
 
-#[pin_project]
+#[pin_project(PinnedDrop)]
 struct StreamLimiter<S> {
-    remaining: Option<u64>,
+    start_position: u64,
+    seen_bytes: u64,
+    bar: Bar,
+    limit: u64,
+    span: Span,
     #[pin]
     inner: S,
 }
 
 impl<S> StreamLimiter<S> {
-    fn new(stream: S, limit: Option<u64>) -> Self {
+    fn new(stream: S, start_position: u64, bar: Bar, limit: u64) -> Self {
+        let span = span!(
+            Level::INFO,
+            "response_stream",
+            "streamed_bytes" = field::Empty,
+            "start_position" = start_position,
+            "limit" = limit,
+        );
+
         Self {
-            remaining: limit,
+            start_position,
+            seen_bytes: 0,
+            bar,
+            limit,
             inner: stream,
+            span,
         }
+    }
+}
+
+#[pinned_drop]
+impl<S> PinnedDrop for StreamLimiter<S> {
+    fn drop(self: Pin<&mut Self>) {
+        self.span.record("streamed_bytes", self.seen_bytes);
     }
 }
 
@@ -64,24 +91,25 @@ where
     type Item = Result<Bytes, io::Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if let Some(remaining) = self.remaining {
-            if remaining == 0 {
-                return Poll::Ready(None);
-            }
+        let _entered = self.span.clone().entered();
+
+        if self.seen_bytes >= self.limit {
+            return Poll::Ready(None);
         }
 
         let this = self.project();
 
         match this.inner.poll_next(cx) {
             Poll::Ready(Some(Ok(mut bytes))) => {
-                if let Some(limit) = this.remaining.take() {
-                    if limit < bytes.len() as u64 {
-                        bytes.truncate(limit as usize);
-                        *this.remaining = Some(0);
-                    } else {
-                        *this.remaining = Some(limit - bytes.len() as u64);
-                    }
+                *this.seen_bytes += bytes.len() as u64;
+
+                if this.limit < this.seen_bytes {
+                    bytes.truncate(bytes.len() - (*this.seen_bytes - *this.limit) as usize);
+                    *this.seen_bytes = *this.limit;
                 }
+
+                this.bar
+                    .set_position(*this.start_position + *this.seen_bytes);
 
                 Poll::Ready(Some(Ok(bytes)))
             }
@@ -802,6 +830,7 @@ impl ToObject for Collections {
 
 struct DlnaHandler {
     flick_sync: FlickSync,
+    console: Console,
 }
 
 impl DlnaHandler {
@@ -1003,11 +1032,13 @@ impl DlnaRequestHandler for DlnaHandler {
         })
     }
 
+    #[instrument(skip(self, _context))]
     async fn stream_resource(
         &self,
         resource_id: &str,
-        seek: u64,
+        seek: Option<u64>,
         length: Option<u64>,
+        _context: DlnaContext,
     ) -> Result<StreamResponse<StreamLimiter<ReaderStream<BufReader<fs::File>>>>, UpnpError> {
         let Some(path) = resource_id.strip_prefix("video/") else {
             debug!("Bad prefix");
@@ -1031,40 +1062,54 @@ impl DlnaRequestHandler for DlnaHandler {
             return Err(UpnpError::unknown_object());
         };
 
-        let Ok(mut file) = fs::File::open(target).await else {
+        let Ok(mut file) = fs::File::open(&target).await else {
             debug!("Bad open");
             return Err(UpnpError::unknown_object());
         };
 
-        let range = match (seek, length) {
-            (0, None) => None,
-            (start, None) => {
-                if file.seek(SeekFrom::Start(start)).await.is_ok() {
-                    Some(Range {
-                        start,
-                        length: metadata.size() - start,
-                    })
-                } else {
-                    None
-                }
-            }
-            (0, Some(length)) => Some(Range { start: 0, length }),
-            (start, Some(length)) => {
-                if file.seek(SeekFrom::Start(start)).await.is_ok() {
-                    Some(Range { start, length })
-                } else {
-                    None
-                }
-            }
-        };
+        let filename = target.file_stem().unwrap().to_str().unwrap();
+        let bar = self
+            .console
+            .add_progress_bar(&format!("🌍 {}", filename), ProgressType::Bytes);
+        bar.set_length(metadata.size());
+        bar.set_position(0);
 
-        let limit = range.as_ref().map(|r| r.length);
+        let (range, position, limit) = if let Some(seek) = seek {
+            let mut length = length.unwrap_or_else(|| metadata.size() - seek);
+            length = cmp::min(length, metadata.size() - seek);
+
+            if seek > 0 {
+                match file.seek(SeekFrom::Start(seek)).await {
+                    Ok(start) => {
+                        bar.set_position(seek);
+
+                        (Some(Range { start, length }), start, length)
+                    }
+                    Err(e) => {
+                        warn!(error=%e, "Failed to seek source file");
+                        (None, 0, metadata.size())
+                    }
+                }
+            } else {
+                (Some(Range { start: 0, length }), 0, length)
+            }
+        } else if let Some(mut length) = length {
+            length = cmp::min(length, metadata.size());
+            (Some(Range { start: 0, length }), 0, length)
+        } else {
+            (None, 0, metadata.size())
+        };
 
         Ok(StreamResponse {
             mime_type,
             range,
             resource_size: Some(metadata.size()),
-            stream: StreamLimiter::new(ReaderStream::new(BufReader::new(file)), limit),
+            stream: StreamLimiter::new(
+                ReaderStream::new(BufReader::new(file)),
+                position,
+                bar,
+                limit,
+            ),
         })
     }
 }
@@ -1073,9 +1118,12 @@ impl DlnaRequestHandler for DlnaHandler {
 pub struct Dlna {}
 
 impl Runnable for Dlna {
-    async fn run(self, flick_sync: FlickSync, _console: Console) -> Result<(), Error> {
+    async fn run(self, flick_sync: FlickSync, console: Console) -> Result<(), Error> {
         let uuid = flick_sync.client_id().await;
-        let handler = DlnaHandler { flick_sync };
+        let handler = DlnaHandler {
+            flick_sync,
+            console,
+        };
 
         let server = DlnaServer::builder(handler)
             .uuid(uuid)

@@ -55,6 +55,7 @@ mod ns {
 }
 
 /// The range included in the stream.
+#[derive(Debug)]
 pub struct Range {
     pub start: u64,
     pub length: u64,
@@ -70,6 +71,12 @@ pub struct StreamResponse<S> {
     pub resource_size: Option<u64>,
     /// The resource stream.
     pub stream: S,
+}
+
+/// Some perhaps useful information about the DLNA client.
+pub struct DlnaContext {
+    /// A unique identifier for this request.
+    pub request_id: u64,
 }
 
 #[async_trait]
@@ -95,8 +102,9 @@ where
     async fn stream_resource(
         &self,
         resource_id: &str,
-        seek: u64,
+        seek: Option<u64>,
         length: Option<u64>,
+        context: DlnaContext,
     ) -> Result<StreamResponse<impl Stream<Item = Result<Bytes, io::Error>> + 'static>, UpnpError>;
 }
 
@@ -158,7 +166,7 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
         let http_server = HttpServer::new(move || {
             App::new()
                 .app_data(app_data.clone())
-                .wrap(from_fn(services::middleware))
+                .wrap(from_fn(services::middleware::<H>))
                 .route("/device.xml", web::get().to(services::device_root::<H>))
                 .service(services::connection_manager)
                 .service(services::content_directory)
