@@ -37,7 +37,7 @@ enum SsdpMessage {
         notification_type: String,
         unique_service_name: String,
         availability: String,
-        location: String,
+        location: Option<String>,
         server: String,
     },
     SearchResponse {
@@ -171,7 +171,9 @@ impl SsdpMessage {
                 push_line(buffer, format!("NT: {notification_type}"));
                 push_line(buffer, format!("USN: {unique_service_name}"));
                 push_line(buffer, format!("NTS: {availability}"));
-                push_line(buffer, format!("LOCATION: {location}"));
+                if let Some(location) = location {
+                    push_line(buffer, format!("LOCATION: {location}"));
+                }
                 push_line(buffer, format!("SERVER: {server}"));
             }
             SsdpMessage::SearchResponse {
@@ -234,10 +236,7 @@ impl SsdpMessage {
             return None;
         };
 
-        let Some(location) = get_header::<String>(&headers, "location") else {
-            warn!("Missing location header");
-            return None;
-        };
+        let location = get_header::<String>(&headers, "location");
 
         let Some(unique_service_name) = get_header::<String>(&headers, "usn") else {
             warn!("Missing usn header");
@@ -503,11 +502,11 @@ impl SsdpTask {
             notification_type: notification_type.to_owned(),
             unique_service_name: usn.to_owned(),
             availability: "ssdp:alive".to_string(),
-            location: format!(
+            location: Some(format!(
                 "http://{}:{}/device.xml",
                 interface.address(),
                 self.http_port
-            ),
+            )),
             server: self.server.clone(),
         }
     }
