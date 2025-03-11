@@ -15,7 +15,7 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 use socket_pktinfo::PktInfoUdpSocket;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::{net::UdpSocket, time};
-use tracing::{error, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace, warn};
 use uuid::Uuid;
 
 use crate::{TaskHandle, ns, rt};
@@ -547,6 +547,8 @@ impl SsdpTask {
             ),
         ];
 
+        debug!(local_address = %interface.address(), count = messages.len(), "Sending SSDP announcements");
+
         Self::send_messages(&socket, interface, target, messages).await;
     }
 
@@ -628,6 +630,8 @@ impl SsdpTask {
             return;
         }
 
+        debug!(local_address = %local_interface.address(), remote_address = %address, count = messages.len(), "Sending notification responses");
+
         let socket = match local_interface.build_unicast_socket() {
             Ok(s) => s,
             Err(e) => {
@@ -644,13 +648,28 @@ impl SsdpTask {
         socket.set_nonblocking(true)?;
         socket.set_reuse_address(true)?;
         socket.set_reuse_port(true)?;
+
+        let interfaces = get_interfaces();
+
         if is_ipv4 {
-            socket.bind(&SocketAddr::from((SSDP_IPV4, SSDP_PORT)).into())?;
-            socket.join_multicast_v4(&SSDP_IPV4, &Ipv4Addr::UNSPECIFIED)?;
+            socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, SSDP_PORT)).into())?;
+
+            for interface in interfaces {
+                if let IpAddr::V4(ipaddr) = interface.address() {
+                    socket.join_multicast_v4(&SSDP_IPV4, &ipaddr)?;
+                }
+            }
+
             socket.set_multicast_loop_v4(false)?;
         } else {
-            socket.bind(&SocketAddr::from((SSDP_IPV6, SSDP_PORT)).into())?;
-            socket.join_multicast_v6(&SSDP_IPV6, 0)?;
+            socket.bind(&SocketAddr::from((Ipv6Addr::UNSPECIFIED, SSDP_PORT)).into())?;
+
+            for interface in interfaces {
+                if !interface.is_ipv4() {
+                    socket.join_multicast_v6(&SSDP_IPV6, interface.index())?;
+                }
+            }
+
             socket.set_multicast_loop_v6(false)?;
         }
 
@@ -722,15 +741,17 @@ impl SsdpTask {
                                 continue;
                             }
 
-                            trace!(?message, local_address = %local_interface.address(), remote_address = %info.addr_src, "Received SSDP message");
+                            if let SsdpMessage::MSearch { search_target, .. } = &message {
+                                debug!(?message, local_address = %local_interface.address(), remote_address = %info.addr_src, "Received SSDP message");
 
-                            if let SsdpMessage::MSearch { search_target, .. } = message {
                                 self.send_search_response(
                                     &local_interface,
-                                    &search_target,
+                                    search_target,
                                     info.addr_src,
                                 )
                                 .await;
+                            } else {
+                                trace!(?message, local_address = %local_interface.address(), remote_address = %info.addr_src, "Received SSDP message");
                             }
                         }
                         Ok(None) => {
