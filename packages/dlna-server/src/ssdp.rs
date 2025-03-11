@@ -5,17 +5,24 @@ use std::{
     io::{self, ErrorKind},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     str::{FromStr, from_utf8},
+    task::Poll,
     time::Duration,
 };
 
 use anyhow::bail;
 use bytes::{Buf, BytesMut};
+use futures::{StreamExt, poll};
 use getifaddrs::{InterfaceFlags, getifaddrs};
 use http::{HeaderMap, HeaderName, HeaderValue};
 use socket_pktinfo::PktInfoUdpSocket;
 use socket2::{Domain, Protocol, Socket, Type};
-use tokio::{net::UdpSocket, time};
-use tracing::{debug, error, instrument, trace, warn};
+use tokio::{
+    net::UdpSocket,
+    signal::unix::{SignalKind, signal},
+    time,
+};
+use tokio_stream::wrappers::SignalStream;
+use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::Uuid;
 
 use crate::{TaskHandle, ns, rt};
@@ -677,6 +684,8 @@ impl SsdpTask {
     }
 
     async fn receive_task(self, is_ipv4: bool) {
+        let mut sighup = SignalStream::new(signal(SignalKind::hangup()).unwrap());
+
         loop {
             let socket = match Self::build_recv_socket(is_ipv4) {
                 Ok(s) => s,
@@ -688,7 +697,7 @@ impl SsdpTask {
                         }
                         _ => {
                             error!(error=%e, kind=?e.kind(), is_ipv4, "Failed to build multicast receiver socket");
-                            time::sleep(Duration::from_secs(5)).await;
+                            time::sleep(Duration::from_secs(10)).await;
 
                             continue;
                         }
@@ -700,6 +709,10 @@ impl SsdpTask {
             let mut receive_buffer = [0_u8; 4096];
 
             loop {
+                if let Poll::Ready(Some(())) = poll!(sighup.next()) {
+                    break;
+                }
+
                 let (len, info) = match socket.recv(&mut receive_buffer) {
                     Ok(p) => p,
                     Err(e) => {
@@ -765,6 +778,10 @@ impl SsdpTask {
                     }
                 }
             }
+
+            info!("Restarting SSDP listener.");
+            drop(socket);
+            time::sleep(Duration::from_secs(1)).await;
         }
     }
 }

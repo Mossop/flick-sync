@@ -5,7 +5,6 @@ use std::{
     path::PathBuf,
     pin::Pin,
     str::FromStr,
-    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -21,7 +20,7 @@ use flick_sync::{
     Collection, FlickSync, Library, MovieCollection, MovieLibrary, Playlist, Season, Server, Show,
     ShowCollection, ShowLibrary, Video, VideoPart,
 };
-use futures::Stream;
+use futures::{Stream, StreamExt, stream::select};
 use image::image_dimensions;
 use mime::Mime;
 use pathdiff::diff_paths;
@@ -30,8 +29,9 @@ use rust_embed::{Embed, EmbeddedFile};
 use tokio::{
     fs,
     io::{AsyncSeekExt, BufReader},
-    sync::Notify,
+    signal::unix::{SignalKind, signal},
 };
+use tokio_stream::wrappers::SignalStream;
 use tokio_util::io::ReaderStream;
 use tracing::{Level, Span, debug, field, instrument, span, warn};
 
@@ -1164,15 +1164,12 @@ impl Runnable for Dlna {
             .build()
             .await?;
 
-        let notify = Arc::new(Notify::new());
-
-        let handler_notify = notify.clone();
-        ctrlc::set_handler(move || {
-            handler_notify.notify_one();
-        })
-        .unwrap();
-
-        notify.notified().await;
+        select(
+            SignalStream::new(signal(SignalKind::interrupt()).unwrap()),
+            SignalStream::new(signal(SignalKind::terminate()).unwrap()),
+        )
+        .next()
+        .await;
 
         server.shutdown().await;
 

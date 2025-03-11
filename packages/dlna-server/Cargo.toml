@@ -9,7 +9,7 @@ rt-tokio = ["tokio/rt"]
 rt-async = ["dep:async-std"]
 
 [dependencies]
-tokio = { version = "1.43.0", features = ["net"] }
+tokio = { version = "1.43.0", features = ["net", "signal"] }
 tokio-util = { version = "0.7.13", features = ["net", "codec"] }
 anyhow = "1.0.96"
 actix-web = { version = "4.9.0", default-features = false, features = [
@@ -33,3 +33,4 @@ async-trait = "0.1.87"
 url = "2.5.2"
 socket-pktinfo = "0.2.1"
 gethostname = "1.0.0"
+tokio-stream = { version = "0.1.17", features = ["signal"] }

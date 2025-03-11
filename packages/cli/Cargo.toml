@@ -23,9 +23,13 @@ thiserror = "2.0.11"
 url = "2.3.1"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 enum_dispatch = "0.3.11"
-tokio = { version = "1.29.1", features = ["rt", "macros", "rt-multi-thread"] }
+tokio = { version = "1.29.1", features = [
+  "rt",
+  "macros",
+  "rt-multi-thread",
+  "signal",
+] }
 anyhow = "1.0.96"
-ctrlc = "3.4.5"
 async-trait = "0.1.87"
 mime = "0.3.17"
 bytes = "1.10.0"
@@ -42,3 +46,4 @@ pathdiff = "0.2.3"
 pin-project = "1.1.10"
 rust-embed = "8.6.0"
 openssl = { version = "0.10", features = ["vendored"], optional = true }
+tokio-stream = { version = "0.1.17", features = ["signal"] }
