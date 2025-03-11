@@ -48,12 +48,18 @@ impl From<WriterError> for UpnpError {
     }
 }
 
+/// An icon for a container or media item.
 #[derive(Debug, Clone)]
 pub struct Icon {
+    /// The identifier for this icon. Will be passed in the `stream_icon` method.
     pub id: String,
+    /// The icon's content type.
     pub mime_type: Mime,
+    /// Width in pixels.
     pub width: u32,
+    /// Height in pixels.
     pub height: u32,
+    /// The number of bits per pixel.
     pub depth: u8,
 }
 
@@ -85,7 +91,7 @@ pub struct Container {
     pub child_count: Option<usize>,
     /// The title of this container.
     pub title: String,
-    /// An optional icon identifier for this container. Will be passed in the `stream_icon` method.
+    /// An optional icon for this container.
     pub thumbnail: Option<Icon>,
 }
 
@@ -115,6 +121,7 @@ impl<W: Write> ToXml<W> for Container {
     }
 }
 
+/// A resource the a client can download. Normally used for media items.
 #[derive(Debug)]
 pub struct Resource {
     /// A unique identifier for this resource. This will be passed in the `get_resource` or
@@ -175,7 +182,7 @@ pub struct Item {
     pub title: String,
     /// Different resources available for this item.
     pub resources: Vec<Resource>,
-    /// An optional icon identifier for this container. Will be passed in the `stream_icon` method.
+    /// An optional icon for this container.
     pub thumbnail: Option<Icon>,
 }
 

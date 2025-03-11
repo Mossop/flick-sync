@@ -79,6 +79,7 @@ pub struct DlnaContext {
     pub request_id: u64,
 }
 
+/// This handler is called when the DLNA server needs to respond to client requests.
 #[async_trait]
 pub trait DlnaRequestHandler
 where
@@ -108,8 +109,7 @@ where
     ) -> Result<StreamResponse<impl Stream<Item = Result<Bytes, io::Error>> + 'static>, UpnpError>;
 }
 
-/// A handle to the DLNA server allowing for discovering clients and shutting
-/// the server down.
+/// A handle to the DLNA server allowing for shutting the server down.
 pub struct DlnaServer {
     ssdp_handle: Ssdp,
     web_handle: ServerHandle,
