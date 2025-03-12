@@ -4,24 +4,26 @@ use std::{
     fmt,
     io::{self, ErrorKind},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    pin::{Pin, pin},
     str::{FromStr, from_utf8},
-    task::Poll,
+    sync::Arc,
+    task::{Context, Poll},
     time::Duration,
 };
 
 use anyhow::bail;
 use bytes::{Buf, BytesMut};
-use futures::{StreamExt, poll};
+use futures::{Stream, StreamExt};
 use getifaddrs::{InterfaceFlags, getifaddrs};
 use http::{HeaderMap, HeaderName, HeaderValue};
+use pin_project::pin_project;
 use socket_pktinfo::PktInfoUdpSocket;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::{
     net::UdpSocket,
-    signal::unix::{SignalKind, signal},
+    sync::{Notify, futures::Notified},
     time,
 };
-use tokio_stream::wrappers::SignalStream;
 use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::Uuid;
 
@@ -452,6 +454,31 @@ async fn send_to(socket: &UdpSocket, address: SocketAddr, mut data: &[u8]) -> an
     Ok(())
 }
 
+#[pin_project]
+struct NotifyStream<'a> {
+    #[pin]
+    notifier: Notified<'a>,
+}
+
+impl<'a> NotifyStream<'a> {
+    fn new(notifier: &'a Arc<Notify>) -> Self {
+        Self {
+            notifier: notifier.notified(),
+        }
+    }
+}
+
+impl Stream for NotifyStream<'_> {
+    type Item = bool;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.project().notifier.poll(cx) {
+            Poll::Pending => Poll::Ready(Some(false)),
+            Poll::Ready(()) => Poll::Ready(Some(true)),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct SsdpTask {
     uuid: Uuid,
@@ -683,9 +710,7 @@ impl SsdpTask {
         Ok(socket)
     }
 
-    async fn receive_task(self, is_ipv4: bool) {
-        let mut sighup = SignalStream::new(signal(SignalKind::hangup()).unwrap());
-
+    async fn receive_task(self, is_ipv4: bool, restart_notifier: Arc<Notify>) {
         loop {
             let socket = match Self::build_recv_socket(is_ipv4) {
                 Ok(s) => s,
@@ -708,8 +733,10 @@ impl SsdpTask {
             let mut buffers: HashMap<SocketAddr, BytesMut> = HashMap::new();
             let mut receive_buffer = [0_u8; 4096];
 
+            let mut notified = pin!(NotifyStream::new(&restart_notifier));
+
             loop {
-                if let Poll::Ready(Some(())) = poll!(sighup.next()) {
+                if let Some(true) = notified.next().await {
                     break;
                 }
 
@@ -788,24 +815,31 @@ impl SsdpTask {
 
 pub(crate) struct Ssdp {
     announce: TaskHandle,
-    ipv4: TaskHandle,
-    ipv6: TaskHandle,
+    ipv4_handle: TaskHandle,
+    ipv6_handle: TaskHandle,
+    restart_notify: Arc<Notify>,
 }
 
 impl Ssdp {
     pub(crate) fn new(uuid: Uuid, server_version: &str, http_port: u16) -> Self {
         let task = SsdpTask::new(uuid, server_version, http_port);
+        let restart_notify = Arc::new(Notify::new());
 
         Self {
             announce: rt::spawn(task.clone().announce_task()),
-            ipv4: rt::spawn(task.clone().receive_task(true)),
-            ipv6: rt::spawn(task.receive_task(false)),
+            ipv4_handle: rt::spawn(task.clone().receive_task(true, restart_notify.clone())),
+            ipv6_handle: rt::spawn(task.receive_task(false, restart_notify.clone())),
+            restart_notify,
         }
+    }
+
+    pub(crate) fn restart(&self) {
+        self.restart_notify.notify_waiters();
     }
 
     pub(crate) async fn shutdown(self) {
         self.announce.shutdown().await;
-        self.ipv4.shutdown().await;
-        self.ipv6.shutdown().await;
+        self.ipv4_handle.shutdown().await;
+        self.ipv6_handle.shutdown().await;
     }
 }

@@ -20,7 +20,7 @@ use flick_sync::{
     Collection, FlickSync, Library, MovieCollection, MovieLibrary, Playlist, Season, Server, Show,
     ShowCollection, ShowLibrary, Video, VideoPart,
 };
-use futures::{Stream, StreamExt, stream::select};
+use futures::{Stream, StreamExt, select};
 use image::image_dimensions;
 use mime::Mime;
 use pathdiff::diff_paths;
@@ -1164,12 +1164,17 @@ impl Runnable for Dlna {
             .build()
             .await?;
 
-        select(
-            SignalStream::new(signal(SignalKind::interrupt()).unwrap()),
-            SignalStream::new(signal(SignalKind::terminate()).unwrap()),
-        )
-        .next()
-        .await;
+        let mut sighup = SignalStream::new(signal(SignalKind::hangup()).unwrap()).fuse();
+        let mut sigint = SignalStream::new(signal(SignalKind::interrupt()).unwrap()).fuse();
+        let mut sigterm = SignalStream::new(signal(SignalKind::interrupt()).unwrap()).fuse();
+
+        loop {
+            select! {
+                _ = sighup.next() => server.restart(),
+                _ = sigint.next() => break,
+                _ = sigterm.next() => break,
+            }
+        }
 
         server.shutdown().await;
 

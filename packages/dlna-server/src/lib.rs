@@ -122,6 +122,7 @@ impl DlnaServer {
         Self::builder(handler).build().await
     }
 
+    /// Creates a default builder that can be further customized.
     pub fn builder<H: DlnaRequestHandler>(handler: H) -> DlnaServerBuilder<H> {
         let server_version = format!(
             "RustDlna/{}.{}",
@@ -138,6 +139,13 @@ impl DlnaServer {
         }
     }
 
+    /// Restarts the UPnP listener service. This is required if the set of available network
+    /// interfaces changes.
+    pub fn restart(&self) {
+        self.ssdp_handle.restart();
+    }
+
+    /// Shuts down the server.
     pub async fn shutdown(self) {
         self.ssdp_handle.shutdown().await;
         self.web_handle.stop(true).await;
