@@ -154,6 +154,20 @@ impl PartialOrd for TranscodeProfile {
     }
 }
 
+#[derive(Default, Deserialize, Debug, Serialize, PartialEq, Clone, Copy, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum OutputStyle {
+    #[default]
+    Minimal,
+    Standardized,
+}
+
+impl OutputStyle {
+    fn is_default(&self) -> bool {
+        matches!(self, OutputStyle::Minimal)
+    }
+}
+
 #[derive(Deserialize, Serialize, Default, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Config {
@@ -164,6 +178,8 @@ pub(crate) struct Config {
     pub(crate) device: Option<String>,
     #[serde(default)]
     pub(crate) profiles: HashMap<String, TranscodeProfile>,
+    #[serde(default, skip_serializing_if = "OutputStyle::is_default")]
+    pub(crate) output_style: OutputStyle,
 }
 
 impl MigratableStore for Config {

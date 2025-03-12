@@ -27,6 +27,7 @@ use xml::{EmitterConfig, writer::XmlEvent};
 
 use crate::{
     Error, FlickSync, Result, Server,
+    config::OutputStyle,
     state::{
         CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, RelatedFileState,
         SeasonState, ServerState, ShowState, VideoDetail, VideoPartState, VideoState,
@@ -209,7 +210,9 @@ macro_rules! metadata_methods {
             let metadata_path = self.file_path(FileType::Metadata, "nfo").await;
 
             let mut metadata = self.metadata().await;
-            if rebuild {
+            let output_standardized =
+                self.server.inner.output_style().await == OutputStyle::Standardized;
+            if rebuild || !output_standardized {
                 metadata.delete(&root).await;
             } else {
                 metadata.verify(&root, &metadata_path).await;
@@ -217,7 +220,7 @@ macro_rules! metadata_methods {
 
             self.update_state(|s| s.metadata = metadata.clone()).await?;
 
-            if metadata.is_none() {
+            if metadata.is_none() && output_standardized {
                 let target = root.join(&metadata_path);
 
                 if let Some(parent) = target.parent() {
@@ -278,6 +281,7 @@ async fn write_playlist(root: &Path, playlist_path: &Path, videos: Vec<Video>) -
     let target = root.join(playlist_path);
     let parent = target.parent().unwrap();
 
+    create_dir_all(&parent).await?;
     let output = File::create(&target).await?;
     let mut writer = BufWriter::new(output);
 
@@ -358,6 +362,9 @@ impl Show {
     }
 
     pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
+        let output_standardized =
+            self.server.inner.output_style().await == OutputStyle::Standardized;
+
         self.with_server_state(|ss| {
             let state = ss.shows.get(&self.id).unwrap();
 
@@ -365,7 +372,13 @@ impl Show {
                 FileType::Video(_) | FileType::Playlist => {
                     unreachable!("Invalid file type for Show")
                 }
-                FileType::Thumbnail => format!("dvdcover.{extension}"),
+                FileType::Thumbnail => {
+                    if output_standardized {
+                        format!("dvdcover.{extension}")
+                    } else {
+                        format!(".thumb.{extension}")
+                    }
+                }
                 FileType::Metadata => format!("tvshow.{extension}"),
             };
 
@@ -931,8 +944,10 @@ impl VideoPart {
         })
         .await?;
 
-        if let Err(e) = new_state.strip_metadata(&root).await {
-            warn!(path=?path, error=%e, "Failed to strip metadata");
+        if self.server.inner.output_style().await == OutputStyle::Standardized {
+            if let Err(e) = new_state.strip_metadata(&root).await {
+                warn!(path=?path, error=%e, "Failed to strip metadata");
+            }
         }
 
         Ok(())
@@ -995,8 +1010,10 @@ impl VideoPart {
             );
         }
 
-        if let Err(e) = new_state.strip_metadata(&root).await {
-            warn!(path=?path, error=%e, "Failed to strip metadata");
+        if self.server.inner.output_style().await == OutputStyle::Standardized {
+            if let Err(e) = new_state.strip_metadata(&root).await {
+                warn!(path=?path, error=%e, "Failed to strip metadata");
+            }
         }
 
         Ok(())
@@ -1024,8 +1041,10 @@ impl VideoPart {
 
         let state = self.download_state().await;
 
-        if let Err(e) = state.strip_metadata(&root).await {
-            warn!(error=%e, "Unable to strip metadata from video file");
+        if self.server.inner.output_style().await == OutputStyle::Standardized {
+            if let Err(e) = state.strip_metadata(&root).await {
+                warn!(error=%e, "Unable to strip metadata from video file");
+            }
         }
     }
 }
@@ -1222,6 +1241,9 @@ impl Episode {
     }
 
     pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
+        let output_standardized =
+            self.server.inner.output_style().await == OutputStyle::Standardized;
+
         self.with_server_state(|ss| {
             let state = ss.videos.get(&self.id).unwrap();
             let ep_state = state.episode_state();
@@ -1244,10 +1266,17 @@ impl Episode {
                     )
                 }
                 FileType::Thumbnail => {
-                    format!(
-                        "S{:02}E{:02} - {}.{extension}",
-                        season.index, ep_state.index, state.title
-                    )
+                    if output_standardized {
+                        format!(
+                            "S{:02}E{:02} - {}.{extension}",
+                            season.index, ep_state.index, state.title
+                        )
+                    } else {
+                        format!(
+                            ".S{:02}E{:02}.thumb.{extension}",
+                            season.index, ep_state.index
+                        )
+                    }
                 }
                 FileType::Metadata => {
                     format!(
@@ -1323,6 +1352,9 @@ impl Movie {
     }
 
     pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
+        let output_standardized =
+            self.server.inner.output_style().await == OutputStyle::Standardized;
+
         self.with_server_state(|ss| {
             let state = ss.videos.get(&self.id).unwrap();
             let m_state = state.movie_state();
@@ -1340,7 +1372,9 @@ impl Movie {
                     format!("{} ({}){part_name}.{extension}", state.title, m_state.year)
                 }
                 FileType::Thumbnail => {
-                    if state.parts.len() == 1 {
+                    if !output_standardized {
+                        format!(".thumb.{extension}")
+                    } else if state.parts.len() == 1 {
                         format!("{} ({}).{extension}", state.title, m_state.year)
                     } else {
                         format!("movie.{extension}")
@@ -1494,9 +1528,19 @@ impl Playlist {
     }
 
     pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
+        let output_standardized =
+            self.server.inner.output_style().await == OutputStyle::Standardized;
+
         self.with_state(|state| {
             let name = match file_type {
-                FileType::Thumbnail | FileType::Playlist => format!("{}.{extension}", state.title),
+                FileType::Thumbnail => {
+                    if output_standardized {
+                        format!("{}.{extension}", state.title)
+                    } else {
+                        format!(".{}.{extension}", self.id)
+                    }
+                }
+                FileType::Playlist => format!("{}.{extension}", state.title),
                 _ => unreachable!("Invalid file type for Playlist"),
             };
 
@@ -1511,7 +1555,17 @@ impl Playlist {
         let root = self.server.inner.path.read().await;
         let playlist_path = self.file_path(FileType::Playlist, "m3u").await;
 
-        write_playlist(&root, &playlist_path, self.videos().await).await
+        if self.server.inner.output_style().await == OutputStyle::Standardized {
+            write_playlist(&root, &playlist_path, self.videos().await).await
+        } else if let Err(e) = remove_file(root.join(playlist_path)).await {
+            if e.kind() == ErrorKind::NotFound {
+                Ok(())
+            } else {
+                Err(e.into())
+            }
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -1549,12 +1603,22 @@ impl MovieCollection {
     }
 
     pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
+        let output_standardized =
+            self.server.inner.output_style().await == OutputStyle::Standardized;
+
         self.with_server_state(|ss| {
             let state = ss.collections.get(&self.id).unwrap();
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
 
             let name = match file_type {
-                FileType::Thumbnail | FileType::Playlist => format!("{}.{extension}", state.title),
+                FileType::Thumbnail => {
+                    if output_standardized {
+                        format!("{}.{extension}", state.title)
+                    } else {
+                        format!(".{}.{extension}", self.id)
+                    }
+                }
+                FileType::Playlist => format!("{}.{extension}", state.title),
                 _ => unreachable!("Invalid file type for MovieCollection"),
             };
 
@@ -1570,7 +1634,17 @@ impl MovieCollection {
         let root = self.server.inner.path.read().await;
         let playlist_path = self.file_path(FileType::Playlist, "m3u").await;
 
-        write_playlist(&root, &playlist_path, self.videos().await).await
+        if self.server.inner.output_style().await == OutputStyle::Standardized {
+            write_playlist(&root, &playlist_path, self.videos().await).await
+        } else if let Err(e) = remove_file(root.join(playlist_path)).await {
+            if e.kind() == ErrorKind::NotFound {
+                Ok(())
+            } else {
+                Err(e.into())
+            }
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -1604,12 +1678,22 @@ impl ShowCollection {
     }
 
     pub(crate) async fn file_path(&self, file_type: FileType, extension: &str) -> PathBuf {
+        let output_standardized =
+            self.server.inner.output_style().await == OutputStyle::Standardized;
+
         self.with_server_state(|ss| {
             let state = ss.collections.get(&self.id).unwrap();
             let library_title = &ss.libraries.get(&state.library).unwrap().title;
 
             let name = match file_type {
-                FileType::Thumbnail | FileType::Playlist => format!("{}.{extension}", state.title),
+                FileType::Thumbnail => {
+                    if output_standardized {
+                        format!("{}.{extension}", state.title)
+                    } else {
+                        format!(".{}.{extension}", self.id)
+                    }
+                }
+                FileType::Playlist => format!("{}.{extension}", state.title),
                 _ => unreachable!("Invalid file type for ShowCollection"),
             };
 
@@ -1622,6 +1706,19 @@ impl ShowCollection {
     }
 
     pub(crate) async fn write_playlist(&self) -> Result {
+        let root = self.server.inner.path.read().await;
+        let playlist_path = self.file_path(FileType::Playlist, "m3u").await;
+
+        if self.server.inner.output_style().await != OutputStyle::Standardized {
+            if let Err(e) = remove_file(root.join(playlist_path)).await {
+                if e.kind() != ErrorKind::NotFound {
+                    return Err(e.into());
+                }
+            }
+
+            return Ok(());
+        }
+
         let mut videos: Vec<Video> = Vec::new();
 
         for show in self.shows().await {
@@ -1631,9 +1728,6 @@ impl ShowCollection {
                 }
             }
         }
-
-        let root = self.server.inner.path.read().await;
-        let playlist_path = self.file_path(FileType::Playlist, "m3u").await;
 
         write_playlist(&root, &playlist_path, videos).await
     }

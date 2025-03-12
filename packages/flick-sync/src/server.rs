@@ -25,7 +25,7 @@ use tokio::{
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
-    DEFAULT_PROFILES, Error, FileType, Inner, Library, Result, ServerConnection,
+    DEFAULT_PROFILES, Error, FileType, Inner, Library, OutputStyle, Result, ServerConnection,
     config::{Config, ServerConfig, SyncItem, TranscodeProfile},
     state::{
         CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, SeasonState,
@@ -550,13 +550,13 @@ impl Server {
 
         for collection in self.collections().await {
             if let Err(e) = collection.write_playlist().await {
-                warn!(error=?e, "Failed to write playlist");
+                warn!(error=?e, "Failed to update playlist");
             }
         }
 
         for playlist in self.playlists().await {
             if let Err(e) = playlist.write_playlist().await {
-                warn!(error=?e, "Failed to write playlist");
+                warn!(error=?e, "Failed to update playlist");
             }
         }
     }
@@ -567,6 +567,7 @@ impl Server {
 
         self.update_thumbnails(true).await;
         self.update_metadata(true).await;
+        self.write_playlists().await;
 
         Ok(())
     }
@@ -623,7 +624,7 @@ impl Server {
                             warn!(error=?e);
                         }
 
-                        if rebuild {
+                        if rebuild && self.inner.output_style().await == OutputStyle::Standardized {
                             for part in video.parts().await {
                                 part.strip_metadata().await;
                             }
@@ -642,7 +643,9 @@ impl Server {
                                     warn!(error=?e);
                                 }
 
-                                if rebuild {
+                                if rebuild
+                                    && self.inner.output_style().await == OutputStyle::Standardized
+                                {
                                     for part in video.parts().await {
                                         part.strip_metadata().await;
                                     }
@@ -675,6 +678,7 @@ impl Server {
         info!("Pruning server filesystem");
 
         let root = self.inner.path.write().await;
+        let output_standardized = self.inner.output_style().await == OutputStyle::Standardized;
 
         let mut expected_files: HashSet<PathBuf> = HashSet::new();
 
@@ -691,8 +695,11 @@ impl Server {
             }
         }
 
-        for collection in self.collections().await {
-            expected_files.insert(root.join(collection.file_path(FileType::Playlist, "m3u").await));
+        if output_standardized {
+            for collection in self.collections().await {
+                expected_files
+                    .insert(root.join(collection.file_path(FileType::Playlist, "m3u").await));
+            }
         }
 
         for show in server_state.shows.values() {
@@ -721,8 +728,11 @@ impl Server {
             }
         }
 
-        for playlist in self.playlists().await {
-            expected_files.insert(root.join(playlist.file_path(FileType::Playlist, "m3u").await));
+        if output_standardized {
+            for playlist in self.playlists().await {
+                expected_files
+                    .insert(root.join(playlist.file_path(FileType::Playlist, "m3u").await));
+            }
         }
 
         let server_root = root.join(safe(&self.id));

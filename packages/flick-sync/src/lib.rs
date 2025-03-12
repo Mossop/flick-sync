@@ -31,7 +31,10 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 pub use wrappers::*;
 
-use crate::{config::H264Profile, schema::MigratableStore};
+use crate::{
+    config::{H264Profile, OutputStyle},
+    schema::MigratableStore,
+};
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
@@ -82,6 +85,10 @@ struct Inner {
 }
 
 impl Inner {
+    async fn output_style(&self) -> OutputStyle {
+        self.config.read().await.output_style
+    }
+
     async fn transcode_options(&self, profile: Option<String>) -> Option<VideoTranscodeOptions> {
         if let Some(ref profile) = profile {
             let config = self.config.read().await;
