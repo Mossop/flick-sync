@@ -66,7 +66,7 @@ pub struct Icon {
 impl Icon {
     fn write_xml<W: Write>(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
         let base = writer.base();
-        let uri = base.join(&format!("/icon/{}", self.id)).unwrap();
+        let uri = base.join(&format!("/upnp/icon/{}", self.id)).unwrap();
 
         writer.element_ns((ns::UPNP, "icon")).text(&uri)?;
         writer.element_ns((ns::UPNP, "albumArtURI")).text(&uri)?;
@@ -140,7 +140,7 @@ pub struct Resource {
 impl<W: Write> ToXml<W> for Resource {
     fn write_xml(&self, writer: &mut XmlWriter<W>) -> Result<(), WriterError> {
         let base = writer.base();
-        let uri = base.join(&format!("/resource/{}", self.id)).unwrap();
+        let uri = base.join(&format!("/upnp/resource/{}", self.id)).unwrap();
 
         let mut builder = writer
             .element_ns((ns::DIDL, "res"))
@@ -328,7 +328,9 @@ impl<W: Write> ToXml<W> for Root {
                                     writer.element("width").text(icon.width)?;
                                     writer.element("height").text(icon.height)?;
                                     writer.element("depth").text(icon.depth)?;
-                                    writer.element("url").text(format!("/icon/{}", icon.id))
+                                    writer
+                                        .element("url")
+                                        .text(format!("/upnp/icon/{}", icon.id))
                                 })?;
                             }
 
@@ -344,8 +346,9 @@ impl<W: Write> ToXml<W> for Root {
                                 .text("urn:upnp-org:serviceId:ConnectionManager")?;
                             writer
                                 .element("SCPDURL")
-                                .text("/service/ConnectionManager.xml")?;
-                            writer.element("controlURL").text("/soap")
+                                .text("/upnp/service/ConnectionManager.xml")?;
+                            writer.element("controlURL").text("/upnp/soap")?;
+                            writer.element("eventSubURL").empty()
                         })?;
 
                         writer.element("service").contents(|writer| {
@@ -355,8 +358,8 @@ impl<W: Write> ToXml<W> for Root {
                                 .text("urn:upnp-org:serviceId:ContentDirectory")?;
                             writer
                                 .element("SCPDURL")
-                                .text("/service/ContentDirectory.xml")?;
-                            writer.element("controlURL").text("/soap")?;
+                                .text("/upnp/service/ContentDirectory.xml")?;
+                            writer.element("controlURL").text("/upnp/soap")?;
                             writer.element("eventSubURL").empty()
                         })
                     })

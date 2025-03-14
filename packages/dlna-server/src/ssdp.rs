@@ -537,7 +537,7 @@ impl SsdpTask {
             unique_service_name: usn.to_owned(),
             availability: "ssdp:alive".to_string(),
             location: Some(format!(
-                "http://{}:{}/device.xml",
+                "http://{}:{}/upnp/device.xml",
                 interface.address(),
                 self.http_port
             )),
@@ -608,7 +608,7 @@ impl SsdpTask {
     ) -> SsdpMessage {
         SsdpMessage::SearchResponse {
             location: format!(
-                "http://{}:{}/device.xml",
+                "http://{}:{}/upnp/device.xml",
                 local_interface.address(),
                 self.http_port
             ),

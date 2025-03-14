@@ -3,12 +3,7 @@
 
 use std::{io, net::Ipv4Addr};
 
-use actix_web::{
-    App, HttpServer,
-    dev::ServerHandle,
-    middleware::from_fn,
-    web::{self, Data},
-};
+use actix_web::{App, HttpServer, dev::ServerHandle};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
@@ -21,9 +16,10 @@ use crate::{
     services::HttpAppData,
     ssdp::Ssdp,
 };
+pub use services::DlnaServiceFactory;
 
 /// The default port to use for HTTP communication
-const HTTP_PORT: u16 = 1980;
+const DEFAULT_HTTP_PORT: u16 = 1980;
 
 #[cfg_attr(feature = "rt-async", path = "rt/async_std.rs")]
 #[cfg_attr(feature = "rt-tokio", path = "rt/tokio.rs")]
@@ -112,7 +108,7 @@ where
 /// A handle to the DLNA server allowing for shutting the server down.
 pub struct DlnaServer {
     ssdp_handle: Ssdp,
-    web_handle: ServerHandle,
+    web_handle: Option<ServerHandle>,
 }
 
 impl DlnaServer {
@@ -134,6 +130,7 @@ impl DlnaServer {
             uuid: Uuid::new_v4(),
             server_name: "Dlna".to_string(),
             server_version,
+            http_port: DEFAULT_HTTP_PORT,
             icons: Vec::new(),
             handler,
         }
@@ -148,7 +145,9 @@ impl DlnaServer {
     /// Shuts down the server.
     pub async fn shutdown(self) {
         self.ssdp_handle.shutdown().await;
-        self.web_handle.stop(true).await;
+        if let Some(web_handle) = self.web_handle {
+            web_handle.stop(true).await;
+        }
     }
 }
 
@@ -157,49 +156,47 @@ pub struct DlnaServerBuilder<H: DlnaRequestHandler> {
     uuid: Uuid,
     server_version: String,
     server_name: String,
+    http_port: u16,
     icons: Vec<Icon>,
     handler: H,
 }
 
 impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
-    /// Builds the DLNA server and starts it listening using the chosen runtime.
-    pub async fn build(self) -> anyhow::Result<DlnaServer> {
-        let app_data = Data::new(HttpAppData {
+    /// Builds the DLNA server and starts the SSDP listener. Returns the server and a service
+    /// factory that must be added to an `actix_web` server instance. Note that if your server
+    /// uses a http port other than 1980 you must configure it on this builder first or Upnp
+    /// discovery will fail.
+    pub async fn build_service(self) -> anyhow::Result<(DlnaServer, DlnaServiceFactory<H>)> {
+        let service_factory = DlnaServiceFactory::new(HttpAppData {
             uuid: self.uuid,
             server_name: self.server_name,
             handler: self.handler,
             icons: self.icons,
         });
 
-        let http_server = HttpServer::new(move || {
-            App::new()
-                .app_data(app_data.clone())
-                .wrap(from_fn(services::middleware::<H>))
-                .route("/device.xml", web::get().to(services::device_root::<H>))
-                .service(services::connection_manager)
-                .service(services::content_directory)
-                .route("/soap", web::post().to(services::soap_request::<H>))
-                .route("/icon/{path:.*}", web::get().to(services::icon::<H>))
-                .route(
-                    "/resource/{path:.*}",
-                    web::head().to(services::resource_head::<H>),
-                )
-                .route(
-                    "/resource/{path:.*}",
-                    web::get().to(services::resource_get::<H>),
-                )
-        })
-        .bind((Ipv4Addr::UNSPECIFIED, HTTP_PORT))?;
+        Ok((
+            DlnaServer {
+                ssdp_handle: Ssdp::new(self.uuid, &self.server_version, self.http_port),
+                web_handle: None,
+            },
+            service_factory,
+        ))
+    }
+
+    /// Builds the DLNA server and starts a http server using the chosen runtime.
+    pub async fn build(self) -> anyhow::Result<DlnaServer> {
+        let http_port = self.http_port;
+        let (mut dlna_server, web_scope) = self.build_service().await?;
+
+        let http_server = HttpServer::new(move || App::new().service(web_scope.clone()))
+            .bind((Ipv4Addr::UNSPECIFIED, http_port))?;
 
         let server = http_server.run();
-        let web_handle = server.handle();
+        dlna_server.web_handle = Some(server.handle());
 
         spawn(server);
 
-        Ok(DlnaServer {
-            ssdp_handle: Ssdp::new(self.uuid, &self.server_version, HTTP_PORT),
-            web_handle,
-        })
+        Ok(dlna_server)
     }
 
     /// Sets a specific server version. Should match the form `Name/<major>.<minor>`. Defaults to
@@ -212,6 +209,12 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
     /// Sets a base name for the server.
     pub fn server_name(mut self, name: &str) -> Self {
         self.server_name = name.to_owned();
+        self
+    }
+
+    /// Sets a specific HTTP port. If not called the default of 1980 is used.
+    pub fn http_port(mut self, port: u16) -> Self {
+        self.http_port = port;
         self
     }
 

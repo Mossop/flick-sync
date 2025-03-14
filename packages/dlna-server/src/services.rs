@@ -9,13 +9,13 @@ use std::{
 };
 
 use actix_web::{
-    Error, FromRequest, HttpMessage, HttpRequest, HttpResponse, Responder,
+    Error, FromRequest, HttpMessage, HttpRequest, HttpResponse, Responder, Scope,
     body::BoxBody,
-    dev::{ServiceRequest, ServiceResponse},
+    dev::{AppService, HttpServiceFactory, ServiceRequest, ServiceResponse},
     get,
     http::header::{self, HeaderMap, HeaderName, HeaderValue},
-    middleware::Next,
-    web::{Data, Path, Payload, ReqData},
+    middleware::{Next, from_fn},
+    web::{self, Data, Path, Payload, ReqData},
 };
 use mime::Mime;
 use serde::{Deserialize, Serialize};
@@ -818,4 +818,41 @@ pub(crate) async fn soap_request<H: DlnaRequestHandler>(
     }
 
     UpnpError::InvalidAction.respond_to(&request)
+}
+
+pub struct DlnaServiceFactory<H: DlnaRequestHandler> {
+    app_data: Data<HttpAppData<H>>,
+}
+
+impl<H: DlnaRequestHandler> DlnaServiceFactory<H> {
+    pub(crate) fn new(app_data: HttpAppData<H>) -> Self {
+        Self {
+            app_data: Data::new(app_data),
+        }
+    }
+}
+
+impl<H: DlnaRequestHandler> Clone for DlnaServiceFactory<H> {
+    fn clone(&self) -> Self {
+        Self {
+            app_data: self.app_data.clone(),
+        }
+    }
+}
+
+impl<H: DlnaRequestHandler> HttpServiceFactory for DlnaServiceFactory<H> {
+    fn register(self, config: &mut AppService) {
+        let scope = Scope::new("/upnp")
+            .app_data(self.app_data.clone())
+            .wrap(from_fn(middleware::<H>))
+            .route("/device.xml", web::get().to(device_root::<H>))
+            .service(connection_manager)
+            .service(content_directory)
+            .route("/soap", web::post().to(soap_request::<H>))
+            .route("/icon/{path:.*}", web::get().to(icon::<H>))
+            .route("/resource/{path:.*}", web::head().to(resource_head::<H>))
+            .route("/resource/{path:.*}", web::get().to(resource_get::<H>));
+
+        scope.register(config);
+    }
 }
