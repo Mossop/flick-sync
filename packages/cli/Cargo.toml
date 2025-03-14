@@ -14,6 +14,7 @@ path = "src/main.rs"
 futures = "0.3.28"
 flick-sync = { path = "../flick-sync" }
 dlna-server = { path = "../dlna-server" }
+flick-sync-webserver = { path = "../web-server" }
 clap = { version = "4.1.13", features = ["derive", "env"] }
 console = "0.15.5"
 dialoguer = "0.11.0"
@@ -47,7 +48,3 @@ pin-project = "1.1.10"
 rust-embed = "8.6.0"
 openssl = { version = "0.10", features = ["vendored"], optional = true }
 tokio-stream = { version = "0.1.17", features = ["signal"] }
-actix-web = { version = "4.9.0", default-features = false, features = [
-  "macros",
-  "compat",
-] }

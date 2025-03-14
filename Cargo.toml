@@ -1,3 +1,8 @@
 [workspace]
-members = ["packages/flick-sync", "packages/dlna-server", "packages/cli"]
+members = [
+  "packages/flick-sync",
+  "packages/dlna-server",
+  "packages/web-server",
+  "packages/cli",
+]
 resolver = "3"

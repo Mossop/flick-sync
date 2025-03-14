@@ -1,13 +1,8 @@
-use std::net::Ipv4Addr;
-
-use actix_web::{App, HttpServer};
 use clap::Args;
 use flick_sync::FlickSync;
+use flick_sync_webserver::spawn_server;
 use futures::{StreamExt, select};
-use tokio::{
-    signal::unix::{SignalKind, signal},
-    spawn,
-};
+use tokio::signal::unix::{SignalKind, signal};
 use tokio_stream::wrappers::SignalStream;
 
 use crate::{Console, Runnable, dlna::build_dlna, error::Error};
@@ -25,13 +20,7 @@ impl Runnable for Serve {
 
         let (dlna_server, service_factory) = build_dlna(flick_sync.clone(), console, port).await?;
 
-        let http_server = HttpServer::new(move || App::new().service(service_factory.clone()))
-            .bind((Ipv4Addr::UNSPECIFIED, port))?
-            .run();
-
-        let http_handle = http_server.handle();
-
-        spawn(http_server);
+        let http_handle = spawn_server(flick_sync, service_factory, port)?;
 
         let mut sighup = SignalStream::new(signal(SignalKind::hangup()).unwrap()).fuse();
         let mut sigint = SignalStream::new(signal(SignalKind::interrupt()).unwrap()).fuse();

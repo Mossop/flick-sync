@@ -31,6 +31,11 @@ pub enum Error {
         #[from]
         source: anyhow::Error,
     },
+    #[error("Web server error: {source}")]
+    WebServer {
+        #[from]
+        source: flick_sync_webserver::Error,
+    },
     #[error("{0}")]
     Generic(String),
     #[error("Unknown error")]
