@@ -10,40 +10,33 @@ use std::{
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use clap::Args;
 use dlna_server::{
-    Container, DlnaContext, DlnaRequestHandler, DlnaServer, Icon, Item, Object, Range, Resource,
-    StreamResponse, UpnpError,
+    Container, DlnaContext, DlnaRequestHandler, DlnaServer, DlnaServiceFactory, Icon, Item, Object,
+    Range, Resource, StreamResponse, UpnpError,
 };
 use file_format::FileFormat;
 use flick_sync::{
     Collection, FlickSync, Library, MovieCollection, MovieLibrary, Playlist, Season, Server, Show,
     ShowCollection, ShowLibrary, Video, VideoPart,
 };
-use futures::{Stream, StreamExt, select};
+use futures::Stream;
 use image::image_dimensions;
 use mime::Mime;
 use pathdiff::diff_paths;
 use pin_project::{pin_project, pinned_drop};
-use rust_embed::{Embed, EmbeddedFile};
+use rust_embed::EmbeddedFile;
 use tokio::{
     fs,
     io::{AsyncSeekExt, BufReader},
-    signal::unix::{SignalKind, signal},
 };
-use tokio_stream::wrappers::SignalStream;
 use tokio_util::io::ReaderStream;
 use tracing::{Level, Span, debug, field, instrument, span, warn};
 
 use crate::{
-    Console, Runnable,
+    Console, Resources,
     console::{Bar, ProgressType},
     error::Error,
 };
-
-#[derive(Embed)]
-#[folder = "../../resources"]
-struct Resources;
 
 #[pin_project(PinnedDrop)]
 struct StreamLimiter<S> {
@@ -828,7 +821,7 @@ impl ToObject for Collections {
     }
 }
 
-struct DlnaHandler {
+pub(crate) struct DlnaHandler {
     flick_sync: FlickSync,
     console: Console,
 }
@@ -959,10 +952,8 @@ impl DlnaRequestHandler for DlnaHandler {
     async fn stream_icon(
         &self,
         icon_id: &str,
-    ) -> Result<
-        StreamResponse<EitherStream<EmbeddedFileStream, ReaderStream<BufReader<fs::File>>>>,
-        UpnpError,
-    > {
+    ) -> Result<StreamResponse<impl Stream<Item = Result<Bytes, io::Error>> + 'static>, UpnpError>
+    {
         if let Some(path) = icon_id.strip_prefix("thumbnail/") {
             let target = self.flick_sync.root().await.join(path);
 
@@ -989,7 +980,7 @@ impl DlnaRequestHandler for DlnaHandler {
                 stream: EitherStream::B(ReaderStream::new(BufReader::new(file))),
             })
         } else if let Some(resource) = icon_id.strip_prefix("resource/") {
-            let Some(icon_file) = Resources::get(resource) else {
+            let Some(icon_file) = Resources::get(&format!("upnp/{resource}")) else {
                 return Err(UpnpError::unknown_object());
             };
 
@@ -1039,7 +1030,8 @@ impl DlnaRequestHandler for DlnaHandler {
         seek: Option<u64>,
         length: Option<u64>,
         _context: DlnaContext,
-    ) -> Result<StreamResponse<StreamLimiter<ReaderStream<BufReader<fs::File>>>>, UpnpError> {
+    ) -> Result<StreamResponse<impl Stream<Item = Result<Bytes, io::Error>> + 'static>, UpnpError>
+    {
         let Some(path) = resource_id.strip_prefix("video/") else {
             debug!("Bad prefix");
             return Err(UpnpError::unknown_object());
@@ -1114,70 +1106,54 @@ impl DlnaRequestHandler for DlnaHandler {
     }
 }
 
-#[derive(Args)]
-pub struct Dlna {}
+pub(crate) async fn build_dlna(
+    flick_sync: FlickSync,
+    console: Console,
+    port: u16,
+) -> Result<(DlnaServer, DlnaServiceFactory<DlnaHandler>), Error> {
+    let uuid = flick_sync.client_id().await;
+    let handler = DlnaHandler {
+        flick_sync,
+        console,
+    };
 
-impl Runnable for Dlna {
-    async fn run(self, flick_sync: FlickSync, console: Console) -> Result<(), Error> {
-        let uuid = flick_sync.client_id().await;
-        let handler = DlnaHandler {
-            flick_sync,
-            console,
-        };
-
-        let server = DlnaServer::builder(handler)
-            .uuid(uuid)
-            .server_version(&format!(
-                "FlickSync/{}.{}",
-                env!("CARGO_PKG_VERSION_MAJOR"),
-                env!("CARGO_PKG_VERSION_MINOR")
-            ))
-            .server_name("Synced Flicks")
-            .icon(Icon {
-                id: "resource/logo-32.png".to_string(),
-                mime_type: mime::IMAGE_PNG,
-                width: 32,
-                height: 32,
-                depth: 32,
-            })
-            .icon(Icon {
-                id: "resource/logo-64.png".to_string(),
-                mime_type: mime::IMAGE_PNG,
-                width: 64,
-                height: 64,
-                depth: 32,
-            })
-            .icon(Icon {
-                id: "resource/logo-128.png".to_string(),
-                mime_type: mime::IMAGE_PNG,
-                width: 128,
-                height: 128,
-                depth: 32,
-            })
-            .icon(Icon {
-                id: "resource/logo-256.png".to_string(),
-                mime_type: mime::IMAGE_PNG,
-                width: 256,
-                height: 256,
-                depth: 32,
-            })
-            .build()
-            .await?;
-
-        let mut sighup = SignalStream::new(signal(SignalKind::hangup()).unwrap()).fuse();
-        let mut sigint = SignalStream::new(signal(SignalKind::interrupt()).unwrap()).fuse();
-        let mut sigterm = SignalStream::new(signal(SignalKind::interrupt()).unwrap()).fuse();
-
-        loop {
-            select! {
-                _ = sighup.next() => server.restart(),
-                _ = sigint.next() => break,
-                _ = sigterm.next() => break,
-            }
-        }
-
-        server.shutdown().await;
-
-        Ok(())
-    }
+    Ok(DlnaServer::builder(handler)
+        .uuid(uuid)
+        .http_port(port)
+        .server_version(&format!(
+            "FlickSync/{}.{}",
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            env!("CARGO_PKG_VERSION_MINOR")
+        ))
+        .server_name("Synced Flicks")
+        .icon(Icon {
+            id: "resource/logo-32.png".to_string(),
+            mime_type: mime::IMAGE_PNG,
+            width: 32,
+            height: 32,
+            depth: 32,
+        })
+        .icon(Icon {
+            id: "resource/logo-64.png".to_string(),
+            mime_type: mime::IMAGE_PNG,
+            width: 64,
+            height: 64,
+            depth: 32,
+        })
+        .icon(Icon {
+            id: "resource/logo-128.png".to_string(),
+            mime_type: mime::IMAGE_PNG,
+            width: 128,
+            height: 128,
+            depth: 32,
+        })
+        .icon(Icon {
+            id: "resource/logo-256.png".to_string(),
+            mime_type: mime::IMAGE_PNG,
+            width: 256,
+            height: 256,
+            depth: 32,
+        })
+        .build_service()
+        .await?)
 }

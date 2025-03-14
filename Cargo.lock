@@ -1099,6 +1099,7 @@ dependencies = [
 name = "flick-sync-cli"
 version = "1.6.0"
 dependencies = [
+ "actix-web",
  "anyhow",
  "async-trait",
  "bytes",

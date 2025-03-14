@@ -189,12 +189,12 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
         let (mut dlna_server, web_scope) = self.build_service().await?;
 
         let http_server = HttpServer::new(move || App::new().service(web_scope.clone()))
-            .bind((Ipv4Addr::UNSPECIFIED, http_port))?;
+            .bind((Ipv4Addr::UNSPECIFIED, http_port))?
+            .run();
 
-        let server = http_server.run();
-        dlna_server.web_handle = Some(server.handle());
+        dlna_server.web_handle = Some(http_server.handle());
 
-        spawn(server);
+        spawn(http_server);
 
         Ok(dlna_server)
     }

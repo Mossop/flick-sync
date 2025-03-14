@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 use enum_dispatch::enum_dispatch;
 use error::{Error, err};
 use flick_sync::{CONFIG_FILE, FlickSync, STATE_FILE, Server};
+use rust_embed::Embed;
 use sync::{Prune, Sync};
 use tokio::fs::{metadata, read_dir};
 use tracing::{error, trace};
@@ -14,17 +15,22 @@ use tracing::{error, trace};
 mod console;
 mod dlna;
 mod error;
+mod serve;
 mod server;
 mod sync;
 mod util;
 
+use console::Console;
+use serve::Serve;
 use server::{Add, Login, Rebuild, Remove};
+use sync::BuildMetadata;
 use util::{List, Stats};
 
-pub use crate::console::Console;
-use crate::{dlna::Dlna, sync::BuildMetadata};
-
 pub type Result<T = ()> = std::result::Result<T, Error>;
+
+#[derive(Embed)]
+#[folder = "../../resources"]
+struct Resources;
 
 #[enum_dispatch]
 #[derive(Subcommand)]
@@ -49,7 +55,7 @@ pub enum Command {
     /// Rebuilds metadata files.
     BuildMetadata,
     /// Serves downloaded media over DLNA.
-    Dlna,
+    Serve,
 }
 
 #[enum_dispatch(Command)]
@@ -164,7 +170,7 @@ async fn main() -> Result {
 
     let log_filter = if cfg!(debug_assertions) {
         env::var("RUST_LOG")
-            .unwrap_or_else(|_| "flick_sync=trace,dlna_server=trace,warn".to_string())
+            .unwrap_or_else(|_| "flick_sync=trace,dlna_server=debug,warn".to_string())
     } else {
         env::var("RUST_LOG")
             .unwrap_or_else(|_| "flick_sync=debug,dlna_server=info,warn".to_string())
