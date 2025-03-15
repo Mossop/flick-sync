@@ -7,27 +7,21 @@ use rinja::Template;
 
 use crate::{EmbeddedFileStream, Resources, error::Error};
 
-#[get("/resource/scripts/{path:.*}")]
-pub(super) async fn scripts(path: Path<String>) -> Result<HttpResponse, Error> {
-    let Some(file) = Resources::get(&format!("scripts/{path}")) else {
+#[get("/resources/{path:.*}")]
+pub(super) async fn resources(path: Path<String>) -> Result<HttpResponse, Error> {
+    let Some(file) = Resources::get(&format!("{path}")) else {
         return Ok(HttpResponse::NotFound().finish());
+    };
+
+    let mime = match path.rsplit_once('.') {
+        Some((_, "js")) => mime::APPLICATION_JAVASCRIPT,
+        Some((_, "css")) => mime::TEXT_CSS,
+        _ => mime::APPLICATION_OCTET_STREAM,
     };
 
     Ok(HttpResponse::Ok()
         .append_header(header::ContentLength(file.data.len()))
-        .append_header(header::ContentType(mime::APPLICATION_JAVASCRIPT))
-        .streaming(EmbeddedFileStream::new(file)))
-}
-
-#[get("/resource/styles/{path:.*}")]
-pub(super) async fn styles(path: Path<String>) -> Result<HttpResponse, Error> {
-    let Some(file) = Resources::get(&format!("styles/{path}")) else {
-        return Ok(HttpResponse::NotFound().finish());
-    };
-
-    Ok(HttpResponse::Ok()
-        .append_header(header::ContentLength(file.data.len()))
-        .append_header(header::ContentType(mime::TEXT_CSS))
+        .append_header(header::ContentType(mime))
         .streaming(EmbeddedFileStream::new(file)))
 }
 

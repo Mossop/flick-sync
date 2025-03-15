@@ -30,8 +30,7 @@ impl Runnable for Serve {
                 .app_data(ThinData(flick_sync.clone()))
                 .service(service_factory.clone())
                 .wrap(from_fn(middleware::middleware))
-                .service(services::scripts)
-                .service(services::styles)
+                .service(services::resources)
                 .service(services::index)
         })
         .bind((Ipv4Addr::UNSPECIFIED, port))?
