@@ -1,13 +1,20 @@
 use std::{
     env::{self, current_dir},
+    io,
     path::PathBuf,
+    pin::Pin,
+    result,
+    task::{Context, Poll},
 };
 
+use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use enum_dispatch::enum_dispatch;
 use error::{Error, err};
 use flick_sync::{CONFIG_FILE, FlickSync, STATE_FILE, Server};
-use rust_embed::Embed;
+use futures::Stream;
+use pin_project::pin_project;
+use rust_embed::{Embed, EmbeddedFile};
 use sync::{Prune, Sync};
 use tokio::fs::{metadata, read_dir};
 use tracing::{error, trace};
@@ -27,6 +34,34 @@ use sync::BuildMetadata;
 use util::{List, Stats};
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
+
+#[pin_project]
+struct EmbeddedFileStream {
+    position: usize,
+    file: EmbeddedFile,
+}
+
+impl EmbeddedFileStream {
+    fn new(file: EmbeddedFile) -> Self {
+        Self { file, position: 0 }
+    }
+}
+
+impl Stream for EmbeddedFileStream {
+    type Item = result::Result<Bytes, io::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+
+        if *this.position >= this.file.data.len() {
+            Poll::Ready(None)
+        } else {
+            let bytes = Bytes::copy_from_slice(&this.file.data);
+            *this.position = this.file.data.len();
+            Poll::Ready(Some(Ok(bytes)))
+        }
+    }
+}
 
 #[derive(Embed)]
 #[folder = "../../resources"]

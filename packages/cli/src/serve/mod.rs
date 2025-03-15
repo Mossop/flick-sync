@@ -1,11 +1,16 @@
+use std::net::Ipv4Addr;
+
+use actix_web::{App, HttpServer, middleware::from_fn, web::ThinData};
 use clap::Args;
 use flick_sync::FlickSync;
-use flick_sync_webserver::spawn_server;
 use futures::{StreamExt, select};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio_stream::wrappers::SignalStream;
 
 use crate::{Console, Runnable, dlna::build_dlna, error::Error};
+
+mod middleware;
+mod services;
 
 #[derive(Args)]
 pub struct Serve {
@@ -20,7 +25,21 @@ impl Runnable for Serve {
 
         let (dlna_server, service_factory) = build_dlna(flick_sync.clone(), console, port).await?;
 
-        let http_handle = spawn_server(flick_sync, service_factory, port)?;
+        let http_server = HttpServer::new(move || {
+            App::new()
+                .app_data(ThinData(flick_sync.clone()))
+                .service(service_factory.clone())
+                .wrap(from_fn(middleware::middleware))
+                .service(services::scripts)
+                .service(services::styles)
+                .service(services::index)
+        })
+        .bind((Ipv4Addr::UNSPECIFIED, port))?
+        .run();
+
+        let http_handle = http_server.handle();
+
+        tokio::spawn(http_server);
 
         let mut sighup = SignalStream::new(signal(SignalKind::hangup()).unwrap()).fuse();
         let mut sigint = SignalStream::new(signal(SignalKind::interrupt()).unwrap()).fuse();

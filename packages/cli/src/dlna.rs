@@ -24,7 +24,6 @@ use image::image_dimensions;
 use mime::Mime;
 use pathdiff::diff_paths;
 use pin_project::{pin_project, pinned_drop};
-use rust_embed::EmbeddedFile;
 use tokio::{
     fs,
     io::{AsyncSeekExt, BufReader},
@@ -33,7 +32,7 @@ use tokio_util::io::ReaderStream;
 use tracing::{Level, Span, debug, field, instrument, span, warn};
 
 use crate::{
-    Console, Resources,
+    Console, EmbeddedFileStream, Resources,
     console::{Bar, ProgressType},
     error::Error,
 };
@@ -107,34 +106,6 @@ where
                 Poll::Ready(Some(Ok(bytes)))
             }
             o => o,
-        }
-    }
-}
-
-#[pin_project]
-struct EmbeddedFileStream {
-    position: usize,
-    file: EmbeddedFile,
-}
-
-impl EmbeddedFileStream {
-    fn new(file: EmbeddedFile) -> Self {
-        Self { file, position: 0 }
-    }
-}
-
-impl Stream for EmbeddedFileStream {
-    type Item = Result<Bytes, io::Error>;
-
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.project();
-
-        if *this.position >= this.file.data.len() {
-            Poll::Ready(None)
-        } else {
-            let bytes = Bytes::copy_from_slice(&this.file.data);
-            *this.position = this.file.data.len();
-            Poll::Ready(Some(Ok(bytes)))
         }
     }
 }

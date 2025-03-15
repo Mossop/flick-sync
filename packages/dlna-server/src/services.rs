@@ -497,9 +497,9 @@ impl SoapAction for GetCurrentConnectionInfo {
         ]
     }
 
-    async fn execute<'a, H: DlnaRequestHandler>(
+    async fn execute<H: DlnaRequestHandler>(
         &self,
-        _context: RequestContext<'a, H>,
+        _context: RequestContext<'_, H>,
     ) -> SoapResult<Self::Response> {
         Err(UpnpError::ActionFailed)
     }
