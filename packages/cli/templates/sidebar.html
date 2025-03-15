@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block body %}
+{% if let Some(sidebar) = sidebar %}
+<body class="sidebar" hx-target="#content" hx-select="#content">
+  <sl-split-panel position-in-pixels="250" primary="start">
+    <div slot="start" id="sidebar">
+      <sl-tree>
+        <sl-tree-item hx-get="/" hx-push-url="true"><sl-icon name="bookmark"></sl-icon> On Deck</sl-tree-item>
+        {% for library in sidebar.libraries %}
+          <sl-tree-item hx-get="/library/{{ library.server }}/{{ library.id }}" hx-push-url="true">
+            {% if library.library_type == LibraryType::Movie %}
+              <sl-icon name="film"></sl-icon>
+            {% else %}
+              <sl-icon name="tv"></sl-icon>
+            {% endif %}
+            {{ library.title }}
+          </sl-tree-item>
+        {% endfor %}
+        {% for playlist in sidebar.playlists %}
+          <sl-tree-item hx-get="/playlist/{{ playlist.server }}/{{ playlist.id }}" hx-push-url="true"><sl-icon name="music-note-list"></sl-icon> {{ playlist.title }}</sl-tree-item>
+        {% endfor %}
+      </sl-tree>
+    </div>
+{% endif %}
+    <div slot="end" id="content">
+      {% block content %}{% endblock %}
+    </div>
+{% if let Some(sidebar) = sidebar %}
+  </sl-split-panel>
+</body>
+{% endif %}
+{% endblock %}

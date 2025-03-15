@@ -60,12 +60,17 @@ impl Responder for Error {
     fn respond_to(self, req: &HttpRequest) -> HttpResponse<Self::Body> {
         #[derive(Debug, Template)]
         #[template(path = "error.html")]
-        struct T {}
+        struct T {
+            error_message: String,
+        }
 
-        let tmpl = T {};
+        let tmpl = T {
+            error_message: self.to_string(),
+        };
+
         match tmpl.render() {
             Ok(body) => (Html::new(body), self.status_code()).respond_to(req),
-            Err(e) => (e.to_string(), self.status_code()).respond_to(req),
+            Err(e) => (e.to_string(), StatusCode::INTERNAL_SERVER_ERROR).respond_to(req),
         }
     }
 }

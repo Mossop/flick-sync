@@ -31,6 +31,8 @@ impl Runnable for Serve {
                 .service(service_factory.clone())
                 .wrap(from_fn(middleware::middleware))
                 .service(services::resources)
+                .service(services::playlist_list)
+                .service(services::library_list)
                 .service(services::index)
         })
         .bind((Ipv4Addr::UNSPECIFIED, port))?

@@ -194,10 +194,10 @@ impl PlaylistState {
     }
 }
 
-#[derive(Deserialize, Serialize, Clone, Copy, Debug)]
+#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq)]
 #[typeshare]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum LibraryType {
+pub enum LibraryType {
     Movie,
     Show,
 }

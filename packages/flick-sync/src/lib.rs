@@ -22,6 +22,7 @@ pub use plex_api;
 use plex_api::{HttpClient, HttpClientBuilder, transcode::VideoTranscodeOptions};
 use serde_json::to_string_pretty;
 pub use server::{ItemType, Server, SyncItemInfo};
+pub use state::LibraryType;
 use state::{ServerState, State};
 use tokio::{
     fs::{read_dir, remove_dir_all, remove_file, write},

@@ -1856,6 +1856,13 @@ impl Library {
         }
     }
 
+    pub fn library_type(&self) -> LibraryType {
+        match self {
+            Self::Movie(_) => LibraryType::Movie,
+            Self::Show(_) => LibraryType::Show,
+        }
+    }
+
     pub async fn collections(&self) -> Vec<Collection> {
         match self {
             Self::Movie(l) => l
