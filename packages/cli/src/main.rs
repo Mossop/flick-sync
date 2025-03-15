@@ -64,7 +64,7 @@ impl Stream for EmbeddedFileStream {
 }
 
 #[derive(Embed)]
-#[folder = "../../resources"]
+#[folder = "resources"]
 struct Resources;
 
 #[enum_dispatch]
