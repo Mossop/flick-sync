@@ -7,7 +7,6 @@ use actix_web::{
 };
 use flick_sync::{FlickSync, LibraryType};
 use rinja::Template;
-use tracing::info;
 
 use crate::{EmbeddedFileStream, Resources, error::Error};
 

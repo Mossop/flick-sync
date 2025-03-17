@@ -6,7 +6,7 @@ use std::{
 };
 
 use plex_api::{
-    Server,
+    Server as PlexServer,
     library::{Collection, FromMetadata, MediaItem, MetadataItem, Part, Playlist, Season, Show},
     media_container::server::library::{Metadata, MetadataType},
     transcode::TranscodeStatus,
@@ -21,11 +21,20 @@ use typeshare::typeshare;
 use uuid::Uuid;
 
 use crate::{
-    Error, Result,
+    Error, LockedFile, Result, Server, VideoPart,
     schema::{JsonObject, JsonUtils, MigratableStore, SchemaVersion},
+    sync::{OpReadGuard, OpWriteGuard},
 };
 
-const SCHEMA_VERSION: u64 = 1;
+const SCHEMA_VERSION: u64 = 2;
+
+async fn remove_file(path: &Path) {
+    if let Err(e) = fs::remove_file(path).await {
+        if e.kind() != ErrorKind::NotFound {
+            warn!(?path, error=?e, "Failed to remove file");
+        }
+    }
+}
 
 #[derive(Deserialize, Default, Serialize, Clone, PartialEq)]
 #[serde(tag = "state", rename_all = "camelCase")]
@@ -33,25 +42,46 @@ pub(crate) enum RelatedFileState {
     #[default]
     None,
     Stored {
+        #[serde(with = "time::serde::timestamp")]
+        updated: OffsetDateTime,
         path: PathBuf,
     },
 }
 
 impl RelatedFileState {
-    pub(crate) fn file(&self) -> Option<PathBuf> {
+    pub(crate) fn path(&self) -> Option<PathBuf> {
         match self {
             Self::None => None,
-            Self::Stored { path } => Some(path.clone()),
+            Self::Stored { path, .. } => Some(path.clone()),
         }
+    }
+
+    pub(crate) fn file(&self, guard: OpReadGuard, root: &Path) -> Option<LockedFile> {
+        let file = self.path()?;
+
+        Some(LockedFile::new(root.join(file), guard))
     }
 
     pub(crate) fn is_none(&self) -> bool {
         matches!(self, RelatedFileState::None)
     }
 
-    #[instrument(level = "trace", skip(root))]
-    pub(crate) async fn verify(&mut self, root: &Path, expected_path: &Path) {
-        if let RelatedFileState::Stored { path } = self {
+    pub(crate) fn needs_update(&self, since: OffsetDateTime) -> bool {
+        if let RelatedFileState::Stored { updated, .. } = self {
+            since > *updated
+        } else {
+            true
+        }
+    }
+
+    #[instrument(level = "trace", skip(root, guard))]
+    pub(crate) async fn verify(
+        &mut self,
+        #[expect(unused)] guard: &OpWriteGuard,
+        root: &Path,
+        expected_path: &Path,
+    ) {
+        if let RelatedFileState::Stored { path, updated } = self {
             let file = root.join(&path);
 
             match fs::metadata(&file).await {
@@ -92,6 +122,7 @@ impl RelatedFileState {
                     warn!(?path, ?expected_path, error=?e, "Failed to move file to expected location");
                 } else {
                     *self = RelatedFileState::Stored {
+                        updated: *updated,
                         path: expected_path.to_owned(),
                     };
                 }
@@ -99,17 +130,13 @@ impl RelatedFileState {
         }
     }
 
-    #[instrument(level = "trace", skip(root))]
-    pub(crate) async fn delete(&mut self, root: &Path) {
-        if let RelatedFileState::Stored { path } = self {
+    #[instrument(level = "trace", skip(root, guard))]
+    pub(crate) async fn delete(&mut self, #[expect(unused)] guard: &OpWriteGuard, root: &Path) {
+        if let RelatedFileState::Stored { path, .. } = self {
             let file = root.join(&path);
             trace!(?path, "Removing old file");
 
-            if let Err(e) = fs::remove_file(&file).await {
-                if e.kind() != ErrorKind::NotFound {
-                    warn!(?path, error=?e, "Failed to remove file");
-                }
-            }
+            remove_file(&file).await;
 
             *self = RelatedFileState::None;
         }
@@ -155,19 +182,16 @@ impl CollectionState {
         }
     }
 
-    pub(crate) async fn update<T>(&mut self, collection: &Collection<T>, root: &Path) {
+    pub(crate) async fn update<T>(&mut self, collection: &Collection<T>) {
         self.title = collection.title().to_owned();
 
         if let Some(updated) = collection.metadata().updated_at {
-            if updated > self.last_updated {
-                self.thumbnail.delete(root).await;
-            }
             self.last_updated = updated;
         }
     }
 
-    pub(crate) async fn delete(&mut self, root: &Path) {
-        self.thumbnail.delete(root).await;
+    pub(crate) async fn delete(&mut self, guard: &OpWriteGuard, root: &Path) {
+        self.thumbnail.delete(guard, root).await;
     }
 }
 
@@ -277,24 +301,20 @@ impl ShowState {
         }
     }
 
-    pub(crate) async fn update(&mut self, show: &Show, root: &Path) {
+    pub(crate) async fn update(&mut self, show: &Show) {
         let metadata = show.metadata();
 
         self.year = metadata.year.unwrap();
         self.title = show.title().to_owned();
 
         if let Some(updated) = show.metadata().updated_at {
-            if updated > self.last_updated {
-                self.thumbnail.delete(root).await;
-                self.metadata.delete(root).await;
-            }
             self.last_updated = updated;
         }
     }
 
-    pub(crate) async fn delete(&mut self, root: &Path) {
-        self.thumbnail.delete(root).await;
-        self.metadata.delete(root).await;
+    pub(crate) async fn delete(&mut self, guard: &OpWriteGuard, root: &Path) {
+        self.thumbnail.delete(guard, root).await;
+        self.metadata.delete(guard, root).await;
     }
 }
 
@@ -349,7 +369,9 @@ pub(crate) enum DownloadState {
     #[serde(rename_all = "camelCase")]
     Downloading { path: PathBuf },
     #[serde(rename_all = "camelCase")]
-    Transcoding { session_id: String, path: PathBuf },
+    Transcoding { session_id: String },
+    #[serde(rename_all = "camelCase")]
+    TranscodeDownloading { session_id: String, path: PathBuf },
     #[serde(rename_all = "camelCase")]
     Downloaded { path: PathBuf },
     #[serde(rename_all = "camelCase")]
@@ -357,14 +379,21 @@ pub(crate) enum DownloadState {
 }
 
 impl DownloadState {
-    pub(crate) fn file(&self) -> Option<PathBuf> {
+    pub(crate) fn path(&self) -> Option<PathBuf> {
         match self {
             Self::None => None,
+            Self::Transcoding { .. } => None,
             Self::Downloading { path } => Some(path.clone()),
-            Self::Transcoding { path, .. } => Some(path.clone()),
+            Self::TranscodeDownloading { path, .. } => Some(path.clone()),
             Self::Downloaded { path } => Some(path.clone()),
             Self::Transcoded { path } => Some(path.clone()),
         }
+    }
+
+    pub(crate) async fn file(&self, guard: OpReadGuard, root: &Path) -> Option<LockedFile> {
+        let file = self.path()?;
+
+        Some(LockedFile::new(root.join(file), guard))
     }
 
     pub(crate) fn needs_download(&self) -> bool {
@@ -374,14 +403,16 @@ impl DownloadState {
         )
     }
 
-    #[instrument(level = "trace", skip(root))]
-    pub(crate) async fn strip_metadata(&self, root: &Path) -> Result {
+    #[instrument(level = "trace", skip(root, guard))]
+    pub(crate) async fn strip_metadata(
+        &self,
+        #[expect(unused)] guard: &OpWriteGuard,
+        root: &Path,
+    ) -> Result {
         let source_file = match self {
-            Self::None => return Ok(()),
-            Self::Downloading { .. } => return Ok(()),
-            Self::Transcoding { .. } => return Ok(()),
             Self::Downloaded { path } => root.join(path),
             Self::Transcoded { path } => root.join(path),
+            _ => return Ok(()),
         };
 
         let temp_file = NamedTempFile::new()?;
@@ -409,62 +440,88 @@ impl DownloadState {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(root, server))]
+    async fn verify_transcode_status(
+        &mut self,
+        plex_server: &PlexServer,
+        video_part: &VideoPart,
+        session_id: &str,
+    ) {
+        match plex_server.transcode_session(session_id).await {
+            Ok(session) => {
+                let status = match session.status().await {
+                    Ok(status) => status,
+                    Err(e) => {
+                        error!(error=?e, "Failed to get transcode status");
+                        return;
+                    }
+                };
+
+                match status {
+                    TranscodeStatus::Complete => {
+                        let path = video_part.file_path(&session.container().to_string()).await;
+                        if matches!(self, DownloadState::Transcoding { .. }) {
+                            *self = DownloadState::TranscodeDownloading {
+                                session_id: session_id.to_owned(),
+                                path: path.clone(),
+                            }
+                        }
+                    }
+                    TranscodeStatus::Error => {
+                        error!("Transcode session has failed");
+                        let _ = session.cancel().await;
+
+                        *self = DownloadState::None;
+                    }
+                    TranscodeStatus::Transcoding { .. } => {
+                        *self = DownloadState::Transcoding {
+                            session_id: session_id.to_owned(),
+                        };
+                    }
+                }
+            }
+            Err(plex_api::Error::ItemNotFound) => {
+                warn!("Transcode session is no longer present");
+                *self = DownloadState::None;
+            }
+            Err(e) => {
+                error!(error=?e, "Failed to get transcode session");
+            }
+        }
+    }
+
+    #[instrument(level = "trace", skip(root, guard, plex_server))]
     pub(crate) async fn verify(
         &mut self,
-        server: &Server,
+        #[expect(unused)] guard: &OpWriteGuard,
+        plex_server: &PlexServer,
+        video_part: &VideoPart,
         root: &Path,
-        expected_path: Option<&Path>,
     ) {
-        let path = match self {
+        match self.clone() {
             DownloadState::None => return,
             DownloadState::Downloading { .. } => {
                 return;
             }
-            DownloadState::Transcoding { session_id, path } => {
-                let file = root.join(&path);
-
-                match server.transcode_session(session_id).await {
-                    Ok(session) => {
-                        let status = match session.status().await {
-                            Ok(status) => status,
-                            Err(e) => {
-                                error!(?path, error=?e, "Failed to get transcode status");
-                                return;
-                            }
-                        };
-
-                        if !matches!(status, TranscodeStatus::Error) {
-                            return;
-                        }
-
-                        error!(?path, "Transcode session has failed");
-                        let _ = session.cancel().await;
-                    }
-                    Err(plex_api::Error::ItemNotFound) => {
-                        warn!(?path, "Transcode session is no longer present");
-                    }
-                    Err(e) => {
-                        error!(?path, error=?e, "Failed to get transcode session");
-                        return;
-                    }
-                }
-
-                if let Err(e) = fs::remove_file(&file).await {
-                    if e.kind() != ErrorKind::NotFound {
-                        warn!(?path, error=?e, "Failed to remove partial download");
-                    }
-                }
-
-                *self = DownloadState::None;
-
-                return;
+            DownloadState::Transcoding { session_id }
+            | DownloadState::TranscodeDownloading { session_id, .. } => {
+                self.verify_transcode_status(plex_server, video_part, &session_id)
+                    .await;
             }
-            DownloadState::Downloaded { path } => path,
-            DownloadState::Transcoded { path } => path,
+            _ => {}
+        }
+
+        let Some(path) = self.path() else {
+            return;
         };
 
         let file = root.join(&path);
+
+        let extension = file
+            .extension()
+            .and_then(|os| os.to_str())
+            .unwrap()
+            .to_owned();
+        let expected_path = video_part.file_path(&extension).await;
 
         match fs::metadata(&file).await {
             Ok(stats) => {
@@ -489,54 +546,62 @@ impl DownloadState {
             }
         }
 
-        if let Some(expected_path) = expected_path {
-            if expected_path != path {
-                let new_target = root.join(expected_path);
+        if expected_path != path {
+            let new_target = root.join(&expected_path);
 
-                if let Err(e) = fs::rename(&file, &new_target).await {
-                    warn!(?path, ?expected_path, error=?e, "Failed to move file to expected location");
-                } else if matches!(self, DownloadState::Downloaded { .. }) {
-                    *self = DownloadState::Downloaded {
-                        path: expected_path.to_owned(),
-                    };
-                } else if matches!(self, DownloadState::Transcoded { .. }) {
-                    *self = DownloadState::Transcoded {
-                        path: expected_path.to_owned(),
-                    };
-                } else {
-                    unreachable!("Should have returned early if the video is not local");
-                }
+            if let Err(e) = fs::rename(&file, &new_target).await {
+                warn!(?path, ?expected_path, error=?e, "Failed to move file to expected location");
+            } else if matches!(self, DownloadState::Downloaded { .. }) {
+                *self = DownloadState::Downloaded {
+                    path: expected_path.to_owned(),
+                };
+            } else if matches!(self, DownloadState::Transcoded { .. }) {
+                *self = DownloadState::Transcoded {
+                    path: expected_path.to_owned(),
+                };
+            } else {
+                unreachable!("Should have returned early if the video is not local");
             }
         }
     }
 
-    #[instrument(level = "trace", skip(root, server))]
-    pub(crate) async fn delete(&mut self, server: &Server, root: &Path) {
-        let (path, session_id) = match self {
+    #[instrument(level = "trace", skip(root, guard, plex_server))]
+    pub(crate) async fn delete(
+        &mut self,
+        #[expect(unused)] guard: &OpWriteGuard,
+        plex_server: &PlexServer,
+        root: &Path,
+    ) {
+        let path = match self {
             DownloadState::None => return,
-            DownloadState::Downloading { path } => (path, None),
-            DownloadState::Transcoding { session_id, path } => (path, Some(session_id)),
-            DownloadState::Downloaded { path } => (path, None),
-            DownloadState::Transcoded { path } => (path, None),
+            DownloadState::Downloading { path } => path,
+            DownloadState::Transcoding { session_id } => {
+                if let Ok(session) = plex_server.transcode_session(session_id).await {
+                    if let Err(e) = session.cancel().await {
+                        warn!(error=?e, "Failed to cancel stale transcode session");
+                    }
+                }
+
+                return;
+            }
+            DownloadState::TranscodeDownloading { session_id, path } => {
+                if let Ok(session) = plex_server.transcode_session(session_id).await {
+                    if let Err(e) = session.cancel().await {
+                        warn!(error=?e, "Failed to cancel stale transcode session");
+                    }
+                }
+
+                path
+            }
+            DownloadState::Downloaded { path } => path,
+            DownloadState::Transcoded { path } => path,
         };
 
         let file = root.join(&path);
 
         trace!(?path, "Removing old video file");
 
-        if let Err(e) = fs::remove_file(&file).await {
-            if e.kind() != ErrorKind::NotFound {
-                warn!(?path, error=?e, "Failed to remove file");
-            }
-        }
-
-        if let Some(session_id) = session_id {
-            if let Ok(session) = server.transcode_session(session_id).await {
-                if let Err(e) = session.cancel().await {
-                    warn!(error=?e, "Failed to cancel stale transcode session");
-                }
-            }
-        }
+        remove_file(&file).await;
 
         *self = DownloadState::None;
     }
@@ -547,7 +612,10 @@ impl fmt::Debug for DownloadState {
         match self {
             Self::None => write!(f, "None"),
             Self::Downloading { .. } => write!(f, "Downloading"),
-            Self::Transcoding { session_id, .. } => write!(f, "Transcoding({session_id})"),
+            Self::Transcoding { session_id } => write!(f, "Transcoding({session_id})"),
+            Self::TranscodeDownloading { session_id, .. } => {
+                write!(f, "TranscodeDownloading({session_id})")
+            }
             Self::Downloaded { .. } => write!(f, "Downloaded"),
             Self::Transcoded { .. } => write!(f, "Transcoded"),
         }
@@ -692,8 +760,9 @@ impl VideoState {
 
     pub(crate) async fn update<M: MediaItem + FromMetadata>(
         &mut self,
-        item: &M,
         server: &Server,
+        item: &M,
+        plex_server: &PlexServer,
         root: &Path,
     ) {
         let metadata = item.metadata();
@@ -712,7 +781,7 @@ impl VideoState {
                             video = item.rating_key(),
                             position, "Updating playback position on server"
                         );
-                        match server.update_timeline(item, position).await {
+                        match plex_server.update_timeline(item, position).await {
                             Ok(item) => {
                                 let metadata = item.metadata();
                                 self.playback_state = playback_state_from_metadata(metadata);
@@ -725,7 +794,7 @@ impl VideoState {
                             video = item.rating_key(),
                             "Marking item as watched on server"
                         );
-                        match server.mark_watched(item).await {
+                        match plex_server.mark_watched(item).await {
                             Ok(item) => {
                                 let metadata = item.metadata();
                                 self.playback_state = playback_state_from_metadata(metadata);
@@ -747,60 +816,57 @@ impl VideoState {
         }
 
         if let Some(updated) = metadata.updated_at {
-            if updated > self.last_updated {
-                self.thumbnail.delete(root).await;
-                self.metadata.delete(root).await;
-            }
             self.last_updated = updated;
         }
 
         let media = &item.media()[0];
         let parts = media.parts();
 
-        if parts.len() != self.parts.len() {
-            info!("Number of video parts changed, deleting existing downloads.");
-            for part in self.parts.iter_mut() {
-                part.download.delete(server, root).await;
-            }
+        if let Ok(guard) = server.try_lock_write_key(&self.id).await {
+            if parts.len() != self.parts.len() {
+                info!("Number of video parts changed, deleting existing downloads.");
+                for part in self.parts.iter_mut() {
+                    part.download.delete(&guard, plex_server, root).await;
+                }
 
-            self.parts = parts.iter().map(VideoPartState::from).collect()
-        } else {
-            for (part_state, part) in self.parts.iter_mut().zip(parts.iter()) {
-                let metadata = part.metadata();
+                self.parts = parts.iter().map(VideoPartState::from).collect()
+            } else {
+                for (part_state, part) in self.parts.iter_mut().zip(parts.iter()) {
+                    let metadata = part.metadata();
 
-                if part_state != part {
-                    info!(
-                        old_id = part_state.id,
-                        new_id = metadata.id,
-                        old_key = part_state.key,
-                        new_key = metadata.key,
-                        old_size = part_state.size,
-                        new_size = metadata.size,
-                        old_duration = part_state.duration,
-                        new_duration = metadata.duration,
-                        part = part_state.id,
-                        "Part changed, deleting existing download."
-                    );
-                    part_state.download.delete(server, root).await;
-                    *part_state = part.into();
+                    if part_state != part {
+                        info!(
+                            old_id = part_state.id,
+                            new_id = metadata.id,
+                            old_key = part_state.key,
+                            new_key = metadata.key,
+                            old_size = part_state.size,
+                            new_size = metadata.size,
+                            old_duration = part_state.duration,
+                            new_duration = metadata.duration,
+                            part = part_state.id,
+                            "Part changed, deleting existing download."
+                        );
+                        part_state.download.delete(&guard, plex_server, root).await;
+                        *part_state = part.into();
+                    }
                 }
             }
         }
     }
 
-    pub(crate) async fn delete(&mut self, server: &Server, root: &Path) {
-        if self.thumbnail != RelatedFileState::None {
-            self.thumbnail.delete(root).await;
-        }
+    pub(crate) async fn delete(
+        &mut self,
+        guard: &OpWriteGuard,
+        plex_server: &PlexServer,
+        root: &Path,
+    ) {
+        self.thumbnail.delete(guard, root).await;
 
-        if self.metadata != RelatedFileState::None {
-            self.metadata.delete(root).await;
-        }
+        self.metadata.delete(guard, root).await;
 
         for part in self.parts.iter_mut() {
-            if part.download != DownloadState::None {
-                part.download.delete(server, root).await;
-            }
+            part.download.delete(guard, plex_server, root).await;
         }
     }
 }
@@ -905,6 +971,70 @@ impl State {
 
         Ok(())
     }
+
+    fn migrate_v1(data: &mut JsonObject) -> Result {
+        for video in data
+            .prop("servers")
+            .values()
+            .prop("videos")
+            .values()
+            .as_object()
+        {
+            if let Some(updated) = video.get("lastUpdated").cloned() {
+                if let Some(Value::Object(obj)) = video.get_mut("thumbnail") {
+                    if obj.contains_key("path") {
+                        obj.insert("updated".to_string(), updated.clone());
+                    }
+                }
+
+                if let Some(Value::Object(obj)) = video.get_mut("metadata") {
+                    if obj.contains_key("path") {
+                        obj.insert("updated".to_string(), updated);
+                    }
+                }
+            }
+        }
+
+        for show in data
+            .prop("servers")
+            .values()
+            .prop("shows")
+            .values()
+            .as_object()
+        {
+            if let Some(updated) = show.get("lastUpdated").cloned() {
+                if let Some(Value::Object(obj)) = show.get_mut("thumbnail") {
+                    if obj.contains_key("path") {
+                        obj.insert("updated".to_string(), updated.clone());
+                    }
+                }
+
+                if let Some(Value::Object(obj)) = show.get_mut("metadata") {
+                    if obj.contains_key("path") {
+                        obj.insert("updated".to_string(), updated);
+                    }
+                }
+            }
+        }
+
+        for collection in data
+            .prop("servers")
+            .values()
+            .prop("collections")
+            .values()
+            .as_object()
+        {
+            if let Some(updated) = collection.get("lastUpdated").cloned() {
+                if let Some(Value::Object(obj)) = collection.get_mut("thumbnail") {
+                    if obj.contains_key("path") {
+                        obj.insert("updated".to_string(), updated);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for State {
@@ -937,6 +1067,10 @@ impl MigratableStore for State {
 
         if version < 1 {
             Self::migrate_v0(data)?;
+        }
+
+        if version < 2 {
+            Self::migrate_v1(data)?;
         }
 
         data.insert("schema".to_string(), SCHEMA_VERSION.into());

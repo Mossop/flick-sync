@@ -15,7 +15,7 @@ mod services;
 #[derive(Args)]
 pub struct Serve {
     /// The port to use for the web server.
-    #[clap(short, long)]
+    #[clap(short, long, env = "FLICK_SYNC_PORT")]
     port: Option<u16>,
 }
 

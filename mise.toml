@@ -3,3 +3,12 @@ node = "22"
 
 [tasks.crossbuild]
 run = "cross build --release --features vendored-openssl --target arm-unknown-linux-gnueabihf"
+
+[tasks.serve]
+run = "cargo run -- serve -p 3000"
+sources = [
+  "packages/**/*.rs",
+  "packages/cli/resources/**/*",
+  "packages/cli/templates/*.html",
+]
+outputs = ["target/debug/flick-sync"]

@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::sync::Timeout;
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("{source}")]
@@ -48,8 +50,16 @@ pub enum Error {
         #[from]
         source: xml::writer::Error,
     },
+    #[error("Unable to lock, other operations are in progress")]
+    LockFailed,
     #[error("Unknown error")]
     Unknown(String),
+}
+
+impl From<Timeout> for Error {
+    fn from(_: Timeout) -> Error {
+        Error::LockFailed
+    }
 }
 
 impl From<Error> for String {

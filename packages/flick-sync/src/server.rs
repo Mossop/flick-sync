@@ -5,10 +5,12 @@ use std::{
     fmt,
     io::ErrorKind,
     path::{Path, PathBuf},
+    result,
     sync::Arc,
 };
 
 use async_recursion::async_recursion;
+use futures::future::join_all;
 use plex_api::{
     MyPlexBuilder,
     device::DeviceConnection,
@@ -20,17 +22,19 @@ use plex_api::{
 };
 use tokio::{
     fs::{read_dir, remove_dir, remove_dir_all, remove_file},
-    sync::{Mutex, Semaphore, SemaphorePermit},
+    sync::{Mutex, RwLockMappedWriteGuard, RwLockWriteGuard, Semaphore},
 };
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
     DEFAULT_PROFILES, Error, FileType, Inner, Library, OutputStyle, Result, ServerConnection,
+    TransferState,
     config::{Config, ServerConfig, SyncItem, TranscodeProfile},
     state::{
         CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, SeasonState,
         ServerState, ShowState, VideoState,
     },
+    sync::{OpMutex, OpReadGuard, OpWriteGuard, Timeout},
     util::safe,
     wrappers,
 };
@@ -46,6 +50,25 @@ pub enum ItemType {
     Unknown,
 }
 
+pub trait Progress: Unpin {
+    fn progress(&mut self, position: u64);
+
+    fn finished(&mut self);
+}
+
+pub trait DownloadProgress: Clone {
+    fn transcode_started(
+        &self,
+        video_part: &wrappers::VideoPart,
+    ) -> impl Future<Output = impl Progress>;
+
+    fn download_started(
+        &self,
+        video_part: &wrappers::VideoPart,
+        size: u64,
+    ) -> impl Future<Output = impl Progress>;
+}
+
 pub struct SyncItemInfo {
     pub id: String,
     pub item_type: ItemType,
@@ -59,7 +82,8 @@ pub struct Server {
     pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
     connection: Arc<Mutex<Option<plex_api::Server>>>,
-    transcode_requests: Arc<Semaphore>,
+    pub(crate) transcode_requests: Arc<Semaphore>,
+    pub(crate) transcode_permits: Arc<Semaphore>,
 }
 
 impl fmt::Debug for Server {
@@ -137,13 +161,32 @@ async fn prune_directory(path: &Path, expected_files: &HashSet<PathBuf>) -> bool
 }
 
 impl Server {
-    pub(crate) fn new(id: &str, inner: &Arc<Inner>) -> Self {
+    pub(crate) fn new(id: &str, inner: &Arc<Inner>, config: &ServerConfig) -> Self {
         Self {
             id: id.to_owned(),
             inner: inner.clone(),
             connection: Arc::new(Mutex::new(None)),
             transcode_requests: Arc::new(Semaphore::new(1)),
+            transcode_permits: Arc::new(Semaphore::new(config.max_transcodes.unwrap_or(3))),
         }
+    }
+
+    pub(crate) async fn try_lock_write(&self) -> result::Result<OpWriteGuard, Timeout> {
+        OpMutex::try_lock_write_key(self.id.clone()).await
+    }
+
+    pub(crate) async fn try_lock_write_key(
+        &self,
+        key: &str,
+    ) -> result::Result<OpWriteGuard, Timeout> {
+        OpMutex::try_lock_write_key(format!("{}/{key}", self.id)).await
+    }
+
+    pub(crate) async fn try_lock_read_key(
+        &self,
+        key: &str,
+    ) -> result::Result<OpReadGuard, Timeout> {
+        OpMutex::try_lock_read_key(format!("{}/{key}", self.id)).await
     }
 
     /// The FlickSync identifier for this server.
@@ -205,16 +248,6 @@ impl Server {
         server_state.name = server.media_container.friendly_name;
 
         self.inner.persist_state(&state).await
-    }
-
-    pub(crate) async fn transcode_permit(&self) -> SemaphorePermit {
-        self.transcode_requests.acquire().await.unwrap()
-    }
-
-    pub async fn max_transcodes(&self) -> usize {
-        let config = self.inner.config.read().await;
-        let server_config = config.servers.get(&self.id).unwrap();
-        server_config.max_transcodes.unwrap_or(3)
     }
 
     pub async fn video(&self, id: &str) -> Option<wrappers::Video> {
@@ -457,6 +490,9 @@ impl Server {
         transcode_profile: Option<String>,
         only_unplayed: bool,
     ) -> Result {
+        #[expect(unused)]
+        let guard = self.try_lock_write().await?;
+
         let mut config = self.inner.config.write().await;
 
         if let Some(ref profile) = transcode_profile {
@@ -480,11 +516,13 @@ impl Server {
 
     /// Removes an item to sync based on its rating key. Returns true if the item existed.
     pub async fn remove_sync(&self, rating_key: &str) -> Result<bool> {
+        #[expect(unused)]
+        let guard = self.try_lock_write().await?;
+
         let mut config = self.inner.config.write().await;
 
         let server_config = config.servers.get_mut(&self.id).unwrap();
-        let contained = server_config.syncs.contains_key(rating_key);
-        server_config.syncs.remove(rating_key);
+        let contained = server_config.syncs.remove(rating_key).is_some();
 
         self.inner.persist_config(&config).await?;
 
@@ -496,43 +534,44 @@ impl Server {
         info!("Updating item metadata");
         let server = self.connect().await?;
 
-        let config = self.inner.config.read().await;
-        let server_config = config.servers.get(&self.id).unwrap();
-
         {
-            let mut state = self.inner.state.write().await;
+            #[expect(unused)]
+            let guard = self.try_lock_write().await?;
 
-            let server_state = state.servers.entry(self.id.clone()).or_default();
-            server_state.name = server.media_container.friendly_name.clone();
+            let config = self.inner.config.read().await.clone();
+            let server_config = config.servers.get(&self.id).unwrap();
 
             {
-                // Scope the write lock on the path.
-                let root = self.inner.path.write().await;
+                let mut state = self.inner.state.write().await;
 
-                let mut state_sync = StateSync {
-                    config: &config,
-                    server_config,
-                    server_state,
-                    server: server.clone(),
-                    root: &root,
-                    seen_items: Default::default(),
-                    seen_libraries: Default::default(),
-                    transcode_profiles: Default::default(),
-                };
-
-                for item in server_config.syncs.values() {
-                    if let Err(e) = state_sync.add_item_by_key(item, &item.id).await {
-                        warn!(item=item.id, error=?e, "Failed to update item. Aborting update.");
-                    }
-                }
-
-                state_sync.update_profiles().await?;
-
-                state_sync.prune_unseen().await?;
-
-                state_sync.fetch_collections().await?;
+                let server_state = state.servers.entry(self.id.clone()).or_default();
+                server_state.name = server.media_container.friendly_name.clone();
             }
 
+            let mut state_sync = StateSync {
+                config: &config,
+                server_config,
+                server: self,
+                plex_server: server,
+                root: &self.inner.path,
+                seen_items: Default::default(),
+                seen_libraries: Default::default(),
+                transcode_profiles: Default::default(),
+            };
+
+            for item in server_config.syncs.values() {
+                if let Err(e) = state_sync.add_item_by_key(item, &item.id).await {
+                    warn!(item=item.id, error=?e, "Failed to update item. Aborting update.");
+                }
+            }
+
+            state_sync.update_profiles().await?;
+
+            state_sync.fetch_collections().await?;
+
+            state_sync.prune_unseen().await?;
+
+            let state = self.inner.state.write().await;
             self.inner.persist_state(&state).await?;
         }
 
@@ -574,7 +613,7 @@ impl Server {
 
     /// Updates thumbnails for synced items.
     #[instrument(level = "trace", skip(self), fields(server = self.id))]
-    pub async fn update_thumbnails(&self, rebuild: bool) {
+    async fn update_thumbnails(&self, rebuild: bool) {
         info!("Updating thumbnails");
 
         for library in self.libraries().await {
@@ -613,7 +652,7 @@ impl Server {
 
     /// Updates metadata files for synced videos.
     #[instrument(level = "trace", skip(self), fields(server = self.id))]
-    pub async fn update_metadata(&self, rebuild: bool) {
+    async fn update_metadata(&self, rebuild: bool) {
         info!("Updating metadata files");
 
         for library in self.libraries().await {
@@ -672,12 +711,53 @@ impl Server {
         }
     }
 
+    /// Attempts to transcode and download all missing items.
+    #[instrument(level = "trace", skip(self, progress), fields(server = self.id))]
+    pub async fn download<D>(&self, progress: D)
+    where
+        D: DownloadProgress,
+    {
+        let mut jobs = Vec::new();
+
+        for video in self.videos().await {
+            for part in video.parts().await {
+                if part.verify_download().await.is_err() {
+                    continue;
+                }
+
+                match part.transfer_state().await {
+                    TransferState::Transcoding => {
+                        jobs.push(part.download(
+                            progress.clone(),
+                            self.transcode_permits.clone().try_acquire_owned().ok(),
+                            None,
+                        ));
+                    }
+                    TransferState::TranscodeDownloading | TransferState::Downloading => {
+                        jobs.push(part.download(
+                            progress.clone(),
+                            None,
+                            self.inner.download_permits.clone().try_acquire_owned().ok(),
+                        ));
+                    }
+                    TransferState::Waiting => {
+                        jobs.push(part.download(progress.clone(), None, None));
+                    }
+                    TransferState::Downloaded => {}
+                }
+            }
+        }
+
+        join_all(jobs).await;
+    }
+
     /// Verifies the presence of downloads for synced items.
     #[instrument(level = "trace", skip(self), fields(server = self.id))]
     pub async fn prune(&self) -> Result {
+        #[expect(unused)]
+        let guard = self.try_lock_write().await?;
         info!("Pruning server filesystem");
 
-        let root = self.inner.path.write().await;
         let output_standardized = self.inner.output_style().await == OutputStyle::Standardized;
 
         let mut expected_files: HashSet<PathBuf> = HashSet::new();
@@ -690,52 +770,58 @@ impl Server {
         };
 
         for collection in server_state.collections.values() {
-            if let Some(file) = collection.thumbnail.file() {
-                expected_files.insert(root.join(file));
+            if let Some(file) = collection.thumbnail.path() {
+                expected_files.insert(self.inner.path.join(file));
             }
         }
 
         if output_standardized {
             for collection in self.collections().await {
-                expected_files
-                    .insert(root.join(collection.file_path(FileType::Playlist, "m3u").await));
+                expected_files.insert(
+                    self.inner
+                        .path
+                        .join(collection.file_path(FileType::Playlist, "m3u").await),
+                );
             }
         }
 
         for show in server_state.shows.values() {
-            if let Some(file) = show.thumbnail.file() {
-                expected_files.insert(root.join(file));
+            if let Some(file) = show.thumbnail.path() {
+                expected_files.insert(self.inner.path.join(file));
             }
 
-            if let Some(file) = show.metadata.file() {
-                expected_files.insert(root.join(file));
+            if let Some(file) = show.metadata.path() {
+                expected_files.insert(self.inner.path.join(file));
             }
         }
 
         for video in server_state.videos.values() {
-            if let Some(file) = video.thumbnail.file() {
-                expected_files.insert(root.join(file));
+            if let Some(file) = video.thumbnail.path() {
+                expected_files.insert(self.inner.path.join(file));
             }
 
-            if let Some(file) = video.metadata.file() {
-                expected_files.insert(root.join(file));
+            if let Some(file) = video.metadata.path() {
+                expected_files.insert(self.inner.path.join(file));
             }
 
             for part in video.parts.iter() {
-                if let Some(file) = part.download.file() {
-                    expected_files.insert(root.join(file));
+                if let Some(file) = part.download.path() {
+                    expected_files.insert(self.inner.path.join(file));
                 }
             }
         }
 
         if output_standardized {
             for playlist in self.playlists().await {
-                expected_files
-                    .insert(root.join(playlist.file_path(FileType::Playlist, "m3u").await));
+                expected_files.insert(
+                    self.inner
+                        .path
+                        .join(playlist.file_path(FileType::Playlist, "m3u").await),
+                );
             }
         }
 
-        let server_root = root.join(safe(&self.id));
+        let server_root = self.inner.path.join(safe(&self.id));
 
         if expected_files.is_empty() {
             debug!("Deleting empty server directory {}", server_root.display());
@@ -752,10 +838,9 @@ impl Server {
 struct StateSync<'a> {
     config: &'a Config,
     server_config: &'a ServerConfig,
-    server_state: &'a mut ServerState,
-    server: plex_api::Server,
+    plex_server: plex_api::Server,
+    server: &'a Server,
     root: &'a Path,
-
     seen_items: HashSet<String>,
     seen_libraries: HashSet<String>,
     transcode_profiles: HashMap<String, HashSet<String>>,
@@ -771,6 +856,12 @@ macro_rules! return_if_seen {
 }
 
 impl StateSync<'_> {
+    async fn server_state(&self) -> RwLockMappedWriteGuard<'_, ServerState> {
+        RwLockWriteGuard::map(self.server.inner.state.write().await, |state| {
+            state.servers.get_mut(&self.server.id).unwrap()
+        })
+    }
+
     async fn add_video<T: MediaItem + FromMetadata>(&mut self, sync: &SyncItem, video: &T) {
         if sync.only_unplayed && video.metadata().view_count.unwrap_or_default() > 0 {
             return;
@@ -778,16 +869,18 @@ impl StateSync<'_> {
 
         let key = video.rating_key().to_owned();
 
-        if !self.seen_items.contains(video.rating_key()) {
-            let video_state = self
-                .server_state
+        if !self.seen_items.contains(&key) {
+            self.seen_items.insert(key.clone());
+
+            let mut server_state = self.server_state().await;
+            let video_state = server_state
                 .videos
                 .entry(key.clone())
                 .or_insert_with(|| VideoState::from(video));
 
-            video_state.update(video, &self.server, self.root).await;
-
-            self.seen_items.insert(key.clone());
+            video_state
+                .update(self.server, video, &self.plex_server, self.root)
+                .await;
         }
 
         let transcode_profile = sync
@@ -804,7 +897,7 @@ impl StateSync<'_> {
     async fn add_movie(&mut self, sync: &SyncItem, movie: &Movie) -> Result {
         self.add_video(sync, movie).await;
 
-        self.add_library(movie)?;
+        self.add_library(movie).await?;
 
         Ok(())
     }
@@ -815,10 +908,11 @@ impl StateSync<'_> {
         Ok(())
     }
 
-    fn add_season(&mut self, season: &Season) -> Result {
+    async fn add_season(&mut self, season: &Season) -> Result {
         return_if_seen!(self, season);
 
-        self.server_state
+        let mut server_state = self.server_state().await;
+        server_state
             .seasons
             .entry(season.rating_key().to_owned())
             .and_modify(|ss| ss.update(season))
@@ -830,20 +924,20 @@ impl StateSync<'_> {
     async fn add_show(&mut self, show: &Show) -> Result {
         return_if_seen!(self, show);
 
-        let show_state = self
-            .server_state
+        self.add_library(show).await?;
+
+        let mut server_state = self.server_state().await;
+        let show_state = server_state
             .shows
             .entry(show.rating_key().to_owned())
             .or_insert_with(|| ShowState::from(show));
 
-        show_state.update(show, self.root).await;
-
-        self.add_library(show)?;
+        show_state.update(show).await;
 
         Ok(())
     }
 
-    fn add_library<T>(&mut self, item: &T) -> Result<&mut LibraryState>
+    async fn add_library<T>(&mut self, item: &T) -> Result
     where
         T: MetadataItem,
     {
@@ -870,26 +964,27 @@ impl StateSync<'_> {
             _ => panic!("Unknown library type"),
         };
 
-        let library = self
-            .server_state
+        self.seen_libraries.insert(library_id.clone());
+
+        let mut server_state = self.server_state().await;
+        server_state
             .libraries
             .entry(library_id.clone())
             .and_modify(|l| l.title = library_title.clone())
             .or_insert_with(|| LibraryState {
-                id: library_id.clone(),
+                id: library_id,
                 title: library_title.clone(),
                 library_type,
             });
-        self.seen_libraries.insert(library_id);
 
-        Ok(library)
+        Ok(())
     }
 
-    fn add_playlist(&mut self, playlist: &Playlist<Video>, videos: Vec<String>) -> Result {
+    async fn add_playlist(&mut self, playlist: &Playlist<Video>, videos: Vec<String>) -> Result {
         return_if_seen!(self, playlist);
 
-        let playlist_state = self
-            .server_state
+        let mut server_state = self.server_state().await;
+        let playlist_state = server_state
             .playlists
             .entry(playlist.rating_key().to_owned())
             .and_modify(|ps| ps.update(playlist))
@@ -940,23 +1035,30 @@ impl StateSync<'_> {
 
     async fn update_profiles(&mut self) -> Result {
         for (key, selected_profiles) in self.transcode_profiles.iter() {
-            let selected_profile = self.select_profile(selected_profiles);
+            if let Ok(guard) =
+                OpMutex::try_lock_write_key(format!("{}/{}", self.server.id, key)).await
+            {
+                let selected_profile = self.select_profile(selected_profiles);
 
-            let video_state = self.server_state.videos.get_mut(key).unwrap();
-            if video_state.transcode_profile != selected_profile {
-                if video_state
-                    .parts
-                    .iter()
-                    .any(|p| p.download != DownloadState::None)
-                {
-                    info!(item=key, old=?video_state.transcode_profile, new=?selected_profile, "Transcode profile changed, deleting existing downloads.");
+                let mut server_state = self.server_state().await;
+                let video_state = server_state.videos.get_mut(key).unwrap();
+                if video_state.transcode_profile != selected_profile {
+                    if video_state
+                        .parts
+                        .iter()
+                        .any(|p| p.download != DownloadState::None)
+                    {
+                        info!(item=key, old=?video_state.transcode_profile, new=?selected_profile, "Transcode profile changed, deleting existing downloads.");
 
-                    for part in video_state.parts.iter_mut() {
-                        part.download.delete(&self.server, self.root).await;
+                        for part in video_state.parts.iter_mut() {
+                            part.download
+                                .delete(&guard, &self.plex_server, self.root)
+                                .await;
+                        }
                     }
-                }
 
-                video_state.transcode_profile = selected_profile;
+                    video_state.transcode_profile = selected_profile;
+                }
             }
         }
 
@@ -964,130 +1066,143 @@ impl StateSync<'_> {
     }
 
     async fn fetch_collections(&mut self) -> Result {
-        let mut seen_collections: HashSet<String> = HashSet::new();
+        for library in self.plex_server.libraries() {
+            match library {
+                PlexLibrary::Movie(lib) => {
+                    let collections = lib.collections().await?;
+                    for collection in collections {
+                        let children = collection.children().await?;
 
-        for library in self.server.libraries() {
-            if self.server_state.libraries.contains_key(library.id()) {
-                match library {
-                    PlexLibrary::Movie(lib) => {
-                        let collections = lib.collections().await?;
-                        for collection in collections {
-                            let children = collection.children().await?;
+                        let available: Vec<String> = children
+                            .iter()
+                            .filter_map(|movie| {
+                                if self.seen_items.contains(movie.rating_key()) {
+                                    Some(movie.rating_key().to_owned())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
 
-                            let available: Vec<String> = children
-                                .iter()
-                                .filter_map(|movie| {
-                                    if self.server_state.videos.contains_key(movie.rating_key()) {
-                                        Some(movie.rating_key().to_owned())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
+                        if !available.is_empty() {
+                            self.seen_items.insert(collection.rating_key().to_owned());
 
-                            if !available.is_empty() {
-                                let collection_state = self
-                                    .server_state
-                                    .collections
-                                    .entry(collection.rating_key().to_owned())
-                                    .or_insert_with(|| CollectionState::from(&collection));
-                                collection_state.contents = available;
+                            let mut server_state = self.server_state().await;
+                            let collection_state = server_state
+                                .collections
+                                .entry(collection.rating_key().to_owned())
+                                .or_insert_with(|| CollectionState::from(&collection));
+                            collection_state.contents = available;
 
-                                collection_state.update(&collection, self.root).await;
-
-                                seen_collections.insert(collection_state.id.clone());
-                            }
+                            collection_state.update(&collection).await;
                         }
                     }
-                    PlexLibrary::TV(lib) => {
-                        let collections = lib.collections().await?;
-                        for collection in collections {
-                            let children = collection.children().await?;
-
-                            let available: Vec<String> = children
-                                .iter()
-                                .filter_map(|show| {
-                                    if self.server_state.shows.contains_key(show.rating_key()) {
-                                        Some(show.rating_key().to_owned())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-
-                            if !available.is_empty() {
-                                let collection_state = self
-                                    .server_state
-                                    .collections
-                                    .entry(collection.rating_key().to_owned())
-                                    .or_insert_with(|| CollectionState::from(&collection));
-                                collection_state.contents = available;
-
-                                collection_state.update(&collection, self.root).await;
-
-                                seen_collections.insert(collection_state.id.clone());
-                            }
-                        }
-                    }
-                    _ => {}
                 }
+                PlexLibrary::TV(lib) => {
+                    let collections = lib.collections().await?;
+                    for collection in collections {
+                        let children = collection.children().await?;
+
+                        let available: Vec<String> = children
+                            .iter()
+                            .filter_map(|show| {
+                                if self.seen_items.contains(show.rating_key()) {
+                                    Some(show.rating_key().to_owned())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+
+                        if !available.is_empty() {
+                            self.seen_items.insert(collection.rating_key().to_owned());
+
+                            let mut server_state = self.server_state().await;
+                            let collection_state = server_state
+                                .collections
+                                .entry(collection.rating_key().to_owned())
+                                .or_insert_with(|| CollectionState::from(&collection));
+                            collection_state.contents = available;
+
+                            collection_state.update(&collection).await;
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
-        for collection in self
-            .server_state
-            .collections
-            .values_mut()
-            .filter(|v| !seen_collections.contains(&v.id))
-        {
-            collection.delete(self.root).await;
+        Ok(())
+    }
+
+    async fn prune_map<V, F, P>(&mut self, mut mapper: F, mut pre_delete: P)
+    where
+        F: FnMut(&mut ServerState) -> &mut HashMap<String, V>,
+        P: AsyncFnMut(&mut V, &OpWriteGuard),
+        V: Clone,
+    {
+        let unseen_items: Vec<(String, V)> = {
+            let state = self.server_state().await;
+            let map = RwLockMappedWriteGuard::map(state, &mut mapper);
+
+            map.iter()
+                .filter_map(|(k, v)| {
+                    if self.seen_items.contains(k) {
+                        None
+                    } else {
+                        Some((k.clone(), v.clone()))
+                    }
+                })
+                .collect()
+        };
+
+        let mut items_to_delete = HashSet::new();
+        for (key, mut item) in unseen_items {
+            if let Ok(guard) = self.server.try_lock_write_key(&key).await {
+                pre_delete(&mut item, &guard).await;
+                items_to_delete.insert(key);
+            }
         }
 
-        self.server_state
-            .collections
-            .retain(|k, _v| seen_collections.contains(k));
-
-        Ok(())
+        let state = self.server_state().await;
+        let mut map = RwLockMappedWriteGuard::map(state, mapper);
+        map.retain(|k, _v| !items_to_delete.contains(k))
     }
 
     async fn prune_unseen(&mut self) -> Result {
         info!("Pruning old items");
 
-        for video in self
-            .server_state
-            .videos
-            .values_mut()
-            .filter(|v| !self.seen_items.contains(&v.id))
-        {
-            video.delete(&self.server, self.root).await;
-        }
+        let plex_server = self.plex_server.clone();
+        self.prune_map(
+            |ss| &mut ss.videos,
+            async |video, guard| video.delete(guard, &plex_server, self.root).await,
+        )
+        .await;
 
-        for show in self
-            .server_state
-            .shows
-            .values_mut()
-            .filter(|v| !self.seen_items.contains(&v.id))
-        {
-            show.delete(self.root).await;
-        }
+        self.prune_map(
+            |ss| &mut ss.shows,
+            async |show, guard| show.delete(guard, self.root).await,
+        )
+        .await;
 
-        self.server_state
-            .videos
-            .retain(|k, _v| self.seen_items.contains(k));
+        self.prune_map(
+            |ss| &mut ss.collections,
+            async |collection, guard| collection.delete(guard, self.root).await,
+        )
+        .await;
 
-        self.server_state
+        self.server_state()
+            .await
             .playlists
             .retain(|k, _v| self.seen_items.contains(k));
 
-        self.server_state
-            .shows
-            .retain(|k, _v| self.seen_items.contains(k));
-
-        self.server_state
+        self.server_state()
+            .await
             .seasons
             .retain(|k, _v| self.seen_items.contains(k));
 
-        self.server_state
+        self.server_state()
+            .await
             .libraries
             .retain(|k, _v| self.seen_libraries.contains(k));
 
@@ -1095,7 +1210,7 @@ impl StateSync<'_> {
     }
 
     async fn add_item_by_key(&mut self, sync: &SyncItem, key: &str) -> Result {
-        match self.server.item_by_id(key).await {
+        match self.plex_server.item_by_id(key).await {
             Ok(i) => self.add_item(sync, i).await,
             Err(plex_api::Error::ItemNotFound) => {
                 warn!(item = key, "Sync item no longer appears to exist");
@@ -1105,40 +1220,63 @@ impl StateSync<'_> {
         }
     }
 
-    #[async_recursion]
+    async fn add_show_contents(&mut self, sync_item: &SyncItem, show: &Show) -> Result {
+        self.add_show(show).await?;
+
+        for season in show.seasons().await? {
+            self.add_season(&season).await?;
+
+            for episode in season.episodes().await? {
+                self.add_episode(sync_item, &episode).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn add_episode_with_parents(
+        &mut self,
+        sync_item: &SyncItem,
+        episode: &Episode,
+    ) -> Result {
+        let season = episode.season().await?.ok_or_else(|| {
+            Error::ItemIncomplete(
+                episode.rating_key().to_owned(),
+                "season was missing".to_string(),
+            )
+        })?;
+
+        let show = season.show().await?.ok_or_else(|| {
+            Error::ItemIncomplete(
+                season.rating_key().to_owned(),
+                "show was missing".to_string(),
+            )
+        })?;
+        self.add_show(&show).await?;
+
+        self.add_season(&season).await?;
+
+        self.add_episode(sync_item, episode).await
+    }
+
     #[instrument(level = "trace", skip(self, sync, item), fields(item = item.rating_key()))]
     async fn add_item(&mut self, sync: &SyncItem, item: Item) -> Result {
         match item {
             Item::Movie(movie) => self.add_movie(sync, &movie).await,
 
-            Item::Show(show) => {
+            Item::Show(show) => self.add_show_contents(sync, &show).await,
+
+            Item::Season(season) => {
+                let show = season.show().await?.ok_or_else(|| {
+                    Error::ItemIncomplete(
+                        season.rating_key().to_owned(),
+                        "show was missing".to_string(),
+                    )
+                })?;
+
                 self.add_show(&show).await?;
 
-                for season in show.seasons().await? {
-                    self.add_season(&season)?;
-
-                    for episode in season.episodes().await? {
-                        self.add_episode(sync, &episode).await?;
-                    }
-                }
-
-                Ok(())
-            }
-            Item::Season(season) => {
-                if !self
-                    .seen_items
-                    .contains(season.metadata().parent.parent_rating_key.as_ref().unwrap())
-                {
-                    let show = season.show().await?.ok_or_else(|| {
-                        Error::ItemIncomplete(
-                            season.rating_key().to_owned(),
-                            "show was missing".to_string(),
-                        )
-                    })?;
-                    self.add_show(&show).await?;
-                }
-
-                self.add_season(&season)?;
+                self.add_season(&season).await?;
 
                 for episode in season.episodes().await? {
                     self.add_episode(sync, &episode).await?;
@@ -1146,71 +1284,27 @@ impl StateSync<'_> {
 
                 Ok(())
             }
-            Item::Episode(episode) => {
-                if !self.seen_items.contains(
-                    episode
-                        .metadata()
-                        .parent
-                        .parent_rating_key
-                        .as_ref()
-                        .unwrap(),
-                ) {
-                    let season = episode.season().await?.ok_or_else(|| {
-                        Error::ItemIncomplete(
-                            episode.rating_key().to_owned(),
-                            "season was missing".to_string(),
-                        )
-                    })?;
 
-                    if !self
-                        .seen_items
-                        .contains(season.metadata().parent.parent_rating_key.as_ref().unwrap())
-                    {
-                        let show = season.show().await?.ok_or_else(|| {
-                            Error::ItemIncomplete(
-                                season.rating_key().to_owned(),
-                                "show was missing".to_string(),
-                            )
-                        })?;
-                        self.add_show(&show).await?;
-                    }
-
-                    self.add_season(&season)?;
-                }
-
-                self.add_episode(sync, &episode).await
-            }
+            Item::Episode(episode) => self.add_episode_with_parents(sync, &episode).await,
 
             Item::MovieCollection(collection) => {
-                let mut items = HashSet::new();
                 let movies = collection.children().await?;
                 for movie in movies {
-                    let key = movie.rating_key().to_owned();
-                    match self.add_item(sync, Item::Movie(movie)).await {
-                        Ok(()) => {
-                            items.insert(key);
-                        }
-                        Err(e) => warn!(error=?e, "Failed to update item"),
-                    }
+                    self.add_movie(sync, &movie).await?;
                 }
 
                 Ok(())
             }
+
             Item::ShowCollection(collection) => {
-                let mut items = HashSet::new();
                 let shows = collection.children().await?;
                 for show in shows {
-                    let key = show.rating_key().to_owned();
-                    match self.add_item(sync, Item::Show(show)).await {
-                        Ok(()) => {
-                            items.insert(key);
-                        }
-                        Err(e) => warn!(error=?e, "Failed to update item"),
-                    }
+                    self.add_show_contents(sync, &show).await?;
                 }
 
                 Ok(())
             }
+
             Item::VideoPlaylist(playlist) => {
                 let mut items = Vec::new();
                 let videos = playlist.children().await?;
@@ -1218,9 +1312,10 @@ impl StateSync<'_> {
                     let key = video.rating_key().to_owned();
                     let result = match video {
                         Video::Episode(episode) => {
-                            self.add_item(sync, Item::Episode(episode)).await
+                            self.add_episode_with_parents(sync, &episode).await
                         }
-                        Video::Movie(movie) => self.add_item(sync, Item::Movie(movie)).await,
+
+                        Video::Movie(movie) => self.add_movie(sync, &movie).await,
                     };
 
                     match result {
@@ -1231,7 +1326,7 @@ impl StateSync<'_> {
                     }
                 }
 
-                self.add_playlist(&playlist, items)
+                self.add_playlist(&playlist, items).await
             }
             _ => Err(Error::ItemNotSupported(item.rating_key().to_owned())),
         }

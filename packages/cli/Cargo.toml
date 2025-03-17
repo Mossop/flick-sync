@@ -42,7 +42,6 @@ file-format = { version = "0.26.0", features = [
   "reader-id3v2",
 ] }
 image = "0.25.5"
-pathdiff = "0.2.3"
 pin-project = "1.1.10"
 rust-embed = "8.6.0"
 openssl = { version = "0.10", features = ["vendored"], optional = true }
@@ -52,3 +51,5 @@ actix-web = { version = "4.9.0", default-features = false, features = [
   "compat",
 ] }
 rinja = "0.3.5"
+regex = "1.11.1"
+lazy_static = "1.4.0"

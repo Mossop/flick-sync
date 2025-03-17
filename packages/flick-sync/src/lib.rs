@@ -1,6 +1,7 @@
 #![deny(unreachable_pub)]
 use std::{
     collections::{HashMap, HashSet},
+    io::ErrorKind,
     ops::Deref,
     path::{Path, PathBuf},
     sync::Arc,
@@ -11,27 +12,31 @@ mod error;
 mod schema;
 mod server;
 mod state;
+mod sync;
 mod util;
 mod wrappers;
 
-pub use config::ServerConnection;
 use config::{Config, ServerConfig, TranscodeProfile};
-pub use error::Error;
 use lazy_static::lazy_static;
 pub use plex_api;
 use plex_api::{HttpClient, HttpClientBuilder, transcode::VideoTranscodeOptions};
 use serde_json::to_string_pretty;
-pub use server::{ItemType, Server, SyncItemInfo};
-pub use state::LibraryType;
 use state::{ServerState, State};
 use tokio::{
     fs::{read_dir, remove_dir_all, remove_file, write},
-    sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, Semaphore},
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-pub use wrappers::*;
 
+pub use crate::{
+    config::ServerConnection,
+    error::Error,
+    server::{DownloadProgress, ItemType, Progress, Server, SyncItemInfo},
+    state::LibraryType,
+    sync::{LockedFile, LockedFileAsyncRead, LockedFileRead, Timeout},
+    wrappers::*,
+};
 use crate::{
     config::{H264Profile, OutputStyle},
     schema::MigratableStore,
@@ -81,8 +86,9 @@ lazy_static! {
 struct Inner {
     config: RwLock<Config>,
     state: RwLock<State>,
-    path: RwLock<PathBuf>,
+    path: PathBuf,
     servers: Mutex<HashMap<String, Server>>,
+    download_permits: Arc<Semaphore>,
 }
 
 impl Inner {
@@ -111,19 +117,15 @@ impl Inner {
     }
 
     async fn persist_config(&self, config: &RwLockWriteGuard<'_, Config>) -> Result {
-        let path = self.path.read().await;
-
         let str = to_string_pretty(&config.deref())?;
-        write(path.join(CONFIG_FILE), str).await?;
+        write(self.path.join(CONFIG_FILE), str).await?;
 
         Ok(())
     }
 
     async fn persist_state(&self, state: &RwLockWriteGuard<'_, State>) -> Result {
-        let path = self.path.read().await;
-
         let str = to_string_pretty(&state.deref())?;
-        write(path.join(STATE_FILE), str).await?;
+        write(self.path.join(STATE_FILE), str).await?;
 
         Ok(())
     }
@@ -155,27 +157,23 @@ impl FlickSync {
         self.inner.state.read().await.client_id
     }
 
-    pub async fn max_downloads(&self) -> usize {
-        let config = self.inner.config.read().await;
-        config.max_downloads.unwrap_or(2)
-    }
-
     pub async fn new(path: &Path) -> Result<Self> {
         let config = Config::read_or_default(&path.join(CONFIG_FILE)).await?;
         let state = State::read_or_default(&path.join(STATE_FILE)).await?;
 
         Ok(Self {
             inner: Arc::new(Inner {
+                download_permits: Arc::new(Semaphore::new(config.max_downloads.unwrap_or(2))),
                 config: RwLock::new(config),
                 state: RwLock::new(state),
-                path: RwLock::new(path.to_owned()),
+                path: path.to_owned(),
                 servers: Default::default(),
             }),
         })
     }
 
-    pub async fn root(&self) -> PathBuf {
-        self.inner.path.read().await.clone()
+    pub fn root(&self) -> &Path {
+        &self.inner.path
     }
 
     /// Adds a new server
@@ -226,14 +224,12 @@ impl FlickSync {
         }
 
         let config = self.inner.config.read().await;
-        if config.servers.contains_key(id) {
-            let server = Server::new(id, &self.inner);
-            servers.insert(id.to_owned(), server.clone());
+        let server_config = config.servers.get(id)?;
 
-            Some(server)
-        } else {
-            None
-        }
+        let server = Server::new(id, &self.inner, server_config);
+        servers.insert(id.to_owned(), server.clone());
+
+        Some(server)
     }
 
     pub async fn servers(&self) -> Vec<Server> {
@@ -242,10 +238,10 @@ impl FlickSync {
         let config = self.inner.config.read().await;
         config
             .servers
-            .keys()
-            .map(|id| {
+            .iter()
+            .map(|(id, server_config)| {
                 servers.get(id).cloned().unwrap_or_else(|| {
-                    let server = Server::new(id, &self.inner);
+                    let server = Server::new(id, &self.inner, server_config);
                     servers.insert(id.to_owned(), server.clone());
                     server
                 })
@@ -256,13 +252,11 @@ impl FlickSync {
     pub async fn prune_root(&self) {
         info!("Pruning root filesystem");
 
-        let servers: HashSet<String> = {
-            let config: RwLockReadGuard<'_, Config> = self.inner.config.read().await;
+        let config: RwLockReadGuard<'_, Config> = self.inner.config.read().await;
 
-            config.servers.keys().cloned().collect()
-        };
+        let servers: HashSet<String> = config.servers.keys().cloned().collect();
 
-        let root = self.inner.path.write().await;
+        let root = self.inner.path.clone();
 
         let mut reader = match read_dir(root.as_path()).await {
             Ok(reader) => reader,
@@ -299,7 +293,9 @@ impl FlickSync {
                                         debug!(path = %path.display(), "Deleted unknown file");
                                     }
                                     Err(e) => {
-                                        tracing::error!(error=?e, path=%path.display(), "Failed to delete unknown file");
+                                        if e.kind() != ErrorKind::NotFound {
+                                            error!(error=?e, path=%path.display(), "Failed to delete unknown file");
+                                        }
                                     }
                                 }
                             }

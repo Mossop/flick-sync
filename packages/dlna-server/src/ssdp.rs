@@ -721,7 +721,7 @@ impl SsdpTask {
                             return;
                         }
                         _ => {
-                            error!(error=%e, kind=?e.kind(), is_ipv4, "Failed to build multicast receiver socket");
+                            info!(error=%e, kind=?e.kind(), is_ipv4, "Failed to build multicast receiver socket");
                             time::sleep(Duration::from_secs(10)).await;
 
                             continue;

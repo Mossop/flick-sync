@@ -121,7 +121,7 @@ pub async fn select_servers(flick_sync: &FlickSync, ids: &Vec<String>) -> Result
 #[clap(author, version)]
 struct Args {
     /// The storage location to use.
-    #[clap(short, long, env)]
+    #[clap(short, long, env = "FLICK_SYNC_STORE")]
     store: Option<PathBuf>,
 
     #[clap(subcommand)]
