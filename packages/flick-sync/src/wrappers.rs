@@ -173,6 +173,8 @@ macro_rules! thumbnail_methods {
 
                 let image = if let Some(ref thumb) = item.metadata().thumb {
                     thumb.clone()
+                } else if let Some(ref composite) = item.metadata().composite {
+                    composite.clone()
                 } else {
                     warn!("No thumbnail found for {}", item.title());
                     return Ok(());
@@ -1629,6 +1631,8 @@ state_wrapper!(Playlist, PlaylistState, playlists);
 wrapper_builders!(Playlist, PlaylistState);
 
 impl Playlist {
+    thumbnail_methods!();
+
     pub async fn videos(&self) -> Vec<Video> {
         self.with_server_state(|ss| {
             let ps = ss.playlists.get(&self.id).unwrap();
@@ -1657,9 +1661,13 @@ impl Playlist {
                 _ => unreachable!("Invalid file type for Playlist"),
             };
 
-            PathBuf::from(safe(&self.server.id))
-                .join("Playlists")
-                .join(safe(&name))
+            let mut root = PathBuf::from(safe(&self.server.id));
+
+            if output_standardized {
+                root = root.join("Playlists");
+            }
+
+            root.join(safe(&name))
         })
         .await
     }

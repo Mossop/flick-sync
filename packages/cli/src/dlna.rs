@@ -429,18 +429,13 @@ impl ToObject for Playlist {
     type Children = Video;
 
     async fn to_object(self) -> Object {
+        let id = format!("{}/P:{}", self.server().id(), self.id());
         Object::Container(Container {
-            id: format!("{}/P:{}", self.server().id(), self.id()),
+            thumbnail: icon_resource(&id, self.thumbnail().await).await,
+            id,
             parent_id: "P".to_string(),
             child_count: Some(self.videos().await.len()),
             title: self.title().await,
-            thumbnail: Some(Icon {
-                id: "resource/media-256.png".to_string(),
-                mime_type: mime::IMAGE_PNG,
-                width: 256,
-                height: 256,
-                depth: 32,
-            }),
         })
     }
 
@@ -994,6 +989,7 @@ impl DlnaRequestHandler for DlnaHandler {
             };
 
             let Ok(Some(thumbnail)) = (match item_type {
+                "P" => Playlist::from_id(server, item_id).await?.thumbnail().await,
                 "C" => {
                     Collection::from_id(server, item_id)
                         .await?

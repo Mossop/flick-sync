@@ -12,7 +12,7 @@ use plex_api::{
     transcode::TranscodeStatus,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Number, Value};
 use tempfile::NamedTempFile;
 use time::{Date, OffsetDateTime};
 use tokio::{fs, process::Command};
@@ -26,7 +26,7 @@ use crate::{
     sync::{OpReadGuard, OpWriteGuard},
 };
 
-const SCHEMA_VERSION: u64 = 2;
+const SCHEMA_VERSION: u64 = 3;
 
 async fn remove_file(path: &Path) {
     if let Err(e) = fs::remove_file(path).await {
@@ -202,6 +202,11 @@ pub(crate) struct PlaylistState {
     pub(crate) id: String,
     pub(crate) title: String,
     pub(crate) videos: Vec<String>,
+    #[serde(with = "time::serde::timestamp")]
+    #[typeshare(serialized_as = "number")]
+    pub(crate) last_updated: OffsetDateTime,
+    #[serde(default)]
+    pub(crate) thumbnail: RelatedFileState,
 }
 
 impl PlaylistState {
@@ -209,12 +214,18 @@ impl PlaylistState {
         Self {
             id: playlist.rating_key().to_owned(),
             title: playlist.title().to_owned(),
+            last_updated: playlist.metadata().updated_at.unwrap(),
             videos: Default::default(),
+            thumbnail: RelatedFileState::None,
         }
     }
 
     pub(crate) fn update<T>(&mut self, playlist: &Playlist<T>) {
         self.title = playlist.title().to_owned();
+
+        if let Some(updated) = playlist.metadata().updated_at {
+            self.last_updated = updated;
+        }
     }
 }
 
@@ -1035,6 +1046,23 @@ impl State {
 
         Ok(())
     }
+
+    fn migrate_v2(data: &mut JsonObject) -> Result {
+        for playlist in data
+            .prop("servers")
+            .values()
+            .prop("playlists")
+            .values()
+            .as_object()
+        {
+            playlist.insert(
+                "lastUpdated".to_string(),
+                Value::Number(Number::from_u128(0).unwrap()),
+            );
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for State {
@@ -1071,6 +1099,10 @@ impl MigratableStore for State {
 
         if version < 2 {
             Self::migrate_v1(data)?;
+        }
+
+        if version < 3 {
+            Self::migrate_v2(data)?;
         }
 
         data.insert("schema".to_string(), SCHEMA_VERSION.into());

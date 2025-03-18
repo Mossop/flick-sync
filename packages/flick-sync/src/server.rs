@@ -616,6 +616,12 @@ impl Server {
     async fn update_thumbnails(&self, rebuild: bool) {
         info!("Updating thumbnails");
 
+        for playlist in self.playlists().await {
+            if let Err(e) = playlist.update_thumbnail(rebuild).await {
+                warn!(error=?e);
+            }
+        }
+
         for library in self.libraries().await {
             for collection in library.collections().await {
                 if let Err(e) = collection.update_thumbnail(rebuild).await {
@@ -768,6 +774,12 @@ impl Server {
             Some(s) => s,
             None => return Ok(()),
         };
+
+        for playlist in server_state.playlists.values() {
+            if let Some(file) = playlist.thumbnail.path() {
+                expected_files.insert(self.inner.path.join(file));
+            }
+        }
 
         for collection in server_state.collections.values() {
             if let Some(file) = collection.thumbnail.path() {
