@@ -48,6 +48,7 @@ pub(super) async fn resources(path: Path<String>) -> Result<HttpResponse, Error>
     let mime = match path.rsplit_once('.') {
         Some((_, "js")) => mime::APPLICATION_JAVASCRIPT,
         Some((_, "css")) => mime::TEXT_CSS,
+        Some((_, "svg")) => mime::IMAGE_SVG,
         _ => mime::APPLICATION_OCTET_STREAM,
     };
 
