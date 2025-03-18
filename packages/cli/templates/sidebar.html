@@ -5,9 +5,9 @@
 <body class="sidebar" hx-target="#content" hx-select="#content">
   <sl-split-panel position-in-pixels="250" primary="start">
     <div slot="start" id="sidebar" hx-boost="true">
-      <a class="sidebar-item" href="/" ><sl-icon name="bookmark"></sl-icon> On Deck</a>
+      <a class="sidebar-item link-item" href="/" ><sl-icon name="bookmark"></sl-icon> On Deck</a>
       {% for library in sidebar.libraries %}
-        <a class="sidebar-item" href="/library/{{ library.server }}/{{ library.id }}">
+        <a class="sidebar-item link-item link-prefix" href="/library/{{ library.server }}/{{ library.id }}">
           {% if library.library_type == LibraryType::Movie %}
             <sl-icon name="film"></sl-icon>
           {% else %}
@@ -17,9 +17,9 @@
         </a>
       {% endfor %}
       {% for playlist in sidebar.playlists %}
-        <a class="sidebar-item" href="/playlist/{{ playlist.server }}/{{ playlist.id }}" ><sl-icon name="music-note-list"></sl-icon> {{ playlist.title }}</a>
+        <a class="sidebar-item link-item link-prefix" href="/playlist/{{ playlist.server }}/{{ playlist.id }}" ><sl-icon name="music-note-list"></sl-icon> {{ playlist.title }}</a>
       {% endfor %}
-      <a id="sync-item" class="sidebar-item" href="/sync"><sl-icon name="arrow-repeat"></sl-icon> Syncing</a>
+      <a id="sync-item" class="sidebar-item link-item" href="/sync"><sl-icon name="arrow-repeat"></sl-icon> Syncing</a>
     </div>
 {% endif %}
     <div slot="end" id="content" hx-history-elt>

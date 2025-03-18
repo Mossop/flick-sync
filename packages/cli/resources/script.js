@@ -1,14 +1,19 @@
-function updateSidebar() {
+function updateLinks(event) {
   let uri = new URL(document.documentURI);
   let currentPath = uri.pathname;
+  console.log(event.type, currentPath);
 
-  for (let link of document.querySelectorAll(".sidebar-item")) {
-    let isSelected;
+  for (let link of document.querySelectorAll(".link-item")) {
+    let href = link.getAttribute("href");
 
-    if (link.getAttribute("href") == "/") {
-      isSelected = currentPath == "/";
-    } else {
-      isSelected = currentPath.startsWith(link.getAttribute("href"));
+    let isSelected = currentPath == href;
+
+    if (!isSelected && link.classList.contains("link-prefix")) {
+      if (!href.endsWith("/")) {
+        href += "/";
+      }
+
+      isSelected = currentPath.startsWith(href);
     }
 
     if (isSelected) {
@@ -19,10 +24,12 @@ function updateSidebar() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", updateSidebar);
+document.addEventListener("DOMContentLoaded", updateLinks);
 
-htmx.on("htmx:historyRestore", updateSidebar);
+htmx.on("htmx:historyRestore", updateLinks);
 
-htmx.on("htmx:pushedIntoHistory", updateSidebar);
+htmx.on("htmx:pushedIntoHistory", updateLinks);
 
-htmx.on("htmx:replacedIntoHistory", updateSidebar);
+htmx.on("htmx:replacedIntoHistory", updateLinks);
+
+htmx.on("htmx:afterSwap", updateLinks);

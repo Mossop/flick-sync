@@ -3,5 +3,15 @@
 {% block title %}{{ title }}{% endblock %}
 
 {% block content %}
-  <p>{{ title }}</p>
+{% if has_collections %}
+  <div class="tab-group" hx-boost="true" hx-target="#tab-panel" hx-select="#tab-panel">
+    <a class="link-item" href="{{ browse_url }}">Browse</a>
+    <a class="link-item" href="{{ collection_url }}">Collections</a>
+  </div>
+  <div id="tab-panel">
+{% endif %}
+  {% include "grid.html" %}
+{% if has_collections %}
+  </div>
+{% endif %}
 {% endblock %}

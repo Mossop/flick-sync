@@ -1864,6 +1864,34 @@ pub enum Collection {
 }
 
 impl Collection {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Movie(c) => c.id(),
+            Self::Show(c) => c.id(),
+        }
+    }
+
+    pub fn server(&self) -> Server {
+        match self {
+            Self::Movie(c) => c.server(),
+            Self::Show(c) => c.server(),
+        }
+    }
+
+    pub async fn library(&self) -> Library {
+        match self {
+            Self::Movie(c) => Library::Movie(c.library().await),
+            Self::Show(c) => Library::Show(c.library().await),
+        }
+    }
+
+    pub async fn title(&self) -> String {
+        match self {
+            Self::Movie(c) => c.title().await,
+            Self::Show(c) => c.title().await,
+        }
+    }
+
     pub async fn thumbnail(&self) -> result::Result<Option<LockedFile>, Timeout> {
         match self {
             Self::Movie(c) => c.thumbnail().await,
