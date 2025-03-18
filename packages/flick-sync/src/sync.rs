@@ -102,23 +102,8 @@ impl Drop for OpWriteGuard {
 
 pub(crate) struct OpReadGuard {
     key: String,
+    #[expect(unused)]
     guard: OwnedRwLockReadGuard<()>,
-}
-
-impl OpReadGuard {
-    pub(crate) async fn try_clone(&self) -> Result<Self, Timeout> {
-        let lock = OwnedRwLockReadGuard::rwlock(&self.guard);
-
-        attempt(lock.clone().read_owned())
-            .await
-            .map(|guard| OpReadGuard {
-                key: self.key.clone(),
-                guard,
-            })
-            .inspect_err(|_| {
-                trace!(key = self.key, "Timed out acquiring read lock");
-            })
-    }
 }
 
 impl Drop for OpReadGuard {
@@ -153,7 +138,7 @@ impl LockedFile {
 
     pub async fn try_clone(&self) -> Result<Self, Timeout> {
         Ok(Self {
-            guard: self.guard.try_clone().await?,
+            guard: OpMutex::try_lock_read_key(self.guard.key.clone()).await?,
             path: self.path.clone(),
         })
     }

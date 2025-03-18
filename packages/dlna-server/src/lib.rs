@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
 use mime::Mime;
+pub use services::DlnaServiceFactory;
 pub use upnp::{Container, Icon, Item, Object, Resource, UpnpError};
 use uuid::Uuid;
 
@@ -16,7 +17,6 @@ use crate::{
     services::HttpAppData,
     ssdp::Ssdp,
 };
-pub use services::DlnaServiceFactory;
 
 /// The default port to use for HTTP communication
 const DEFAULT_HTTP_PORT: u16 = 1980;
