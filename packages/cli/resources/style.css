@@ -110,3 +110,16 @@ body.sidebar sl-split-panel {
     white-space: nowrap;
   }
 }
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 4s infinite linear;
+}

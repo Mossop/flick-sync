@@ -45,7 +45,7 @@ image = "0.25.5"
 pin-project = "1.1.10"
 rust-embed = "8.6.0"
 openssl = { version = "0.10", features = ["vendored"], optional = true }
-tokio-stream = { version = "0.1.17", features = ["signal"] }
+tokio-stream = { version = "0.1.17", features = ["signal", "sync"] }
 actix-web = { version = "4.9.0", default-features = false, features = [
   "macros",
   "compat",

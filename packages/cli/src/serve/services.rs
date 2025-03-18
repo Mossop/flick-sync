@@ -8,12 +8,15 @@ use actix_web::{
     http::header,
     web::{Path, ThinData},
 };
+use bytes::Bytes;
 use flick_sync::{Collection, FlickSync, Library, LibraryType, Show, Video};
+use futures::TryStreamExt;
 use rinja::Template;
-use tokio::io::BufReader;
+use tokio::{io::BufReader, sync::broadcast::Sender};
+use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
 
-use crate::{EmbeddedFileStream, Resources, error::Error};
+use crate::{EmbeddedFileStream, Resources, error::Error, serve::Event};
 
 struct HxTarget(Option<String>);
 
@@ -415,6 +418,19 @@ pub(super) async fn playlist_list(
     };
 
     render(template)
+}
+
+#[get("/events")]
+pub(super) async fn events(ThinData(event_sender): ThinData<Sender<Event>>) -> HttpResponse {
+    let receiver = event_sender.subscribe();
+
+    let event_stream = BroadcastStream::new(receiver)
+        .and_then(async |event| Ok(event.to_string().await))
+        .map_ok(Bytes::from_owner);
+
+    HttpResponse::Ok()
+        .append_header(header::ContentType(mime::TEXT_EVENT_STREAM))
+        .streaming(event_stream)
 }
 
 #[get("/")]

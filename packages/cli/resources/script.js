@@ -1,7 +1,6 @@
 function updateLinks(event) {
   let uri = new URL(document.documentURI);
   let currentPath = uri.pathname;
-  console.log(event.type, currentPath);
 
   for (let link of document.querySelectorAll(".link-item")) {
     let href = link.getAttribute("href");
