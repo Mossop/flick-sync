@@ -1734,10 +1734,13 @@ impl MovieCollection {
                 _ => unreachable!("Invalid file type for MovieCollection"),
             };
 
-            PathBuf::from(safe(&self.server.id))
-                .join(safe(library_title))
-                .join("Collections")
-                .join(safe(&name))
+            let mut root = PathBuf::from(safe(&self.server.id)).join(safe(library_title));
+
+            if output_standardized {
+                root = root.join("Collections");
+            }
+
+            root.join(safe(&name))
         })
         .await
     }
@@ -1808,10 +1811,13 @@ impl ShowCollection {
                 _ => unreachable!("Invalid file type for ShowCollection"),
             };
 
-            PathBuf::from(safe(&self.server.id))
-                .join(safe(library_title))
-                .join("Collections")
-                .join(safe(&name))
+            let mut root = PathBuf::from(safe(&self.server.id)).join(safe(library_title));
+
+            if output_standardized {
+                root = root.join("Collections");
+            }
+
+            root.join(safe(&name))
         })
         .await
     }
