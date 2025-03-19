@@ -9,7 +9,7 @@
     {% endfor %}
   </div>
 
-  <div id="progress-bars" hx-target="#progress-bars" sse-swap="sync-progress">
+  <div id="progress-bars" hx-target="#progress-bars" sse-swap="sync-progress" hx-swap="morph:innerHTML">
     {% for progress in progress_bars %}
       {{ progress|safe }}
     {% endfor %}

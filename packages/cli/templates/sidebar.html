@@ -2,7 +2,7 @@
 
 {% block body %}
 {% if let Some(sidebar) = sidebar %}
-<body hx-ext="sse" sse-connect="/events" class="sidebar" hx-target="#content" hx-select="#content">
+<body hx-ext="sse,morph" sse-connect="/events" class="sidebar" hx-target="#content" hx-select="#content">
   <sl-split-panel position-in-pixels="250" primary="start">
     <div slot="start" id="sidebar" hx-boost="true">
       <a class="sidebar-item link-item" href="/" ><sl-icon name="bookmark"></sl-icon> On Deck</a>
@@ -22,9 +22,9 @@
       <a id="sync-item" class="sidebar-item link-item" href="/sync">
         <div id="sync-throbber" hx-target="#sync-throbber" sse-swap="sync-status">
           {% if sidebar.is_syncing %}
-            <sl-icon class="spin" name="arrow-repeat"></sl-icon> Syncing
+            <sl-icon id="spinner" class="spinning" name="arrow-repeat"></sl-icon> Syncing
           {% else %}
-            <sl-icon name="arrow-repeat"></sl-icon> Syncs
+            <sl-icon id="spinner" class="paused" name="arrow-repeat"></sl-icon> Status
           {% endif %}
         </div>
       </a>

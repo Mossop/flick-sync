@@ -129,8 +129,12 @@ body.sidebar sl-split-panel {
   }
 }
 
-.spin {
-  animation: spin 4s infinite linear;
+#spinner {
+  animation: spin 1s infinite linear paused;
+
+  &.spinning {
+    animation-play-state: running
+  }
 }
 
 #sync-log {

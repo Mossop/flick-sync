@@ -8,7 +8,7 @@
     {{ video }}...
   </p>
   {% if let Some(length) = length %}
-    <sl-progress-bar value="{{ (position * 100) / length }}">
+    <sl-progress-bar id="{{ id }}" value="{{ (position * 100) / length }}">
       {% if is_download %}
         <sl-format-bytes value="{{ position }}"></sl-format-bytes> / <sl-format-bytes value="{{ length }}"></sl-format-bytes>
       {% else %}

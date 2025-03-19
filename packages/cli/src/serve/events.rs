@@ -21,10 +21,14 @@ impl Event {
 
     pub async fn event_data(&self) -> Result<String, rinja::Error> {
         match self {
-            Self::SyncStart => {
-                Ok(r#"<sl-icon class="spin" name="arrow-repeat"></sl-icon> Syncing"#.to_string())
-            }
-            Self::SyncEnd => Ok(r#"<sl-icon name="arrow-repeat"></sl-icon> Syncs"#.to_string()),
+            Self::SyncStart => Ok(
+                r#"<sl-icon id="spinner" class="spinning" name="arrow-repeat"></sl-icon> Syncing"#
+                    .to_string(),
+            ),
+            Self::SyncEnd => Ok(
+                r#"<sl-icon id="spinner" class="paused" name="arrow-repeat"></sl-icon> Status"#
+                    .to_string(),
+            ),
             Self::Log(message) => message.template().await.render(),
             Self::Progress(bars) => {
                 let mut lines = Vec::new();
@@ -155,6 +159,7 @@ impl SyncLog {
 #[derive(Template)]
 #[template(path = "progressbar.html")]
 pub(crate) struct ProgressBarTemplate {
+    id: String,
     is_download: bool,
     video: String,
     position: u64,
@@ -172,6 +177,7 @@ pub(crate) struct SyncProgressBar {
 impl SyncProgressBar {
     pub(crate) async fn template(&self) -> ProgressBarTemplate {
         ProgressBarTemplate {
+            id: self.video_part.id().to_owned(),
             is_download: self.is_download,
             video: self.video_part.video().await.title().await,
             position: self.position,
