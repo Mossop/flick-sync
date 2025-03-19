@@ -10,7 +10,7 @@ use std::{
 
 use actix_web::{
     Error, FromRequest, HttpMessage, HttpRequest, HttpResponse, Responder, Scope,
-    body::BoxBody,
+    body::{BoxBody, SizedStream},
     dev::{AppService, HttpServiceFactory, ServiceRequest, ServiceResponse},
     get,
     http::header::{self, HeaderMap, HeaderName, HeaderValue},
@@ -218,13 +218,14 @@ pub(crate) async fn icon<H: DlnaRequestHandler>(
         Ok(stream_result) => {
             let mut builder = HttpResponse::Ok();
 
-            if let Some(length) = stream_result.resource_size {
-                builder.append_header(header::ContentLength(length as usize));
-            }
-
             builder.append_header(header::ContentType(stream_result.mime_type));
 
-            builder.streaming(stream_result.stream)
+            if let Some(length) = stream_result.resource_size {
+                builder.append_header(header::ContentLength(length as usize));
+                builder.body(SizedStream::new(length, stream_result.stream))
+            } else {
+                builder.streaming(stream_result.stream)
+            }
         }
         Err(err) => {
             let status = err.status_code();
@@ -298,30 +299,28 @@ pub(crate) async fn resource_get<H: DlnaRequestHandler>(
         .await
     {
         Ok(stream_result) => {
-            let mut builder = if let Some(range) = stream_result.range {
+            let (mut builder, length) = if let Some(range) = stream_result.range {
                 let mut builder = HttpResponse::PartialContent();
-
-                builder.append_header(header::ContentLength(range.length as usize));
 
                 builder.append_header(header::ContentRange(header::ContentRangeSpec::Bytes {
                     range: Some((range.start, range.length + range.start - 1)),
                     instance_length: stream_result.resource_size,
                 }));
 
-                builder
+                (builder, Some(range.length))
             } else {
-                let mut builder = HttpResponse::Ok();
-
-                if let Some(length) = stream_result.resource_size {
-                    builder.append_header(header::ContentLength(length as usize));
-                }
-
-                builder
+                (HttpResponse::Ok(), stream_result.resource_size)
             };
 
             builder.append_header(header::ContentType(stream_result.mime_type));
 
-            builder.streaming(stream_result.stream)
+            if let Some(length) = length {
+                builder.append_header(header::ContentLength(length as usize));
+
+                builder.body(SizedStream::new(length, stream_result.stream))
+            } else {
+                builder.streaming(stream_result.stream)
+            }
         }
         Err(err) => {
             let status = err.status_code();

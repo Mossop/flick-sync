@@ -5,7 +5,9 @@ use std::{
 };
 
 use actix_web::{
-    FromRequest, HttpResponse, get,
+    FromRequest, HttpResponse,
+    body::SizedStream,
+    get,
     http::header,
     web::{Data, Path, ThinData},
 };
@@ -120,7 +122,10 @@ pub(super) async fn resources(path: Path<String>) -> Result<HttpResponse, Error>
     Ok(HttpResponse::Ok()
         .append_header(header::ContentLength(file.data.len()))
         .append_header(header::ContentType(mime))
-        .streaming(EmbeddedFileStream::new(file)))
+        .body(SizedStream::new(
+            file.data.len() as u64,
+            EmbeddedFileStream::new(file),
+        )))
 }
 
 #[get("/thumbnail/{server}/{type}/{id}")]
@@ -170,18 +175,25 @@ pub(super) async fn thumbnail(
         return Ok(HttpResponse::NotFound().finish());
     };
 
-    let mut response = HttpResponse::Ok();
-    if let Ok(size) = file.len().await {
-        response.append_header(header::ContentLength(size as usize));
-    }
+    let size = file.len().await;
 
     let Ok(reader) = file.async_read().await else {
         return Ok(HttpResponse::NotFound().finish());
     };
 
-    Ok(response
-        .append_header(header::ContentType(mime::IMAGE_JPEG))
-        .streaming(ReaderStream::new(BufReader::new(reader))))
+    let mut response = HttpResponse::Ok();
+
+    response.append_header(header::ContentType(mime::IMAGE_JPEG));
+
+    if let Ok(size) = size {
+        response.append_header(header::ContentLength(size as usize));
+        Ok(response.body(SizedStream::new(
+            size,
+            ReaderStream::new(BufReader::new(reader)),
+        )))
+    } else {
+        Ok(response.streaming(ReaderStream::new(BufReader::new(reader))))
+    }
 }
 
 #[derive(Debug)]

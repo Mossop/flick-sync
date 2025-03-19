@@ -163,6 +163,11 @@ where
             o => o,
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = (self.limit - self.seen_bytes) as usize;
+        (len, Some(len))
+    }
 }
 
 #[pin_project(project = EitherProj)]

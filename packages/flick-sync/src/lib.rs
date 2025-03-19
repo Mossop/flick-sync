@@ -65,6 +65,7 @@ lazy_static! {
                     H264Profile::Main,
                     H264Profile::High,
                 ]),
+                h264_level: Some("51".to_string()),
                 containers: Some(vec![ContainerFormat::Mp4]),
                 ..Default::default()
             }),
@@ -72,14 +73,15 @@ lazy_static! {
         map.insert(
             "1080p".to_string(),
             Some(TranscodeProfile {
-                bitrate: Some(8000),
-                dimensions: Some((1920, 1920)),
+                bitrate: Some(10000),
+                dimensions: Some((1920, 1080)),
                 audio_channels: Some(2),
                 h264_profiles: Some(vec![
                     H264Profile::Baseline,
                     H264Profile::Main,
                     H264Profile::High,
                 ]),
+                h264_level: Some("51".to_string()),
                 containers: Some(vec![ContainerFormat::Mp4]),
                 ..Default::default()
             }),
