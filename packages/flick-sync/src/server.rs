@@ -253,13 +253,17 @@ impl Server {
     }
 
     pub async fn update_connection(&self, auth_token: &str, server: plex_api::Server) -> Result {
+        let mut connection = self.connection.lock().await;
         let mut state = self.inner.state.write().await;
 
         let server_state = state.servers.entry(self.id.to_owned()).or_default();
         server_state.token = auth_token.to_owned();
         server_state.name = server.media_container.friendly_name;
 
-        self.inner.persist_state(&state).await
+        self.inner.persist_state(&state).await?;
+        *connection = None;
+
+        Ok(())
     }
 
     pub async fn name(&self) -> String {

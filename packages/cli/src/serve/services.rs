@@ -10,7 +10,7 @@ use actix_web::{
     web::{Data, Path, ThinData},
 };
 use bytes::Bytes;
-use flick_sync::{Collection, FlickSync, Library, LibraryType, Show, Video};
+use flick_sync::{Collection, FlickSync, Library, LibraryType, Season, Show, Video};
 use futures::TryStreamExt;
 use rinja::Template;
 use tokio::{io::BufReader, sync::broadcast::Sender};
@@ -279,12 +279,34 @@ impl PartialOrd for Thumbnail {
 }
 
 impl Thumbnail {
+    async fn from_season(season: Season) -> Self {
+        let server = season.server();
+        let show = season.show().await;
+        let library = show.library().await;
+
+        Self {
+            url: format!(
+                "/library/{}/{}/season/{}",
+                server.id(),
+                library.id(),
+                season.id()
+            ),
+            image: format!("/thumbnail/{}/show/{}", server.id(), show.id()),
+            name: season.title().await,
+        }
+    }
+
     async fn from_show(show: Show) -> Self {
         let server = show.server();
         let library = show.library().await;
 
         Self {
-            url: format!("/library/{}/{}/{}", server.id(), library.id(), show.id()),
+            url: format!(
+                "/library/{}/{}/show/{}",
+                server.id(),
+                library.id(),
+                show.id()
+            ),
             image: format!("/thumbnail/{}/show/{}", server.id(), show.id()),
             name: show.title().await,
         }
@@ -295,7 +317,12 @@ impl Thumbnail {
         let library = video.library().await;
 
         Self {
-            url: format!("/library/{}/{}/{}", server.id(), library.id(), video.id()),
+            url: format!(
+                "/library/{}/{}/video/{}",
+                server.id(),
+                library.id(),
+                video.id()
+            ),
             image: format!("/thumbnail/{}/video/{}", server.id(), video.id()),
             name: video.title().await,
         }
@@ -329,8 +356,16 @@ struct LibraryTemplate<'a> {
     items: Vec<Thumbnail>,
 }
 
+#[derive(Template)]
+#[template(path = "list.html")]
+struct ListTemplate {
+    sidebar: Option<Sidebar>,
+    title: String,
+    items: Vec<Thumbnail>,
+}
+
 #[get("/library/{server}/{id}")]
-pub(super) async fn library_list(
+pub(super) async fn library_contents(
     ThinData(flick_sync): ThinData<FlickSync>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
@@ -396,7 +431,7 @@ pub(super) async fn library_list(
 }
 
 #[get("/library/{server}/{id}/collections")]
-pub(super) async fn collection_list(
+pub(super) async fn library_collections(
     ThinData(flick_sync): ThinData<FlickSync>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
@@ -439,8 +474,134 @@ pub(super) async fn collection_list(
     render(template)
 }
 
+#[get("/library/{server}/{library_id}/collection/{collection_id}")]
+pub(super) async fn collection_contents(
+    ThinData(flick_sync): ThinData<FlickSync>,
+    status: Data<Mutex<SyncStatus>>,
+    HxTarget(target): HxTarget,
+    path: Path<(String, String, String)>,
+) -> Result<HttpResponse, Error> {
+    let (server_id, _, collection_id) = path.into_inner();
+
+    let Some(server) = flick_sync.server(&server_id).await else {
+        return Ok(HttpResponse::NotFound().finish());
+    };
+
+    let Some(collection) = server.collection(&collection_id).await else {
+        return Ok(HttpResponse::NotFound().finish());
+    };
+
+    let sidebar = if target.is_some() {
+        None
+    } else {
+        Some(Sidebar::build(&flick_sync, &status).await)
+    };
+
+    let mut thumbs = Vec::new();
+    match collection {
+        Collection::Movie(ref c) => {
+            for movie in c.movies().await {
+                thumbs.push(Thumbnail::from_video(Video::Movie(movie)).await);
+            }
+        }
+        Collection::Show(ref c) => {
+            for show in c.shows().await {
+                thumbs.push(Thumbnail::from_show(show).await);
+            }
+        }
+    };
+
+    thumbs.sort();
+
+    let template = ListTemplate {
+        sidebar,
+        title: collection.title().await,
+        items: thumbs,
+    };
+
+    render(template)
+}
+
+#[get("/library/{server}/{library_id}/show/{collection_id}")]
+pub(super) async fn show_contents(
+    ThinData(flick_sync): ThinData<FlickSync>,
+    status: Data<Mutex<SyncStatus>>,
+    HxTarget(target): HxTarget,
+    path: Path<(String, String, String)>,
+) -> Result<HttpResponse, Error> {
+    let (server_id, _, show_id) = path.into_inner();
+
+    let Some(server) = flick_sync.server(&server_id).await else {
+        return Ok(HttpResponse::NotFound().finish());
+    };
+
+    let Some(show) = server.show(&show_id).await else {
+        return Ok(HttpResponse::NotFound().finish());
+    };
+
+    let sidebar = if target.is_some() {
+        None
+    } else {
+        Some(Sidebar::build(&flick_sync, &status).await)
+    };
+
+    let mut thumbs = Vec::new();
+    for season in show.seasons().await {
+        thumbs.push(Thumbnail::from_season(season).await);
+    }
+
+    let template = ListTemplate {
+        sidebar,
+        title: show.title().await,
+        items: thumbs,
+    };
+
+    render(template)
+}
+
+#[get("/library/{server}/{library_id}/season/{collection_id}")]
+pub(super) async fn season_contents(
+    ThinData(flick_sync): ThinData<FlickSync>,
+    status: Data<Mutex<SyncStatus>>,
+    HxTarget(target): HxTarget,
+    path: Path<(String, String, String)>,
+) -> Result<HttpResponse, Error> {
+    let (server_id, _, season_id) = path.into_inner();
+
+    let Some(server) = flick_sync.server(&server_id).await else {
+        return Ok(HttpResponse::NotFound().finish());
+    };
+
+    let Some(season) = server.season(&season_id).await else {
+        return Ok(HttpResponse::NotFound().finish());
+    };
+
+    let sidebar = if target.is_some() {
+        None
+    } else {
+        Some(Sidebar::build(&flick_sync, &status).await)
+    };
+
+    let mut thumbs = Vec::new();
+    for episode in season.episodes().await {
+        thumbs.push(Thumbnail::from_video(Video::Episode(episode)).await);
+    }
+
+    let template = ListTemplate {
+        sidebar,
+        title: format!(
+            "{} - {}",
+            season.show().await.title().await,
+            season.title().await
+        ),
+        items: thumbs,
+    };
+
+    render(template)
+}
+
 #[get("/playlist/{server}/{id}")]
-pub(super) async fn playlist_list(
+pub(super) async fn playlist_contents(
     ThinData(flick_sync): ThinData<FlickSync>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
@@ -484,6 +645,46 @@ pub(super) async fn playlist_list(
     render(template)
 }
 
+#[get("/library/{server}/{library_id}/video/{video_id}")]
+pub(super) async fn video_page(
+    ThinData(flick_sync): ThinData<FlickSync>,
+    status: Data<Mutex<SyncStatus>>,
+    HxTarget(target): HxTarget,
+    path: Path<(String, String, String)>,
+) -> Result<HttpResponse, Error> {
+    let (server_id, _, video_id) = path.into_inner();
+
+    let Some(server) = flick_sync.server(&server_id).await else {
+        return Ok(HttpResponse::NotFound().finish());
+    };
+
+    let Some(video) = server.video(&video_id).await else {
+        return Ok(HttpResponse::NotFound().finish());
+    };
+
+    let sidebar = if target.is_some() {
+        None
+    } else {
+        Some(Sidebar::build(&flick_sync, &status).await)
+    };
+
+    #[derive(Template)]
+    #[template(path = "video.html")]
+    struct Video {
+        sidebar: Option<Sidebar>,
+        title: String,
+        video: String,
+    }
+
+    let template = Video {
+        sidebar,
+        title: video.title().await,
+        video: format!("/upnp/resource/video/{server_id}/VP:{}/0", video.id()),
+    };
+
+    render(template)
+}
+
 #[get("/events")]
 pub(super) async fn events(ThinData(event_sender): ThinData<Sender<Event>>) -> HttpResponse {
     let receiver = event_sender.subscribe();
@@ -498,7 +699,7 @@ pub(super) async fn events(ThinData(event_sender): ThinData<Sender<Event>>) -> H
 }
 
 #[get("/")]
-pub(super) async fn index(
+pub(super) async fn index_page(
     ThinData(flick_sync): ThinData<FlickSync>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,

@@ -1,0 +1,11 @@
+{% extends "sidebar.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+  <div id="video-container">
+    <video controls preload="auto">
+      <source src="{{ video }}" type="video/x-matroska">
+    </video>
+  </div>
+{% endblock %}
