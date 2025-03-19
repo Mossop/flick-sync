@@ -13,6 +13,7 @@ use futures::io::AsyncWrite;
 use pathdiff::diff_paths;
 use pin_project::pin_project;
 use plex_api::{
+    Server as PlexServer,
     library::{self, Item, MediaItem, MetadataItem},
     media_container::server::library::ContainerFormat,
     transcode::TranscodeStatus,
@@ -623,16 +624,15 @@ impl VideoPart {
     }
 
     #[instrument(level = "trace", skip(self), fields(video=self.id, part=self.index))]
-    pub(crate) async fn verify_download(&self) -> Result {
+    pub(crate) async fn verify_download(&self, plex_server: &PlexServer) -> Result {
         let Ok(guard) = self.try_lock_write().await else {
             return Ok(());
         };
 
-        let server = self.server.connect().await?;
         let mut download_state = self.download_state().await;
 
         download_state
-            .verify(&guard, &server, self, &self.server.inner.path)
+            .verify(&guard, plex_server, self, &self.server.inner.path)
             .await;
 
         self.update_state(|state| state.download = download_state)
@@ -685,7 +685,7 @@ impl VideoPart {
     }
 
     #[instrument(level = "trace", skip(self), fields(session_id, video=self.id, part=self.index))]
-    async fn start_transcode(&self) -> Result {
+    async fn start_transcode(&self, plex_server: &PlexServer) -> Result {
         let (media_id, profile) = self
             .with_video_state(|vs| (vs.media_id.clone(), vs.transcode_profile.clone()))
             .await;
@@ -705,8 +705,7 @@ impl VideoPart {
 
         let _permit = self.server.transcode_requests.acquire().await.unwrap();
 
-        let server = self.server.connect().await?;
-        let item = server.item_by_id(&self.id).await?;
+        let item = plex_server.item_by_id(&self.id).await?;
 
         let video = match item {
             Item::Movie(m) => library::Video::Movie(m),
@@ -773,9 +772,8 @@ impl VideoPart {
     }
 
     #[instrument(level = "trace", skip(self), fields(video=self.id, part=self.index))]
-    async fn enter_downloading_state(&self) -> Result {
-        let server = self.server.connect().await?;
-        let item = server.item_by_id(&self.id).await?;
+    async fn enter_downloading_state(&self, plex_server: &PlexServer) -> Result {
+        let item = plex_server.item_by_id(&self.id).await?;
 
         let media_id = self
             .with_server_state(|ss| {
@@ -812,11 +810,11 @@ impl VideoPart {
     #[instrument(level = "trace", skip(self, progress), fields(video=self.id, part=self.index))]
     async fn wait_for_transcode_to_complete<P: Progress>(
         &self,
+        plex_server: &PlexServer,
         session_id: &str,
         mut progress: P,
     ) -> Result {
-        let server = self.server.connect().await?;
-        let session = match server.transcode_session(session_id).await {
+        let session = match plex_server.transcode_session(session_id).await {
             Ok(session) => session,
             Err(plex_api::Error::ItemNotFound) => {
                 warn!("Server dropped transcode session");
@@ -882,17 +880,16 @@ impl VideoPart {
     }
 
     #[instrument(level = "trace", skip(guard), fields(video=self.id, part=self.index))]
-    async fn negotiate_transfer_type(&self, guard: &OpWriteGuard) -> Result {
+    async fn negotiate_transfer_type(
+        &self,
+        plex_server: &PlexServer,
+        guard: &OpWriteGuard,
+    ) -> Result {
         let mut download_state = self.download_state().await;
 
         if matches!(download_state, DownloadState::Transcoding { .. }) {
             download_state
-                .verify(
-                    guard,
-                    &self.server.connect().await?,
-                    self,
-                    &self.server.inner.path,
-                )
+                .verify(guard, plex_server, self, &self.server.inner.path)
                 .await;
 
             self.update_state(|state| state.download = download_state.clone())
@@ -900,7 +897,7 @@ impl VideoPart {
         }
 
         if matches!(download_state, DownloadState::None) {
-            match self.start_transcode().await {
+            match self.start_transcode(plex_server).await {
                 Err(Error::TranscodeSkipped) => (),
                 Err(Error::PlexError {
                     source: plex_api::Error::TranscodeRefused,
@@ -911,7 +908,7 @@ impl VideoPart {
                 }
             }
 
-            self.enter_downloading_state().await?;
+            self.enter_downloading_state(plex_server).await?;
         }
 
         Ok(())
@@ -920,6 +917,7 @@ impl VideoPart {
     #[instrument(level = "trace", skip(self, guard, path, progress), fields(video=self.id, part=self.index))]
     async fn download_direct<D: DownloadProgress>(
         &self,
+        plex_server: &PlexServer,
         guard: &OpWriteGuard,
         path: &Path,
         progress: &D,
@@ -936,8 +934,7 @@ impl VideoPart {
             }
         };
 
-        let server = self.server.connect().await?;
-        let item = server.item_by_id(&self.id).await?;
+        let item = plex_server.item_by_id(&self.id).await?;
 
         let media_id = self
             .with_server_state(|ss| {
@@ -1003,13 +1000,13 @@ impl VideoPart {
     #[instrument(level = "trace", skip(self, guard, path, progress), fields(video=self.id, part=self.index))]
     async fn download_transcode<D: DownloadProgress>(
         &self,
+        plex_server: &PlexServer,
         guard: &OpWriteGuard,
         session_id: &str,
         path: &Path,
         progress: &D,
     ) -> Result {
-        let server = self.server.connect().await?;
-        let session = server.transcode_session(session_id).await?;
+        let session = plex_server.transcode_session(session_id).await?;
         let status = session.status().await?;
         let stats = session.stats().await?;
 
@@ -1073,12 +1070,13 @@ impl VideoPart {
 
     pub(crate) async fn download<D: DownloadProgress>(
         self,
+        plex_server: PlexServer,
         progress: D,
         mut transcode_permit: Option<OwnedSemaphorePermit>,
         mut download_permit: Option<OwnedSemaphorePermit>,
-    ) {
+    ) -> bool {
         let Ok(guard) = self.try_lock_write().await else {
-            return;
+            return false;
         };
 
         loop {
@@ -1090,15 +1088,15 @@ impl VideoPart {
                         let Ok(permit) =
                             self.server.transcode_permits.clone().acquire_owned().await
                         else {
-                            return;
+                            return false;
                         };
 
                         transcode_permit.replace(permit);
                     }
 
-                    if let Err(e) = self.negotiate_transfer_type(&guard).await {
-                        error!(error=?e);
-                        return;
+                    if let Err(e) = self.negotiate_transfer_type(&plex_server, &guard).await {
+                        warn!(error=?e);
+                        return false;
                     }
                 }
                 DownloadState::Downloading { path } => {
@@ -1113,15 +1111,18 @@ impl VideoPart {
                             .acquire_owned()
                             .await
                         else {
-                            return;
+                            return false;
                         };
 
                         download_permit.replace(permit);
                     }
 
-                    if let Err(e) = self.download_direct(&guard, &path, &progress).await {
-                        error!(error=?e);
-                        return;
+                    if let Err(e) = self
+                        .download_direct(&plex_server, &guard, &path, &progress)
+                        .await
+                    {
+                        warn!(error=?e);
+                        return false;
                     }
                 }
                 DownloadState::Transcoding { session_id } => {
@@ -1131,7 +1132,7 @@ impl VideoPart {
                         let Ok(permit) =
                             self.server.transcode_permits.clone().acquire_owned().await
                         else {
-                            return;
+                            return false;
                         };
 
                         transcode_permit.replace(permit);
@@ -1140,11 +1141,15 @@ impl VideoPart {
                     let transcode_progress = progress.transcode_started(&self).await;
 
                     if let Err(e) = self
-                        .wait_for_transcode_to_complete(&session_id, transcode_progress)
+                        .wait_for_transcode_to_complete(
+                            &plex_server,
+                            &session_id,
+                            transcode_progress,
+                        )
                         .await
                     {
-                        error!(error=?e);
-                        return;
+                        warn!(error=?e);
+                        return false;
                     }
                 }
                 DownloadState::TranscodeDownloading { session_id, path } => {
@@ -1159,21 +1164,21 @@ impl VideoPart {
                             .acquire_owned()
                             .await
                         else {
-                            return;
+                            return false;
                         };
 
                         download_permit.replace(permit);
                     }
 
                     if let Err(e) = self
-                        .download_transcode(&guard, &session_id, &path, &progress)
+                        .download_transcode(&plex_server, &guard, &session_id, &path, &progress)
                         .await
                     {
-                        error!(error=?e);
-                        return;
+                        warn!(error=?e);
+                        return false;
                     }
                 }
-                DownloadState::Downloaded { .. } | DownloadState::Transcoded { .. } => return,
+                DownloadState::Downloaded { .. } | DownloadState::Transcoded { .. } => return true,
             }
         }
     }

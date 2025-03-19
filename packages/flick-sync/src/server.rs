@@ -1,4 +1,3 @@
-use core::ops::Deref;
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
@@ -410,8 +409,8 @@ impl Server {
     pub async fn connect(&self) -> Result<plex_api::Server> {
         let mut connection = self.connection.lock().await;
 
-        if let Some(api) = connection.deref() {
-            return Ok(api.clone());
+        if let Some(ref api) = *connection {
+            return Ok(api.clone().refresh().await?);
         }
 
         let config = self.inner.config.read().await;
@@ -706,11 +705,19 @@ impl Server {
     /// Verifies the presence of downloads for synced items.
     #[instrument(level = "trace", skip(self), fields(server = self.id))]
     pub async fn verify_downloads(&self) {
+        let plex_server = match self.connect().await {
+            Ok(ps) => ps,
+            Err(e) => {
+                warn!(error=%e, "Unable to connect to Plex");
+                return;
+            }
+        };
+
         info!("Verifying downloads");
 
         for video in self.videos().await {
             for part in video.parts().await {
-                if let Err(e) = part.verify_download().await {
+                if let Err(e) = part.verify_download(&plex_server).await {
                     warn!(error=?e);
                 }
             }
@@ -719,21 +726,30 @@ impl Server {
 
     /// Attempts to transcode and download all missing items.
     #[instrument(level = "trace", skip(self, progress), fields(server = self.id))]
-    pub async fn download<D>(&self, progress: D)
+    pub async fn download<D>(&self, progress: D) -> bool
     where
         D: DownloadProgress,
     {
+        let plex_server = match self.connect().await {
+            Ok(ps) => ps,
+            Err(e) => {
+                warn!(error=%e, "Unable to connect to Plex");
+                return false;
+            }
+        };
+
         let mut jobs = Vec::new();
 
         for video in self.videos().await {
             for part in video.parts().await {
-                if part.verify_download().await.is_err() {
+                if part.verify_download(&plex_server).await.is_err() {
                     continue;
                 }
 
                 match part.transfer_state().await {
                     TransferState::Transcoding => {
                         jobs.push(part.download(
+                            plex_server.clone(),
                             progress.clone(),
                             self.transcode_permits.clone().try_acquire_owned().ok(),
                             None,
@@ -741,20 +757,21 @@ impl Server {
                     }
                     TransferState::TranscodeDownloading | TransferState::Downloading => {
                         jobs.push(part.download(
+                            plex_server.clone(),
                             progress.clone(),
                             None,
                             self.inner.download_permits.clone().try_acquire_owned().ok(),
                         ));
                     }
                     TransferState::Waiting => {
-                        jobs.push(part.download(progress.clone(), None, None));
+                        jobs.push(part.download(plex_server.clone(), progress.clone(), None, None));
                     }
                     TransferState::Downloaded => {}
                 }
             }
         }
 
-        join_all(jobs).await;
+        join_all(jobs).await.into_iter().all(|r| r)
     }
 
     /// Verifies the presence of downloads for synced items.
