@@ -1,6 +1,6 @@
 use clap::Args;
 use flick_sync::{DownloadProgress, FlickSync, Progress, VideoPart};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::{
     Console, Result, Runnable,
@@ -63,7 +63,7 @@ impl Runnable for BuildMetadata {
 
 struct ProgressBar {
     bar: Bar,
-    total: u64,
+    total: Option<u64>,
 }
 
 impl Progress for ProgressBar {
@@ -71,8 +71,15 @@ impl Progress for ProgressBar {
         self.bar.set_position(position);
     }
 
-    fn finished(&mut self) {
-        self.bar.set_position(self.total);
+    fn length(&mut self, length: u64) {
+        self.total = Some(length);
+        self.bar.set_length(length);
+    }
+
+    fn finished(self) {
+        if let Some(length) = self.total {
+            self.bar.set_position(length);
+        }
     }
 }
 
@@ -88,19 +95,22 @@ impl DownloadProgress for ConsoleProgress {
         let bar = self
             .console
             .add_progress_bar(&format!("🔄 {title}"), ProgressType::Percent);
+        bar.set_length(100);
 
-        ProgressBar { bar, total: 100 }
+        ProgressBar {
+            bar,
+            total: Some(100),
+        }
     }
 
-    async fn download_started(&self, video_part: &VideoPart, total: u64) -> impl Progress {
+    async fn download_started(&self, video_part: &VideoPart) -> impl Progress {
         let title = video_part.video().await.title().await;
 
         let bar = self
             .console
             .add_progress_bar(&format!("💾 {title}"), ProgressType::Bytes);
-        bar.set_length(total);
 
-        ProgressBar { bar, total }
+        ProgressBar { bar, total: None }
     }
 }
 
@@ -132,7 +142,10 @@ impl Runnable for Sync {
 
             debug!(server = server.id(), "Starting transfer jobs");
 
-            server.download(progress.clone()).await;
+            if let Ok(false) = server.download(progress.clone()).await {
+                warn!("Some items are not yet downloaded");
+            }
+
             server.write_playlists().await;
         }
 

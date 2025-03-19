@@ -2,6 +2,7 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fmt,
+    future::ready,
     io::ErrorKind,
     path::{Path, PathBuf},
     result,
@@ -19,6 +20,7 @@ use plex_api::{
     },
     media_container::server::library::MetadataType,
 };
+use scoped_futures::{ScopedBoxFuture, ScopedFutureExt};
 use tokio::{
     fs::{read_dir, remove_dir, remove_dir_all, remove_file},
     sync::{Mutex, RwLockMappedWriteGuard, RwLockWriteGuard, Semaphore},
@@ -49,10 +51,14 @@ pub enum ItemType {
     Unknown,
 }
 
-pub trait Progress: Unpin {
+pub trait Progress: Unpin + Sized {
     fn progress(&mut self, position: u64);
 
-    fn finished(&mut self);
+    fn length(&mut self, length: u64);
+
+    fn finished(self) {}
+
+    fn failed(self, #[expect(unused)] error: Error) {}
 }
 
 pub trait DownloadProgress: Clone {
@@ -64,8 +70,15 @@ pub trait DownloadProgress: Clone {
     fn download_started(
         &self,
         video_part: &wrappers::VideoPart,
-        size: u64,
     ) -> impl Future<Output = impl Progress>;
+
+    fn download_failed(
+        &self,
+        #[expect(unused)] video_part: &wrappers::VideoPart,
+        #[expect(unused)] error: Error,
+    ) -> impl Future<Output = ()> {
+        ready(())
+    }
 }
 
 pub struct SyncItemInfo {
@@ -247,6 +260,11 @@ impl Server {
         server_state.name = server.media_container.friendly_name;
 
         self.inner.persist_state(&state).await
+    }
+
+    pub async fn name(&self) -> String {
+        let state = self.inner.state.read().await;
+        state.servers.get(&self.id).unwrap().name.clone()
     }
 
     pub async fn video(&self, id: &str) -> Option<wrappers::Video> {
@@ -531,7 +549,7 @@ impl Server {
     /// Updates the state for the synced items
     pub async fn update_state(&self) -> Result {
         info!("Updating item metadata");
-        let server = self.connect().await?;
+        let plex_server = self.connect().await?;
 
         {
             #[expect(unused)]
@@ -544,14 +562,14 @@ impl Server {
                 let mut state = self.inner.state.write().await;
 
                 let server_state = state.servers.entry(self.id.clone()).or_default();
-                server_state.name = server.media_container.friendly_name.clone();
+                server_state.name = plex_server.media_container.friendly_name.clone();
             }
 
             let mut state_sync = StateSync {
                 config: &config,
                 server_config,
                 server: self,
-                plex_server: server,
+                plex_server,
                 root: &self.inner.path,
                 seen_items: Default::default(),
                 seen_libraries: Default::default(),
@@ -560,7 +578,7 @@ impl Server {
 
             for item in server_config.syncs.values() {
                 if let Err(e) = state_sync.add_item_by_key(item, &item.id).await {
-                    warn!(item=item.id, error=?e, "Failed to update item. Aborting update.");
+                    warn!(item=item.id, error=?e, "Failed to update item. Skipping.");
                 }
             }
 
@@ -584,6 +602,10 @@ impl Server {
 
     /// Writes out the playlist files for playlists and collections
     pub async fn write_playlists(&self) {
+        if self.inner.output_style().await != OutputStyle::Standardized {
+            return;
+        }
+
         info!("Writing playlists");
 
         for collection in self.collections().await {
@@ -704,7 +726,7 @@ impl Server {
 
     /// Verifies the presence of downloads for synced items.
     #[instrument(level = "trace", skip(self), fields(server = self.id))]
-    pub async fn verify_downloads(&self) {
+    async fn verify_downloads(&self) {
         let plex_server = match self.connect().await {
             Ok(ps) => ps,
             Err(e) => {
@@ -726,15 +748,15 @@ impl Server {
 
     /// Attempts to transcode and download all missing items.
     #[instrument(level = "trace", skip(self, progress), fields(server = self.id))]
-    pub async fn download<D>(&self, progress: D) -> bool
+    pub async fn download<D>(&self, progress: D) -> Result<bool>
     where
         D: DownloadProgress,
     {
         let plex_server = match self.connect().await {
             Ok(ps) => ps,
             Err(e) => {
-                warn!(error=%e, "Unable to connect to Plex");
-                return false;
+                warn!(error=%e, "Unable to connect to plex server");
+                return Err(e);
             }
         };
 
@@ -742,10 +764,6 @@ impl Server {
 
         for video in self.videos().await {
             for part in video.parts().await {
-                if part.verify_download(&plex_server).await.is_err() {
-                    continue;
-                }
-
                 match part.transfer_state().await {
                     TransferState::Transcoding => {
                         jobs.push(part.download(
@@ -771,7 +789,7 @@ impl Server {
             }
         }
 
-        join_all(jobs).await.into_iter().all(|r| r)
+        Ok(join_all(jobs).await.into_iter().all(|r| r))
     }
 
     /// Verifies the presence of downloads for synced items.
@@ -1164,10 +1182,10 @@ impl StateSync<'_> {
         Ok(())
     }
 
-    async fn prune_map<V, F, P>(&mut self, mut mapper: F, mut pre_delete: P)
+    async fn prune_map<'a, V, M, P>(&mut self, mut mapper: M, mut pre_delete: P)
     where
-        F: FnMut(&mut ServerState) -> &mut HashMap<String, V>,
-        P: AsyncFnMut(&mut V, &OpWriteGuard),
+        M: FnMut(&mut ServerState) -> &mut HashMap<String, V>,
+        P: for<'b> FnMut(&'b mut V, &'b OpWriteGuard) -> ScopedBoxFuture<'a, 'b, ()> + Send,
         V: Clone,
     {
         let unseen_items: Vec<(String, V)> = {
@@ -1204,19 +1222,19 @@ impl StateSync<'_> {
         let plex_server = self.plex_server.clone();
         self.prune_map(
             |ss| &mut ss.videos,
-            async |video, guard| video.delete(guard, &plex_server, self.root).await,
+            |video, guard| video.delete(guard, &plex_server, self.root).scope_boxed(),
         )
         .await;
 
         self.prune_map(
             |ss| &mut ss.shows,
-            async |show, guard| show.delete(guard, self.root).await,
+            |show, guard| show.delete(guard, self.root).scope_boxed(),
         )
         .await;
 
         self.prune_map(
             |ss| &mut ss.collections,
-            async |collection, guard| collection.delete(guard, self.root).await,
+            |collection, guard| collection.delete(guard, self.root).scope_boxed(),
         )
         .await;
 

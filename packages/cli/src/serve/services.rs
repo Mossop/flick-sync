@@ -1,12 +1,13 @@
 use std::{
     cmp::Ordering,
     future::{Ready, ready},
+    sync::Mutex,
 };
 
 use actix_web::{
     FromRequest, HttpResponse, get,
     http::header,
-    web::{Path, ThinData},
+    web::{Data, Path, ThinData},
 };
 use bytes::Bytes;
 use flick_sync::{Collection, FlickSync, Library, LibraryType, Show, Video};
@@ -16,7 +17,14 @@ use tokio::{io::BufReader, sync::broadcast::Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
 
-use crate::{EmbeddedFileStream, Resources, error::Error, serve::Event};
+use crate::{
+    EmbeddedFileStream, Resources,
+    error::Error,
+    serve::{
+        Event, SyncStatus,
+        events::{ProgressBarTemplate, SyncLogTemplate, SyncProgressBar},
+    },
+};
 
 struct HxTarget(Option<String>);
 
@@ -45,6 +53,55 @@ fn render<T: Template>(template: T) -> Result<HttpResponse, Error> {
     Ok(HttpResponse::Ok()
         .append_header(header::ContentType(mime::TEXT_HTML))
         .body(template.render()?))
+}
+
+#[get("/sync")]
+pub(super) async fn sync_list(
+    ThinData(flick_sync): ThinData<FlickSync>,
+    status: Data<Mutex<SyncStatus>>,
+    HxTarget(target): HxTarget,
+) -> Result<HttpResponse, Error> {
+    let sidebar = if target.is_some() {
+        None
+    } else {
+        Some(Sidebar::build(&flick_sync, &status).await)
+    };
+
+    #[derive(Template)]
+    #[template(path = "sync.html")]
+    struct SyncTemplate {
+        sidebar: Option<Sidebar>,
+        log: Vec<SyncLogTemplate>,
+        progress_bars: Vec<ProgressBarTemplate>,
+    }
+
+    let mut template = SyncTemplate {
+        sidebar,
+        log: Vec::new(),
+        progress_bars: Vec::new(),
+    };
+
+    let (log, progress) = {
+        let status = status.lock().unwrap();
+        (
+            status.log.clone(),
+            status
+                .progress
+                .values()
+                .cloned()
+                .collect::<Vec<SyncProgressBar>>(),
+        )
+    };
+
+    for item in log {
+        template.log.push(item.template().await);
+    }
+
+    for item in progress {
+        template.progress_bars.push(item.template().await);
+    }
+
+    render(template)
 }
 
 #[get("/resources/{path:.*}")]
@@ -144,12 +201,15 @@ struct SidebarPlaylist {
 
 #[derive(Debug)]
 struct Sidebar {
+    is_syncing: bool,
     libraries: Vec<SidebarLibrary>,
     playlists: Vec<SidebarPlaylist>,
 }
 
 impl Sidebar {
-    async fn build(flick_sync: &FlickSync) -> Self {
+    async fn build(flick_sync: &FlickSync, status: &Mutex<SyncStatus>) -> Self {
+        let is_syncing = status.lock().unwrap().is_syncing;
+
         let mut libraries = Vec::new();
         let mut playlists = Vec::new();
 
@@ -173,6 +233,7 @@ impl Sidebar {
         }
 
         Self {
+            is_syncing,
             libraries,
             playlists,
         }
@@ -271,6 +332,7 @@ struct LibraryTemplate<'a> {
 #[get("/library/{server}/{id}")]
 pub(super) async fn library_list(
     ThinData(flick_sync): ThinData<FlickSync>,
+    status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
@@ -287,7 +349,7 @@ pub(super) async fn library_list(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&flick_sync).await)
+        Some(Sidebar::build(&flick_sync, &status).await)
     };
 
     let browse_url = format!("/library/{}/{}", server.id(), library.id());
@@ -336,6 +398,7 @@ pub(super) async fn library_list(
 #[get("/library/{server}/{id}/collections")]
 pub(super) async fn collection_list(
     ThinData(flick_sync): ThinData<FlickSync>,
+    status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
@@ -352,7 +415,7 @@ pub(super) async fn collection_list(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&flick_sync).await)
+        Some(Sidebar::build(&flick_sync, &status).await)
     };
 
     let browse_url = format!("/library/{}/{}", server.id(), library.id());
@@ -379,6 +442,7 @@ pub(super) async fn collection_list(
 #[get("/playlist/{server}/{id}")]
 pub(super) async fn playlist_list(
     ThinData(flick_sync): ThinData<FlickSync>,
+    status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
@@ -395,7 +459,7 @@ pub(super) async fn playlist_list(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&flick_sync).await)
+        Some(Sidebar::build(&flick_sync, &status).await)
     };
 
     #[derive(Template)]
@@ -425,7 +489,7 @@ pub(super) async fn events(ThinData(event_sender): ThinData<Sender<Event>>) -> H
     let receiver = event_sender.subscribe();
 
     let event_stream = BroadcastStream::new(receiver)
-        .and_then(async |event| Ok(event.to_string().await))
+        .try_filter_map(async |event| Ok(event.to_string().await))
         .map_ok(Bytes::from_owner);
 
     HttpResponse::Ok()
@@ -436,12 +500,13 @@ pub(super) async fn events(ThinData(event_sender): ThinData<Sender<Event>>) -> H
 #[get("/")]
 pub(super) async fn index(
     ThinData(flick_sync): ThinData<FlickSync>,
+    status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
 ) -> Result<HttpResponse, Error> {
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&flick_sync).await)
+        Some(Sidebar::build(&flick_sync, &status).await)
     };
 
     #[derive(Template, Debug)]

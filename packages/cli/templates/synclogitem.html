@@ -1,0 +1,13 @@
+{% if message_type == "success" %}
+<sl-alert variant="success" open>
+  <sl-icon slot="icon" name="check2-circle"></sl-icon> {{ message }}
+</sl-alert>
+{% elif message_type == "error" %}
+<sl-alert variant="danger" open>
+  <sl-icon slot="icon" name="exclamation-octagon"></sl-icon> {{ message }}
+</sl-alert>
+{% else %}
+<sl-alert variant="primary" open>
+  <sl-icon slot="icon" name="info-circle"></sl-icon> {{ message }}
+</sl-alert>
+{% endif %}

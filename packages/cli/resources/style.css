@@ -19,6 +19,7 @@ body.sidebar sl-split-panel {
 }
 
 #sidebar {
+  height: 100vh;
   display: flex;
   flex-direction: column;
   justify-content: start;
@@ -37,6 +38,13 @@ body.sidebar sl-split-panel {
     justify-content: start;
     align-items: center;
 
+    & > div {
+    display: flex;
+      flex-direction: row;
+      justify-content: start;
+      align-items: center;
+    }
+
     sl-icon {
       margin-inline-end: var(--sl-spacing-x-small);
     }
@@ -53,6 +61,7 @@ body.sidebar sl-split-panel {
 }
 
 #content {
+  height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -122,4 +131,38 @@ body.sidebar sl-split-panel {
 
 .spin {
   animation: spin 4s infinite linear;
+}
+
+#sync-log {
+  flex: 1;
+  overflow-y: auto;
+}
+
+#progress-bars {
+  padding-block: var(--sl-spacing-small);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: start;
+}
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: start;
+  padding-inline: var(--sl-spacing-large);
+  padding-block-start: var(--sl-spacing-small);
+
+  &:first-child {
+    border-top: 1px solid var(--sl-color-neutral-200);
+  }
+
+  p {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sl-spacing-small);
+    padding-block-end: var(--sl-spacing-small);
+  }
 }
