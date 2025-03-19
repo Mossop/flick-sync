@@ -3,7 +3,7 @@
 {% block title %}Syncing{% endblock %}
 
 {% block content %}
-  <div id="sync-log" hx-target="#sync-log" hx-swap="beforeend" sse-swap="sync-log">
+  <div id="sync-log" hx-target="#sync-log" hx-swap="beforeend scroll:bottom" sse-swap="sync-log">
     {% for item in log %}
       {{ item|safe }}
     {% endfor %}

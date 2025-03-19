@@ -19,7 +19,10 @@ mod wrappers;
 use config::{Config, ServerConfig, TranscodeProfile};
 use lazy_static::lazy_static;
 pub use plex_api;
-use plex_api::{HttpClient, HttpClientBuilder, transcode::VideoTranscodeOptions};
+use plex_api::{
+    HttpClient, HttpClientBuilder, media_container::server::library::ContainerFormat,
+    transcode::VideoTranscodeOptions,
+};
 use serde_json::to_string_pretty;
 use state::{ServerState, State};
 use tokio::{
@@ -54,7 +57,7 @@ lazy_static! {
         map.insert(
             "720p".to_string(),
             Some(TranscodeProfile {
-                bitrate: Some(2000),
+                bitrate: Some(4000),
                 dimensions: Some((1280, 720)),
                 audio_channels: Some(2),
                 h264_profiles: Some(vec![
@@ -62,20 +65,22 @@ lazy_static! {
                     H264Profile::Main,
                     H264Profile::High,
                 ]),
+                containers: Some(vec![ContainerFormat::Mp4]),
                 ..Default::default()
             }),
         );
         map.insert(
             "1080p".to_string(),
             Some(TranscodeProfile {
-                bitrate: Some(6000),
-                dimensions: Some((1920, 1080)),
+                bitrate: Some(8000),
+                dimensions: Some((1920, 1920)),
                 audio_channels: Some(2),
                 h264_profiles: Some(vec![
                     H264Profile::Baseline,
                     H264Profile::Main,
                     H264Profile::High,
                 ]),
+                containers: Some(vec![ContainerFormat::Mp4]),
                 ..Default::default()
             }),
         );

@@ -394,7 +394,9 @@ pub(super) async fn library_contents(
         Library::Movie(lib) => {
             let mut thumbs = Vec::new();
             for movie in lib.movies().await {
-                thumbs.push(Thumbnail::from_video(Video::Movie(movie)).await);
+                if movie.is_downloaded().await {
+                    thumbs.push(Thumbnail::from_video(Video::Movie(movie)).await);
+                }
             }
             thumbs.sort();
 
@@ -501,7 +503,9 @@ pub(super) async fn collection_contents(
     match collection {
         Collection::Movie(ref c) => {
             for movie in c.movies().await {
-                thumbs.push(Thumbnail::from_video(Video::Movie(movie)).await);
+                if movie.is_downloaded().await {
+                    thumbs.push(Thumbnail::from_video(Video::Movie(movie)).await);
+                }
             }
         }
         Collection::Show(ref c) => {
@@ -584,7 +588,9 @@ pub(super) async fn season_contents(
 
     let mut thumbs = Vec::new();
     for episode in season.episodes().await {
-        thumbs.push(Thumbnail::from_video(Video::Episode(episode)).await);
+        if episode.is_downloaded().await {
+            thumbs.push(Thumbnail::from_video(Video::Episode(episode)).await);
+        }
     }
 
     let template = ListTemplate {
@@ -633,7 +639,9 @@ pub(super) async fn playlist_contents(
 
     let mut items = Vec::new();
     for video in playlist.videos().await {
-        items.push(Thumbnail::from_video(video).await);
+        if video.is_downloaded().await {
+            items.push(Thumbnail::from_video(video).await);
+        }
     }
 
     let template = Playlist {

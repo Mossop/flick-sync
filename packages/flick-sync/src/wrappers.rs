@@ -623,7 +623,7 @@ impl VideoPart {
             .await)
     }
 
-    #[instrument(level = "trace", skip(self), fields(video=self.id, part=self.index))]
+    #[instrument(level = "trace", skip(self, plex_server), fields(video=self.id, part=self.index))]
     pub(crate) async fn verify_download(&self, plex_server: &PlexServer) -> Result {
         let Ok(guard) = self.try_lock_write().await else {
             return Ok(());
@@ -1359,6 +1359,16 @@ impl Episode {
         VideoStats::try_from(item, self.parts().await).await
     }
 
+    pub async fn is_downloaded(&self) -> bool {
+        for part in self.parts().await {
+            if !part.is_downloaded().await {
+                return false;
+            }
+        }
+
+        true
+    }
+
     pub async fn show(&self) -> Show {
         self.season().await.show().await
     }
@@ -1470,6 +1480,16 @@ impl Movie {
             Ok(())
         })
         .await
+    }
+
+    pub async fn is_downloaded(&self) -> bool {
+        for part in self.parts().await {
+            if !part.is_downloaded().await {
+                return false;
+            }
+        }
+
+        true
     }
 
     pub async fn stats(&self) -> Result<VideoStats> {
