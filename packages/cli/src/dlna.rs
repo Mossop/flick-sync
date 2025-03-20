@@ -29,7 +29,6 @@ use tracing::{Level, Span, field, instrument, span, warn};
 use crate::{
     Console, EmbeddedFileStream, Resources,
     console::{Bar, ProgressType},
-    error::Error,
 };
 
 lazy_static! {
@@ -1104,14 +1103,14 @@ pub(crate) async fn build_dlna(
     flick_sync: FlickSync,
     console: Console,
     port: u16,
-) -> Result<(DlnaServer, DlnaServiceFactory<DlnaHandler>), Error> {
+) -> anyhow::Result<(DlnaServer, DlnaServiceFactory<DlnaHandler>)> {
     let uuid = flick_sync.client_id().await;
     let handler = DlnaHandler {
         flick_sync,
         console,
     };
 
-    Ok(DlnaServer::builder(handler)
+    DlnaServer::builder(handler)
         .uuid(uuid)
         .http_port(port)
         .server_version(&format!(
@@ -1149,5 +1148,5 @@ pub(crate) async fn build_dlna(
             depth: 32,
         })
         .build_service()
-        .await?)
+        .await
 }

@@ -22,9 +22,8 @@ use tokio_stream::wrappers::SignalStream;
 use tracing::warn;
 
 use crate::{
-    Console, Runnable,
+    Console, Result, Runnable,
     dlna::build_dlna,
-    error::Error,
     serve::events::{Event, SyncLogItem, SyncLogMessage, SyncProgressBar},
 };
 
@@ -262,7 +261,7 @@ async fn background_task(
 }
 
 impl Runnable for Serve {
-    async fn run(self, flick_sync: FlickSync, console: Console) -> Result<(), Error> {
+    async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let port = self.port.unwrap_or(80);
 
         let (dlna_server, service_factory) = build_dlna(flick_sync.clone(), console, port).await?;

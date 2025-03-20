@@ -7,10 +7,10 @@ use std::{
     task::{Context, Poll},
 };
 
+use anyhow::{anyhow, bail};
 use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use enum_dispatch::enum_dispatch;
-use error::{Error, err};
 use flick_sync::{CONFIG_FILE, FlickSync, STATE_FILE, Server};
 use futures::Stream;
 use pin_project::pin_project;
@@ -21,7 +21,6 @@ use tracing::{error, trace};
 
 mod console;
 mod dlna;
-mod error;
 mod serve;
 mod server;
 mod sync;
@@ -33,7 +32,7 @@ use server::{Add, Login, Rebuild, Remove};
 use sync::BuildMetadata;
 use util::{List, Stats};
 
-pub type Result<T = ()> = std::result::Result<T, Error>;
+pub type Result<T = ()> = anyhow::Result<T>;
 
 #[pin_project]
 struct EmbeddedFileStream {
@@ -98,7 +97,10 @@ pub(crate) trait Runnable {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result;
 }
 
-pub async fn select_servers(flick_sync: &FlickSync, ids: &Vec<String>) -> Result<Vec<Server>> {
+pub async fn select_servers(
+    flick_sync: &FlickSync,
+    ids: &Vec<String>,
+) -> anyhow::Result<Vec<Server>> {
     if ids.is_empty() {
         Ok(flick_sync.servers().await)
     } else {
@@ -109,7 +111,7 @@ pub async fn select_servers(flick_sync: &FlickSync, ids: &Vec<String>) -> Result
                 flick_sync
                     .server(id)
                     .await
-                    .ok_or_else(|| Error::UnknownServer(id.clone()))?,
+                    .ok_or_else(|| anyhow!("Unknown server: {id}"))?,
             );
         }
 
@@ -135,11 +137,11 @@ async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf> {
     match metadata(&path).await {
         Ok(stats) => {
             if !stats.is_dir() {
-                return err(format!("Store {} is not a directory", path.display()));
+                bail!("Store {} is not a directory", path.display());
             }
         }
         Err(_) => {
-            return err(format!("Store {} is not a directory", path.display()));
+            bail!("Store {} is not a directory", path.display());
         }
     }
 
@@ -149,7 +151,7 @@ async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf> {
             trace!("Store contained config file");
             return Ok(path);
         } else {
-            return err("Store contained a non-file where a config file was expected");
+            bail!("Store contained a non-file where a config file was expected");
         }
     }
 
@@ -159,7 +161,7 @@ async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf> {
             trace!("Store contained state file");
             return Ok(path);
         } else {
-            return err("Store contained a non-file where a state file was expected");
+            bail!("Store contained a non-file where a state file was expected");
         }
     }
 
@@ -171,7 +173,7 @@ async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf> {
             Some(s) => s,
             None => {
                 error!("Store contained an entry with a non-UTF8 invalid name");
-                return err("New store is not empty");
+                bail!("New store is not empty");
             }
         };
 
@@ -179,11 +181,11 @@ async fn validate_store(store: Option<PathBuf>) -> Result<PathBuf> {
         if typ.is_file() {
             if name != CONFIG_FILE {
                 error!("{} exists in a potential new store", name);
-                return err("New store is not empty");
+                bail!("New store is not empty");
             }
         } else {
             error!("{} exists in a potential new store", name);
-            return err("New store is not empty");
+            bail!("New store is not empty");
         }
     }
 

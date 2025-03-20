@@ -1,3 +1,4 @@
+use anyhow::{anyhow, bail};
 use clap::Args;
 use flick_sync::{
     FlickSync, Server, ServerConnection,
@@ -10,7 +11,7 @@ use flick_sync::{
 use tracing::{error, warn};
 use url::Url;
 
-use crate::{Console, Error, Result, Runnable, error::err};
+use crate::{Console, Result, Runnable};
 
 #[derive(Args)]
 pub struct Login {
@@ -193,7 +194,7 @@ async fn create_server(args: Login, flick_sync: FlickSync, console: Console) -> 
             .collect();
 
         let device = if devices.is_empty() {
-            return err("No servers found in this account");
+            bail!("No servers found in this account");
         } else if devices.len() == 1 {
             &devices[0]
         } else {
@@ -252,7 +253,7 @@ pub struct Add {
 
 impl Runnable for Add {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
-        let unexpected = || Error::Generic("Unexpected URL format".to_string());
+        let unexpected = || anyhow!("Unexpected URL format");
 
         let url = Url::parse(&self.url)?;
         let fragment = url.fragment().ok_or_else(unexpected)?;
@@ -305,7 +306,7 @@ impl Runnable for Add {
                     | Item::MusicPlaylist(_)
                     | Item::UnknownItem(_)
             ) {
-                return Err(Error::UnsupportedType(item.title().to_owned()));
+                bail!("Unsupported type: {}", item.title());
             }
 
             console.println(format!(
@@ -321,7 +322,7 @@ impl Runnable for Add {
             return Ok(());
         }
 
-        Err(Error::Generic("No matching server found".to_string()))
+        Err(anyhow!("No matching server found"))
     }
 }
 
