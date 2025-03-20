@@ -34,13 +34,6 @@ async-trait = "0.1.87"
 mime = "0.3.17"
 bytes = "1.10.0"
 tokio-util = "0.7.13"
-file-format = { version = "0.26.0", features = [
-  "reader-asf",
-  "reader-ebml",
-  "reader-mp4",
-  "reader-rm",
-  "reader-id3v2",
-] }
 image = "0.25.5"
 pin-project = "1.1.10"
 rust-embed = "8.6.0"

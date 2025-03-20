@@ -29,3 +29,11 @@ tempfile = "3.17.1"
 pathdiff = "0.2.3"
 tokio-util = "0.7.13"
 scoped-futures = "0.1.4"
+mime = "0.3.17"
+file-format = { version = "0.26.0", features = [
+  "reader-asf",
+  "reader-ebml",
+  "reader-mp4",
+  "reader-rm",
+  "reader-id3v2",
+] }

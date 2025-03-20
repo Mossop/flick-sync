@@ -12,7 +12,6 @@ use dlna_server::{
     Container, DlnaContext, DlnaRequestHandler, DlnaServer, DlnaServiceFactory, Icon, Item, Object,
     Range, Resource, StreamResponse, UpnpError,
 };
-use file_format::FileFormat;
 use flick_sync::{
     Collection, FlickSync, Library, LockedFile, LockedFileAsyncRead, MovieCollection, MovieLibrary,
     Playlist, Season, Server, Show, ShowCollection, ShowLibrary, Timeout, Video, VideoPart,
@@ -58,27 +57,15 @@ where
     F: AsyncFnOnce(BufReader<LockedFileAsyncRead>) -> (Option<Range>, S),
     S: Stream<Item = Result<Bytes, io::Error>>,
 {
-    let Ok(async_file) = file.try_clone().await else {
+    let Ok(mime_type) = file.mime_type().await else {
         return Err(UpnpError::unknown_object());
     };
 
-    let Ok(reader) = file.read() else {
+    let Ok(size) = file.len().await else {
         return Err(UpnpError::unknown_object());
     };
 
-    let Ok(format) = FileFormat::from_reader(io::BufReader::new(reader)) else {
-        return Err(UpnpError::unknown_object());
-    };
-
-    let Ok(mime_type) = Mime::from_str(format.media_type()) else {
-        return Err(UpnpError::unknown_object());
-    };
-
-    let Ok(size) = async_file.len().await else {
-        return Err(UpnpError::unknown_object());
-    };
-
-    let Ok(async_reader) = async_file.async_read().await else {
+    let Ok(async_reader) = file.async_read().await else {
         return Err(UpnpError::unknown_object());
     };
 
@@ -251,10 +238,7 @@ async fn file_resource(
     let file = file.ok()??;
     let size = file.len().await.ok()?;
 
-    let reader = io::BufReader::new(file.read().ok()?);
-
-    let format = FileFormat::from_reader(reader).ok()?;
-    let mime_type = Mime::from_str(format.media_type()).ok()?;
+    let mime_type = file.mime_type().await.ok()?;
     let video = video_part.video().await;
 
     Some(Resource {
@@ -1041,15 +1025,7 @@ impl DlnaRequestHandler for DlnaHandler {
             return Err(UpnpError::unknown_object());
         };
 
-        let Ok(reader) = file.read() else {
-            return Err(UpnpError::unknown_object());
-        };
-
-        let Ok(format) = FileFormat::from_reader(io::BufReader::new(reader)) else {
-            return Err(UpnpError::unknown_object());
-        };
-
-        let Ok(mime_type) = Mime::from_str(format.media_type()) else {
+        let Ok(mime_type) = file.mime_type().await else {
             return Err(UpnpError::unknown_object());
         };
 

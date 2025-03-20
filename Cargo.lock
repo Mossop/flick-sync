@@ -1086,8 +1086,10 @@ name = "flick-sync"
 version = "1.6.0"
 dependencies = [
  "async-recursion",
+ "file-format",
  "futures",
  "lazy_static",
+ "mime",
  "pathdiff",
  "pin-project",
  "plex-api",
@@ -1119,7 +1121,6 @@ dependencies = [
  "dialoguer",
  "dlna-server",
  "enum_dispatch",
- "file-format",
  "flick-sync",
  "futures",
  "image",

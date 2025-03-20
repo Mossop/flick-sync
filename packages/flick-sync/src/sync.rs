@@ -5,12 +5,15 @@ use std::{
     path::PathBuf,
     pin::Pin,
     result,
+    str::FromStr,
     sync::{Arc, Mutex as StdMutex},
     task::{Context, Poll},
     time::Duration,
 };
 
+use file_format::FileFormat;
 use lazy_static::lazy_static;
+use mime::Mime;
 use pin_project::pin_project;
 use tokio::{
     fs,
@@ -62,7 +65,7 @@ impl OpMutex {
             .await
             .map(|guard| OpReadGuard {
                 key: key.clone(),
-                guard,
+                guard: Arc::new(guard),
             })
             .inspect_err(|_| {
                 trace!(key, "Timed out acquiring read lock");
@@ -100,10 +103,11 @@ impl Drop for OpWriteGuard {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct OpReadGuard {
     key: String,
     #[expect(unused)]
-    guard: OwnedRwLockReadGuard<()>,
+    guard: Arc<OwnedRwLockReadGuard<()>>,
 }
 
 impl Drop for OpReadGuard {
@@ -119,6 +123,7 @@ impl Drop for OpReadGuard {
     }
 }
 
+#[derive(Clone)]
 pub struct LockedFile {
     guard: OpReadGuard,
     path: PathBuf,
@@ -136,11 +141,12 @@ impl LockedFile {
         self.path.file_stem().unwrap().to_str().unwrap()
     }
 
-    pub async fn try_clone(&self) -> Result<Self, Timeout> {
-        Ok(Self {
-            guard: OpMutex::try_lock_read_key(self.guard.key.clone()).await?,
-            path: self.path.clone(),
-        })
+    pub async fn mime_type(&self) -> result::Result<Mime, io::Error> {
+        let reader = self.clone().read()?;
+
+        let format = FileFormat::from_reader(io::BufReader::new(reader))?;
+
+        Ok(Mime::from_str(format.media_type()).unwrap())
     }
 
     pub async fn len(&self) -> result::Result<u64, io::Error> {
