@@ -12,8 +12,6 @@ use serde_json::{Map, Value, from_str, from_value, to_string_pretty};
 use tokio::fs::{read_to_string, write};
 use tracing::error;
 
-use crate::Error;
-
 pub(crate) type JsonObject = Map<String, Value>;
 
 #[derive(Default, Clone, Debug)]
@@ -47,9 +45,9 @@ impl<const V: u64> Serialize for SchemaVersion<V> {
 }
 
 pub(crate) trait MigratableStore: Serialize + DeserializeOwned + Default {
-    fn migrate(data: &mut JsonObject) -> Result<bool, Error>;
+    fn migrate(data: &mut JsonObject) -> anyhow::Result<bool>;
 
-    async fn read_or_default(path: &Path) -> Result<Self, Error> {
+    async fn read_or_default(path: &Path) -> anyhow::Result<Self> {
         let str = match read_to_string(path).await {
             Ok(s) => s,
             Err(e) => {

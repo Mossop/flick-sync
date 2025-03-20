@@ -103,7 +103,7 @@ impl Progress for SyncProgress {
         }
     }
 
-    fn failed(self, error: flick_sync::Error) {
+    fn failed(self, error: anyhow::Error) {
         self.task.remove_progress(&self);
 
         if self.is_download {
@@ -190,7 +190,7 @@ impl SyncTask {
         self.log(SyncLogMessage::SyncStarted(server));
     }
 
-    fn sync_failed(&self, server: Server, error: flick_sync::Error) {
+    fn sync_failed(&self, server: Server, error: anyhow::Error) {
         self.log(SyncLogMessage::SyncFailed((server, error.to_string())));
     }
 
@@ -212,7 +212,7 @@ impl DownloadProgress for SyncTask {
         SyncProgress::new(self.clone(), video_part.clone(), true)
     }
 
-    async fn download_failed(&self, video_part: &VideoPart, error: flick_sync::Error) {
+    async fn download_failed(&self, video_part: &VideoPart, error: anyhow::Error) {
         self.log(SyncLogMessage::DownloadFailed((
             video_part.clone(),
             error.to_string(),

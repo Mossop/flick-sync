@@ -9,6 +9,7 @@ use std::{
     sync::Arc,
 };
 
+use anyhow::{anyhow, bail};
 use async_recursion::async_recursion;
 use futures::future::join_all;
 use plex_api::{
@@ -28,7 +29,7 @@ use tokio::{
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
-    DEFAULT_PROFILES, Error, FileType, Inner, Library, OutputStyle, Result, ServerConnection,
+    DEFAULT_PROFILES, FileType, Inner, Library, OutputStyle, Result, ServerConnection,
     TransferState,
     config::{Config, ServerConfig, SyncItem, TranscodeProfile},
     state::{
@@ -58,7 +59,7 @@ pub trait Progress: Unpin + Sized {
 
     fn finished(self) {}
 
-    fn failed(self, #[expect(unused)] error: Error) {}
+    fn failed(self, #[expect(unused)] error: anyhow::Error) {}
 }
 
 pub trait DownloadProgress: Clone {
@@ -75,7 +76,7 @@ pub trait DownloadProgress: Clone {
     fn download_failed(
         &self,
         #[expect(unused)] video_part: &wrappers::VideoPart,
-        #[expect(unused)] error: Error,
+        #[expect(unused)] error: anyhow::Error,
     ) -> impl Future<Output = ()> {
         ready(())
     }
@@ -449,7 +450,7 @@ impl Server {
                 let token = state
                     .servers
                     .get(&self.id)
-                    .ok_or_else(|| Error::ServerNotAuthenticated)?
+                    .ok_or_else(|| anyhow!("No longer authenticated."))?
                     .token
                     .clone();
 
@@ -471,7 +472,7 @@ impl Server {
                     .find(|d| d.identifier() == device_id)
                 {
                     Some(d) => d,
-                    None => return Err(Error::MyPlexServerNotFound),
+                    None => bail!("Server not found"),
                 };
 
                 match device.connect().await? {
@@ -518,7 +519,7 @@ impl Server {
 
         if let Some(ref profile) = transcode_profile {
             if !config.profiles.contains_key(profile) && !DEFAULT_PROFILES.contains_key(profile) {
-                return Err(Error::UnknownProfile(profile.to_owned()));
+                bail!("Unknown profile: {profile}");
             }
         }
 
@@ -995,19 +996,13 @@ impl StateSync<'_> {
         let library_id = item
             .metadata()
             .library_section_id
-            .ok_or(Error::ItemIncomplete(
-                item.rating_key().to_owned(),
-                "library ID was missing".to_string(),
-            ))?
+            .ok_or(anyhow!("Unexpected response from Plex server"))?
             .to_string();
-        let library_title =
-            item.metadata()
-                .library_section_title
-                .clone()
-                .ok_or(Error::ItemIncomplete(
-                    item.rating_key().to_owned(),
-                    "library title was missing".to_string(),
-                ))?;
+        let library_title = item
+            .metadata()
+            .library_section_title
+            .clone()
+            .ok_or(anyhow!("Unexpected response from Plex server"))?;
 
         let library_type = match item.metadata().metadata_type.as_ref().unwrap() {
             MetadataType::Movie => LibraryType::Movie,
@@ -1290,19 +1285,15 @@ impl StateSync<'_> {
         sync_item: &SyncItem,
         episode: &Episode,
     ) -> Result {
-        let season = episode.season().await?.ok_or_else(|| {
-            Error::ItemIncomplete(
-                episode.rating_key().to_owned(),
-                "season was missing".to_string(),
-            )
-        })?;
+        let season = episode
+            .season()
+            .await?
+            .ok_or_else(|| anyhow!("Unexpected response from Plex server"))?;
 
-        let show = season.show().await?.ok_or_else(|| {
-            Error::ItemIncomplete(
-                season.rating_key().to_owned(),
-                "show was missing".to_string(),
-            )
-        })?;
+        let show = season
+            .show()
+            .await?
+            .ok_or_else(|| anyhow!("Unexpected response from Plex server"))?;
         self.add_show(&show).await?;
 
         self.add_season(&season).await?;
@@ -1318,12 +1309,10 @@ impl StateSync<'_> {
             Item::Show(show) => self.add_show_contents(sync, &show).await,
 
             Item::Season(season) => {
-                let show = season.show().await?.ok_or_else(|| {
-                    Error::ItemIncomplete(
-                        season.rating_key().to_owned(),
-                        "show was missing".to_string(),
-                    )
-                })?;
+                let show = season
+                    .show()
+                    .await?
+                    .ok_or_else(|| anyhow!("Unexpected response from Plex server"))?;
 
                 self.add_show(&show).await?;
 
@@ -1379,7 +1368,7 @@ impl StateSync<'_> {
 
                 self.add_playlist(&playlist, items).await
             }
-            _ => Err(Error::ItemNotSupported(item.rating_key().to_owned())),
+            _ => bail!("Item type not supported"),
         }
     }
 }

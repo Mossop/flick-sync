@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::bail;
 use plex_api::{
     Server as PlexServer,
     library::{Collection, FromMetadata, MediaItem, MetadataItem, Part, Playlist, Season, Show},
@@ -21,7 +22,7 @@ use typeshare::typeshare;
 use uuid::Uuid;
 
 use crate::{
-    Error, LockedFile, Result, Server, VideoPart,
+    LockedFile, Result, Server, VideoPart,
     schema::{JsonObject, JsonUtils, MigratableStore, SchemaVersion},
     sync::{OpReadGuard, OpWriteGuard},
 };
@@ -1083,14 +1084,14 @@ impl MigratableStore for State {
                 Some(SCHEMA_VERSION) => return Ok(false),
                 Some(version) => {
                     if version > SCHEMA_VERSION {
-                        return Err(Error::SchemaError);
+                        bail!("Unexpected schema version");
                     }
 
                     version
                 }
-                _ => return Err(Error::SchemaError),
+                _ => bail!("Unexpected schema version"),
             },
-            _ => return Err(Error::SchemaError),
+            _ => bail!("Missing schema version"),
         };
 
         if version < 1 {

@@ -9,6 +9,7 @@ use std::{
     time::Duration,
 };
 
+use anyhow::{anyhow, bail};
 use futures::io::AsyncWrite;
 use pathdiff::diff_paths;
 use pin_project::pin_project;
@@ -29,7 +30,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use xml::{EmitterConfig, writer::XmlEvent};
 
 use crate::{
-    DownloadProgress, Error, FlickSync, LockedFile, Result, Server,
+    DownloadProgress, FlickSync, LockedFile, Result, Server,
     config::OutputStyle,
     server::Progress,
     state::{
@@ -539,6 +540,14 @@ impl fmt::Debug for VideoPart {
     }
 }
 
+enum TranscodeResult {
+    Skipped,
+    Lost,
+    Transcoding,
+    Complete,
+    Refused,
+}
+
 impl VideoPart {
     async fn with_server_state<F, R>(&self, cb: F) -> R
     where
@@ -685,7 +694,7 @@ impl VideoPart {
     }
 
     #[instrument(level = "trace", skip(self, plex_server), fields(session_id, video=self.id, part=self.index))]
-    async fn start_transcode(&self, plex_server: &PlexServer) -> Result {
+    async fn start_transcode(&self, plex_server: &PlexServer) -> Result<TranscodeResult> {
         let (media_id, profile) = self
             .with_video_state(|vs| (vs.media_id.clone(), vs.transcode_profile.clone()))
             .await;
@@ -700,7 +709,7 @@ impl VideoPart {
         {
             options
         } else {
-            return Err(Error::TranscodeSkipped);
+            return Ok(TranscodeResult::Skipped);
         };
 
         let _permit = self.server.transcode_requests.acquire().await.unwrap();
@@ -717,13 +726,19 @@ impl VideoPart {
             .media()
             .into_iter()
             .find(|m| m.metadata().id.as_ref() == Some(&media_id))
-            .ok_or_else(|| Error::MissingItem)?;
+            .ok_or_else(|| anyhow!("Item was not found on the server"))?;
         let parts = media.parts();
-        let part = parts.get(self.index).ok_or_else(|| Error::MissingItem)?;
+        let part = parts
+            .get(self.index)
+            .ok_or_else(|| anyhow!("Item was not found on the server"))?;
 
         trace!("Attempting transcode");
 
-        let session = part.create_download_session(options).await?;
+        let session = match part.create_download_session(options).await {
+            Ok(s) => s,
+            Err(plex_api::Error::TranscodeRefused) => return Ok(TranscodeResult::Refused),
+            Err(e) => return Err(e.into()),
+        };
 
         tracing::Span::current().record("session_id", session.session_id());
 
@@ -741,7 +756,7 @@ impl VideoPart {
                     count += 1;
                     if count > 20 {
                         error!("Transcode session failed to start");
-                        return Err(Error::TranscodeFailed);
+                        bail!("Failed to start transcode");
                     }
                 }
                 Err(e) => return Err(e.into()),
@@ -768,7 +783,7 @@ impl VideoPart {
             return Err(e);
         }
 
-        Ok(())
+        Ok(TranscodeResult::Transcoding)
     }
 
     #[instrument(level = "trace", skip(self, plex_server), fields(video=self.id, part=self.index))]
@@ -786,9 +801,11 @@ impl VideoPart {
             .media()
             .into_iter()
             .find(|m| m.metadata().id.as_ref() == Some(&media_id))
-            .ok_or_else(|| Error::MissingItem)?;
+            .ok_or_else(|| anyhow!("Item was not found on the server"))?;
         let parts = media.parts();
-        let part = parts.get(self.index).ok_or_else(|| Error::MissingItem)?;
+        let part = parts
+            .get(self.index)
+            .ok_or_else(|| anyhow!("Item was not found on the server"))?;
 
         let path = self
             .file_path(&part.metadata().container.unwrap().to_string())
@@ -797,7 +814,7 @@ impl VideoPart {
         let target = self.server.inner.path.join(&path);
         if let Err(e) = remove_file(target).await {
             if e.kind() != ErrorKind::NotFound {
-                return Err(Error::from(e));
+                return Err(e.into());
             }
         }
 
@@ -813,7 +830,7 @@ impl VideoPart {
         plex_server: &PlexServer,
         session_id: &str,
         progress: &mut P,
-    ) -> Result {
+    ) -> Result<TranscodeResult> {
         let session = match plex_server.transcode_session(session_id).await {
             Ok(session) => session,
             Err(plex_api::Error::ItemNotFound) => {
@@ -821,7 +838,7 @@ impl VideoPart {
                 self.update_state(|state| state.download = DownloadState::None)
                     .await?;
 
-                return Err(Error::TranscodeLost);
+                return Ok(TranscodeResult::Lost);
             }
             Err(e) => {
                 error!(error=?e, "Error getting transcode status");
@@ -845,7 +862,7 @@ impl VideoPart {
                 }
                 Ok(TranscodeStatus::Error) => {
                     let _ = session.cancel().await;
-                    return Err(Error::TranscodeFailed);
+                    bail!("Transcode session failed");
                 }
                 Ok(TranscodeStatus::Transcoding {
                     remaining,
@@ -865,7 +882,7 @@ impl VideoPart {
                     self.update_state(|state| state.download = DownloadState::None)
                         .await?;
 
-                    return Err(Error::TranscodeLost);
+                    return Ok(TranscodeResult::Lost);
                 }
                 Err(e) => {
                     error!(error=?e, "Error getting transcode status");
@@ -874,7 +891,7 @@ impl VideoPart {
             }
         }
 
-        Ok(())
+        Ok(TranscodeResult::Complete)
     }
 
     #[instrument(level = "trace", skip(self, plex_server, guard), fields(video=self.id, part=self.index))]
@@ -895,13 +912,10 @@ impl VideoPart {
         }
 
         if matches!(download_state, DownloadState::None) {
-            match self.start_transcode(plex_server).await {
-                Err(Error::TranscodeSkipped) => (),
-                Err(Error::PlexError {
-                    source: plex_api::Error::TranscodeRefused,
-                }) => debug!("Transcode attempt refused"),
-                Err(e) => return Err(e),
-                Ok(_) => {
+            match self.start_transcode(plex_server).await? {
+                TranscodeResult::Skipped => (),
+                TranscodeResult::Refused => debug!("Transcode attempt refused"),
+                _ => {
                     return Ok(());
                 }
             }
@@ -927,7 +941,7 @@ impl VideoPart {
                 if e.kind() == ErrorKind::NotFound {
                     0
                 } else {
-                    return Err(Error::from(e));
+                    return Err(e.into());
                 }
             }
         };
@@ -945,9 +959,11 @@ impl VideoPart {
             .media()
             .into_iter()
             .find(|m| m.metadata().id.as_ref() == Some(&media_id))
-            .ok_or_else(|| Error::MissingItem)?;
+            .ok_or_else(|| anyhow!("Item was not found on the server"))?;
         let parts = media.parts();
-        let part = parts.get(self.index).ok_or_else(|| Error::MissingItem)?;
+        let part = parts
+            .get(self.index)
+            .ok_or_else(|| anyhow!("Item was not found on the server"))?;
 
         if let Some(parent) = target.parent() {
             create_dir_all(parent).await?;
@@ -1006,7 +1022,7 @@ impl VideoPart {
         let stats = session.stats().await?;
 
         if !matches!(status, TranscodeStatus::Complete) {
-            return Err(Error::DownloadUnavailable);
+            bail!("Transcode is not available for download");
         }
 
         let target = self.server.inner.path.join(path);
@@ -1071,7 +1087,9 @@ impl VideoPart {
         mut download_permit: Option<OwnedSemaphorePermit>,
     ) -> bool {
         let Ok(guard) = self.try_lock_write().await else {
-            progress.download_failed(&self, Error::LockFailed).await;
+            progress
+                .download_failed(&self, anyhow!("Failed to lock item for writing"))
+                .await;
             return false;
         };
 
@@ -1095,7 +1113,9 @@ impl VideoPart {
                         let Ok(permit) =
                             self.server.transcode_permits.clone().acquire_owned().await
                         else {
-                            progress.download_failed(&self, Error::LockFailed).await;
+                            progress
+                                .download_failed(&self, anyhow!("Failed to lock item for writing"))
+                                .await;
                             return false;
                         };
 
@@ -1120,7 +1140,9 @@ impl VideoPart {
                             .acquire_owned()
                             .await
                         else {
-                            progress.download_failed(&self, Error::LockFailed).await;
+                            progress
+                                .download_failed(&self, anyhow!("Failed to lock item for writing"))
+                                .await;
                             return false;
                         };
 
@@ -1147,7 +1169,9 @@ impl VideoPart {
                         let Ok(permit) =
                             self.server.transcode_permits.clone().acquire_owned().await
                         else {
-                            progress.download_failed(&self, Error::LockFailed).await;
+                            progress
+                                .download_failed(&self, anyhow!("Failed to lock item for writing"))
+                                .await;
                             return false;
                         };
 
@@ -1179,7 +1203,9 @@ impl VideoPart {
                             .acquire_owned()
                             .await
                         else {
-                            progress.download_failed(&self, Error::LockFailed).await;
+                            progress
+                                .download_failed(&self, anyhow!("Failed to lock item for writing"))
+                                .await;
                             return false;
                         };
 

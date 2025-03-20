@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+use anyhow::anyhow;
 use file_format::FileFormat;
 use lazy_static::lazy_static;
 use mime::Mime;
@@ -30,6 +31,12 @@ lazy_static! {
 }
 
 pub struct Timeout;
+
+impl From<Timeout> for anyhow::Error {
+    fn from(_: Timeout) -> Self {
+        anyhow!("Timed out attempting to obtain lock")
+    }
+}
 
 async fn attempt<F, R>(fut: F) -> Result<R, Timeout>
 where

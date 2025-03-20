@@ -334,6 +334,7 @@ pub(crate) async fn resource_get<H: DlnaRequestHandler>(
 }
 
 #[derive(Debug)]
+#[expect(unused)]
 enum Sort {
     Ascending(String),
     Descending(String),
@@ -442,12 +443,14 @@ struct GetCurrentConnectionInfo {
 }
 
 #[derive(Debug, Serialize)]
+#[expect(unused)]
 enum ConnectionDirection {
     Output,
     Input,
 }
 
 #[derive(Debug, Serialize)]
+#[expect(unused)]
 enum ConnectionStatus {
     #[serde(rename = "OK")]
     Ok,
@@ -518,10 +521,12 @@ struct Browse {
     object_id: String,
     browse_flag: BrowseFlag,
     #[serde_as(as = "StringWithSeparator::<CommaSeparator, String>")]
+    #[expect(unused)]
     filter: Vec<String>,
     starting_index: usize,
     requested_count: usize,
     #[serde_as(as = "StringWithSeparator::<CommaSeparator, Sort>")]
+    #[expect(unused)]
     sort_criteria: Vec<Sort>,
 }
 
@@ -699,6 +704,7 @@ impl SoapAction for GetSystemUpdateID {
 #[serde_as]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
+#[expect(unused)]
 struct Search {
     #[serde(rename = "ContainerID")]
     container_id: String,

@@ -8,7 +8,6 @@ use std::{
 };
 
 mod config;
-mod error;
 mod schema;
 mod server;
 mod state;
@@ -16,6 +15,7 @@ mod sync;
 mod util;
 mod wrappers;
 
+use anyhow::bail;
 use config::{Config, ServerConfig, TranscodeProfile};
 use lazy_static::lazy_static;
 pub use plex_api;
@@ -34,7 +34,6 @@ use uuid::Uuid;
 
 pub use crate::{
     config::ServerConnection,
-    error::Error,
     server::{DownloadProgress, ItemType, Progress, Server, SyncItemInfo},
     state::LibraryType,
     sync::{LockedFile, LockedFileAsyncRead, LockedFileRead, Timeout},
@@ -45,7 +44,7 @@ use crate::{
     schema::MigratableStore,
 };
 
-pub type Result<T = ()> = std::result::Result<T, Error>;
+pub type Result<T = ()> = anyhow::Result<T>;
 
 pub const STATE_FILE: &str = ".flicksync.state.json";
 pub const CONFIG_FILE: &str = "flicksync.json";
@@ -196,7 +195,7 @@ impl FlickSync {
         let mut config = self.inner.config.write().await;
 
         if config.servers.contains_key(id) {
-            return Err(Error::ServerExists);
+            bail!("Server already exists");
         }
 
         state.servers.insert(
