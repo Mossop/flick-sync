@@ -1,12 +1,13 @@
 use flick_sync::{Server, VideoPart};
 use rinja::Template;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tracing::warn;
 
 #[derive(Clone)]
 pub(super) enum Event {
     SyncStart,
     SyncEnd,
-    Log(SyncLog),
+    Log(SyncLogItem),
     Progress(Vec<SyncProgressBar>),
 }
 
@@ -64,7 +65,7 @@ impl Event {
 }
 
 #[derive(Clone)]
-pub(crate) enum SyncLog {
+pub(crate) enum SyncLogMessage {
     SyncStarted(Server),
     SyncFailed((Server, String)),
     SyncFinished((Server, bool)),
@@ -76,32 +77,54 @@ pub(crate) enum SyncLog {
     TranscodeFailed((VideoPart, String)),
 }
 
+#[derive(Clone)]
+pub(crate) struct SyncLogItem {
+    timestamp: OffsetDateTime,
+    message: SyncLogMessage,
+}
+
+impl From<SyncLogMessage> for SyncLogItem {
+    fn from(message: SyncLogMessage) -> Self {
+        SyncLogItem {
+            timestamp: OffsetDateTime::now_utc(),
+            message,
+        }
+    }
+}
+
 #[derive(Template)]
 #[template(path = "synclogitem.html")]
 pub(crate) struct SyncLogTemplate {
+    timestamp: String,
     message_type: &'static str,
     message: String,
 }
 
-impl SyncLog {
+impl SyncLogItem {
     pub(crate) async fn template(&self) -> SyncLogTemplate {
-        match self {
-            SyncLog::SyncStarted(server) => SyncLogTemplate {
+        let timestamp = self.timestamp.format(&Rfc3339).unwrap();
+
+        match &self.message {
+            SyncLogMessage::SyncStarted(server) => SyncLogTemplate {
+                timestamp,
                 message_type: "info",
                 message: format!("Syncing started for {}.", server.name().await),
             },
-            SyncLog::SyncFailed((server, message)) => SyncLogTemplate {
+            SyncLogMessage::SyncFailed((server, message)) => SyncLogTemplate {
+                timestamp,
                 message_type: "error",
                 message: format!("Syncing failed for {}: {message}", server.name().await),
             },
-            SyncLog::SyncFinished((server, complete)) => {
+            SyncLogMessage::SyncFinished((server, complete)) => {
                 if *complete {
                     SyncLogTemplate {
+                        timestamp,
                         message_type: "success",
                         message: format!("Syncing finished for {}.", server.name().await),
                     }
                 } else {
                     SyncLogTemplate {
+                        timestamp,
                         message_type: "success",
                         message: format!(
                             "Syncing finished for {}, some items were not fully synced.",
@@ -110,42 +133,48 @@ impl SyncLog {
                     }
                 }
             }
-            SyncLog::DownloadStarted(video_part) => SyncLogTemplate {
+            SyncLogMessage::DownloadStarted(video_part) => SyncLogTemplate {
+                timestamp,
                 message_type: "info",
                 message: format!(
                     "Download started for {}.",
                     video_part.video().await.title().await
                 ),
             },
-            SyncLog::DownloadComplete(video_part) => SyncLogTemplate {
+            SyncLogMessage::DownloadComplete(video_part) => SyncLogTemplate {
+                timestamp,
                 message_type: "success",
                 message: format!(
                     "Download complete for {}.",
                     video_part.video().await.title().await
                 ),
             },
-            SyncLog::DownloadFailed((video_part, message)) => SyncLogTemplate {
+            SyncLogMessage::DownloadFailed((video_part, message)) => SyncLogTemplate {
+                timestamp,
                 message_type: "error",
                 message: format!(
                     "Download failed for {}: {message}",
                     video_part.video().await.title().await
                 ),
             },
-            SyncLog::TranscodeStarted(video_part) => SyncLogTemplate {
+            SyncLogMessage::TranscodeStarted(video_part) => SyncLogTemplate {
+                timestamp,
                 message_type: "info",
                 message: format!(
                     "Transcode started for {}.",
                     video_part.video().await.title().await
                 ),
             },
-            SyncLog::TranscodeComplete(video_part) => SyncLogTemplate {
+            SyncLogMessage::TranscodeComplete(video_part) => SyncLogTemplate {
+                timestamp,
                 message_type: "success",
                 message: format!(
                     "Transcode complete for {}.",
                     video_part.video().await.title().await
                 ),
             },
-            SyncLog::TranscodeFailed((video_part, message)) => SyncLogTemplate {
+            SyncLogMessage::TranscodeFailed((video_part, message)) => SyncLogTemplate {
+                timestamp,
                 message_type: "error",
                 message: format!(
                     "Transcode failed for {}: {message}",

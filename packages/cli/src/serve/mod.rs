@@ -25,7 +25,7 @@ use crate::{
     Console, Runnable,
     dlna::build_dlna,
     error::Error,
-    serve::events::{Event, SyncLog, SyncProgressBar},
+    serve::events::{Event, SyncLogItem, SyncLogMessage, SyncProgressBar},
 };
 
 mod events;
@@ -44,7 +44,7 @@ pub struct Serve {
 #[derive(Default)]
 struct SyncStatus {
     is_syncing: bool,
-    log: VecDeque<SyncLog>,
+    log: VecDeque<SyncLogItem>,
     progress: HashMap<String, SyncProgressBar>,
 }
 
@@ -96,9 +96,11 @@ impl Progress for SyncProgress {
         self.task.remove_progress(&self);
 
         if self.is_download {
-            self.task.log(SyncLog::DownloadComplete(self.video_part));
+            self.task
+                .log(SyncLogMessage::DownloadComplete(self.video_part));
         } else {
-            self.task.log(SyncLog::TranscodeComplete(self.video_part));
+            self.task
+                .log(SyncLogMessage::TranscodeComplete(self.video_part));
         }
     }
 
@@ -106,12 +108,12 @@ impl Progress for SyncProgress {
         self.task.remove_progress(&self);
 
         if self.is_download {
-            self.task.log(SyncLog::DownloadFailed((
+            self.task.log(SyncLogMessage::DownloadFailed((
                 self.video_part,
                 error.to_string(),
             )));
         } else {
-            self.task.log(SyncLog::TranscodeFailed((
+            self.task.log(SyncLogMessage::TranscodeFailed((
                 self.video_part,
                 error.to_string(),
             )));
@@ -169,14 +171,16 @@ impl SyncTask {
         }
     }
 
-    fn log(&self, message: SyncLog) {
+    fn log(&self, message: SyncLogMessage) {
+        let log_item: SyncLogItem = message.into();
+
         let mut status = self.status.lock().unwrap();
-        status.log.push_back(message.clone());
+        status.log.push_back(log_item.clone());
         while status.log.len() > LOG_LIMIT {
             status.log.pop_front();
         }
 
-        self.send_event(Event::Log(message));
+        self.send_event(Event::Log(log_item));
     }
 
     fn send_event(&self, event: Event) {
@@ -184,33 +188,33 @@ impl SyncTask {
     }
 
     fn sync_started(&self, server: Server) {
-        self.log(SyncLog::SyncStarted(server));
+        self.log(SyncLogMessage::SyncStarted(server));
     }
 
     fn sync_failed(&self, server: Server, error: flick_sync::Error) {
-        self.log(SyncLog::SyncFailed((server, error.to_string())));
+        self.log(SyncLogMessage::SyncFailed((server, error.to_string())));
     }
 
     fn sync_finished(&self, server: Server, complete: bool) {
-        self.log(SyncLog::SyncFinished((server, complete)));
+        self.log(SyncLogMessage::SyncFinished((server, complete)));
     }
 }
 
 impl DownloadProgress for SyncTask {
     async fn transcode_started(&self, video_part: &VideoPart) -> impl Progress {
-        self.log(SyncLog::TranscodeStarted(video_part.clone()));
+        self.log(SyncLogMessage::TranscodeStarted(video_part.clone()));
 
         SyncProgress::new(self.clone(), video_part.clone(), false)
     }
 
     async fn download_started(&self, video_part: &VideoPart) -> impl Progress {
-        self.log(SyncLog::DownloadStarted(video_part.clone()));
+        self.log(SyncLogMessage::DownloadStarted(video_part.clone()));
 
         SyncProgress::new(self.clone(), video_part.clone(), true)
     }
 
     async fn download_failed(&self, video_part: &VideoPart, error: flick_sync::Error) {
-        self.log(SyncLog::DownloadFailed((
+        self.log(SyncLogMessage::DownloadFailed((
             video_part.clone(),
             error.to_string(),
         )));

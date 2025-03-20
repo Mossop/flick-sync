@@ -46,3 +46,4 @@ actix-web = { version = "4.9.0", default-features = false, features = [
 rinja = "0.3.5"
 regex = "1.11.1"
 lazy_static = "1.4.0"
+time = "0.3.20"

@@ -140,6 +140,18 @@ body.sidebar sl-split-panel {
 #sync-log {
   flex: 1;
   overflow-y: auto;
+
+  .log-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sl-spacing-large);
+
+    .message {
+      flex: 1;
+    }
+  }
 }
 
 #progress-bars {

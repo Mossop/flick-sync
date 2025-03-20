@@ -1,13 +1,24 @@
 {% if message_type == "success" %}
 <sl-alert variant="success" open>
-  <sl-icon slot="icon" name="check2-circle"></sl-icon> {{ message }}
-</sl-alert>
+  <sl-icon slot="icon" name="check2-circle"></sl-icon>
 {% elif message_type == "error" %}
 <sl-alert variant="danger" open>
-  <sl-icon slot="icon" name="exclamation-octagon"></sl-icon> {{ message }}
-</sl-alert>
+  <sl-icon slot="icon" name="exclamation-octagon"></sl-icon>
 {% else %}
 <sl-alert variant="primary" open>
-  <sl-icon slot="icon" name="info-circle"></sl-icon> {{ message }}
-</sl-alert>
+  <sl-icon slot="icon" name="info-circle"></sl-icon>
 {% endif %}
+  <div class="log-item">
+    <div class="message">{{ message }}</div>
+    <sl-format-date
+      year="numeric"
+      month="numeric"
+      day="numeric"
+      hour="numeric"
+      minute="numeric"
+      second="numeric"
+    >
+      {{ timestamp }}
+    </sl-format-date>
+  </div>
+</sl-alert>
