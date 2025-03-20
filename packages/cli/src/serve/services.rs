@@ -18,10 +18,10 @@ use rinja::Template;
 use tokio::{io::BufReader, sync::broadcast::Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
+use tracing::error;
 
 use crate::{
     EmbeddedFileStream, Resources,
-    error::Error,
     serve::{
         Event, SyncStatus,
         events::{ProgressBarTemplate, SyncLogTemplate, SyncProgressBar},
@@ -51,10 +51,16 @@ impl FromRequest for HxTarget {
     }
 }
 
-fn render<T: Template>(template: T) -> Result<HttpResponse, Error> {
-    Ok(HttpResponse::Ok()
-        .append_header(header::ContentType(mime::TEXT_HTML))
-        .body(template.render()?))
+fn render<T: Template>(template: T) -> HttpResponse {
+    match template.render() {
+        Ok(body) => HttpResponse::Ok()
+            .append_header(header::ContentType(mime::TEXT_HTML))
+            .body(body),
+        Err(e) => {
+            error!(error=%e, "Failed to render template");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
 }
 
 #[get("/sync")]
@@ -62,7 +68,7 @@ pub(super) async fn sync_list(
     ThinData(flick_sync): ThinData<FlickSync>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
-) -> Result<HttpResponse, Error> {
+) -> HttpResponse {
     let sidebar = if target.is_some() {
         None
     } else {
@@ -107,9 +113,9 @@ pub(super) async fn sync_list(
 }
 
 #[get("/resources/{path:.*}")]
-pub(super) async fn resources(path: Path<String>) -> Result<HttpResponse, Error> {
+pub(super) async fn resources(path: Path<String>) -> HttpResponse {
     let Some(file) = Resources::get(&format!("{path}")) else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let mime = match path.rsplit_once('.') {
@@ -119,66 +125,66 @@ pub(super) async fn resources(path: Path<String>) -> Result<HttpResponse, Error>
         _ => mime::APPLICATION_OCTET_STREAM,
     };
 
-    Ok(HttpResponse::Ok()
+    HttpResponse::Ok()
         .append_header(header::ContentLength(file.data.len()))
         .append_header(header::ContentType(mime))
         .body(SizedStream::new(
             file.data.len() as u64,
             EmbeddedFileStream::new(file),
-        )))
+        ))
 }
 
 #[get("/thumbnail/{server}/{type}/{id}")]
 pub(super) async fn thumbnail(
     ThinData(flick_sync): ThinData<FlickSync>,
     path: Path<(String, String, String)>,
-) -> Result<HttpResponse, Error> {
+) -> HttpResponse {
     let (server_id, item_type, item_id) = path.into_inner();
 
     let Some(server) = flick_sync.server(&server_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let file = match item_type.as_str() {
         "video" => {
             let Some(item) = server.video(&item_id).await else {
-                return Ok(HttpResponse::NotFound().finish());
+                return HttpResponse::NotFound().finish();
             };
 
             item.thumbnail().await
         }
         "show" => {
             let Some(item) = server.show(&item_id).await else {
-                return Ok(HttpResponse::NotFound().finish());
+                return HttpResponse::NotFound().finish();
             };
 
             item.thumbnail().await
         }
         "playlist" => {
             let Some(item) = server.playlist(&item_id).await else {
-                return Ok(HttpResponse::NotFound().finish());
+                return HttpResponse::NotFound().finish();
             };
 
             item.thumbnail().await
         }
         "collection" => {
             let Some(item) = server.collection(&item_id).await else {
-                return Ok(HttpResponse::NotFound().finish());
+                return HttpResponse::NotFound().finish();
             };
 
             item.thumbnail().await
         }
-        _ => return Ok(HttpResponse::NotFound().finish()),
+        _ => return HttpResponse::NotFound().finish(),
     };
 
     let Ok(Some(file)) = file else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let size = file.len().await;
 
     let Ok(reader) = file.async_read().await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let mut response = HttpResponse::Ok();
@@ -187,12 +193,12 @@ pub(super) async fn thumbnail(
 
     if let Ok(size) = size {
         response.append_header(header::ContentLength(size as usize));
-        Ok(response.body(SizedStream::new(
+        response.body(SizedStream::new(
             size,
             ReaderStream::new(BufReader::new(reader)),
-        )))
+        ))
     } else {
-        Ok(response.streaming(ReaderStream::new(BufReader::new(reader))))
+        response.streaming(ReaderStream::new(BufReader::new(reader)))
     }
 }
 
@@ -382,15 +388,15 @@ pub(super) async fn library_contents(
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String)>,
-) -> Result<HttpResponse, Error> {
+) -> HttpResponse {
     let (server_id, library_id) = path.into_inner();
 
     let Some(server) = flick_sync.server(&server_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let Some(library) = server.library(&library_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let sidebar = if target.is_some() {
@@ -450,15 +456,15 @@ pub(super) async fn library_collections(
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String)>,
-) -> Result<HttpResponse, Error> {
+) -> HttpResponse {
     let (server_id, library_id) = path.into_inner();
 
     let Some(server) = flick_sync.server(&server_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let Some(library) = server.library(&library_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let sidebar = if target.is_some() {
@@ -494,15 +500,15 @@ pub(super) async fn collection_contents(
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String, String)>,
-) -> Result<HttpResponse, Error> {
+) -> HttpResponse {
     let (server_id, _, collection_id) = path.into_inner();
 
     let Some(server) = flick_sync.server(&server_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let Some(collection) = server.collection(&collection_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let sidebar = if target.is_some() {
@@ -544,15 +550,15 @@ pub(super) async fn show_contents(
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String, String)>,
-) -> Result<HttpResponse, Error> {
+) -> HttpResponse {
     let (server_id, _, show_id) = path.into_inner();
 
     let Some(server) = flick_sync.server(&server_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let Some(show) = server.show(&show_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let sidebar = if target.is_some() {
@@ -581,15 +587,15 @@ pub(super) async fn season_contents(
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String, String)>,
-) -> Result<HttpResponse, Error> {
+) -> HttpResponse {
     let (server_id, _, season_id) = path.into_inner();
 
     let Some(server) = flick_sync.server(&server_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let Some(season) = server.season(&season_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let sidebar = if target.is_some() {
@@ -624,15 +630,15 @@ pub(super) async fn playlist_contents(
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String)>,
-) -> Result<HttpResponse, Error> {
+) -> HttpResponse {
     let (server_id, playlist_id) = path.into_inner();
 
     let Some(server) = flick_sync.server(&server_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let Some(playlist) = server.playlist(&playlist_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let sidebar = if target.is_some() {
@@ -671,15 +677,15 @@ pub(super) async fn video_page(
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String, String)>,
-) -> Result<HttpResponse, Error> {
+) -> HttpResponse {
     let (server_id, _, video_id) = path.into_inner();
 
     let Some(server) = flick_sync.server(&server_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let Some(video) = server.video(&video_id).await else {
-        return Ok(HttpResponse::NotFound().finish());
+        return HttpResponse::NotFound().finish();
     };
 
     let sidebar = if target.is_some() {
@@ -723,7 +729,7 @@ pub(super) async fn index_page(
     ThinData(flick_sync): ThinData<FlickSync>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
-) -> Result<HttpResponse, Error> {
+) -> HttpResponse {
     let sidebar = if target.is_some() {
         None
     } else {
