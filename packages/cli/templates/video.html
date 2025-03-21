@@ -4,8 +4,6 @@
 
 {% block content %}
   <div id="video-container">
-    <video controls preload="auto">
-      <source src="{{ video }}" type="video/mp4">
-    </video>
+    <video-player playlist="{{ parts|json }}"></video-player>
   </div>
 {% endblock %}

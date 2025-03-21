@@ -15,6 +15,7 @@ use bytes::Bytes;
 use flick_sync::{Collection, FlickSync, Library, LibraryType, Season, Show, Video};
 use futures::TryStreamExt;
 use rinja::Template;
+use serde::Serialize;
 use tokio::{io::BufReader, sync::broadcast::Sender};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
@@ -694,18 +695,47 @@ pub(super) async fn video_page(
         Some(Sidebar::build(&flick_sync, &status).await)
     };
 
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct VideoPart {
+        url: String,
+        mime_type: String,
+        duration: f64,
+    }
+
+    let mut parts = Vec::new();
+    for part in video.parts().await {
+        let Ok(Some(file)) = part.file().await else {
+            return HttpResponse::NotFound().finish();
+        };
+
+        let Ok(mime_type) = file.mime_type().await else {
+            return HttpResponse::NotFound().finish();
+        };
+
+        parts.push(VideoPart {
+            url: format!(
+                "/upnp/resource/video/{server_id}/VP:{}/{}",
+                video.id(),
+                part.index()
+            ),
+            mime_type: mime_type.to_string(),
+            duration: part.duration().await.as_millis() as f64 / 1000.0,
+        })
+    }
+
     #[derive(Template)]
     #[template(path = "video.html")]
     struct Video {
         sidebar: Option<Sidebar>,
         title: String,
-        video: String,
+        parts: Vec<VideoPart>,
     }
 
     let template = Video {
         sidebar,
         title: video.title().await,
-        video: format!("/upnp/resource/video/{server_id}/VP:{}/0", video.id()),
+        parts,
     };
 
     render(template)

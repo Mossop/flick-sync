@@ -110,10 +110,8 @@ impl Drop for OpWriteGuard {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct OpReadGuard {
     key: String,
-    #[expect(unused)]
     guard: Arc<OwnedRwLockReadGuard<()>>,
 }
 
@@ -126,6 +124,19 @@ impl Drop for OpReadGuard {
             *count -= 1;
         } else {
             locks.remove(&self.key);
+        }
+    }
+}
+
+impl Clone for OpReadGuard {
+    fn clone(&self) -> Self {
+        let mut locks = LOCKS.lock().unwrap();
+        let (_, count) = locks.get_mut(&self.key).unwrap();
+        *count += 1;
+
+        Self {
+            key: self.key.clone(),
+            guard: self.guard.clone(),
         }
     }
 }

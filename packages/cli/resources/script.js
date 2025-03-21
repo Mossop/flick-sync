@@ -1,4 +1,4 @@
-function updateLinks(event) {
+function updateLinks() {
   let uri = new URL(document.documentURI);
   let currentPath = uri.pathname;
 
@@ -32,3 +32,17 @@ htmx.on("htmx:pushedIntoHistory", updateLinks);
 htmx.on("htmx:replacedIntoHistory", updateLinks);
 
 htmx.on("htmx:afterSwap", updateLinks);
+
+window.__onGCastApiAvailable = function (isAvailable) {
+  if (isAvailable) {
+    cast.framework.CastContext.getInstance().setOptions({
+      receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+    });
+
+    castState = true;
+
+    document.dispatchEvent(new CustomEvent("cast-available"));
+  }
+};
+
+var castState = false;

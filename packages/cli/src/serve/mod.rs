@@ -256,7 +256,7 @@ async fn background_task(
         status.lock().unwrap().is_syncing = false;
         task.send_event(Event::SyncEnd);
 
-        time::sleep(Duration::from_secs(5 * 60)).await;
+        time::sleep(Duration::from_secs(30 * 60)).await;
     }
 }
 

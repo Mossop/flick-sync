@@ -1133,6 +1133,7 @@ dependencies = [
  "regex",
  "rinja",
  "rust-embed",
+ "serde",
  "thiserror 2.0.11",
  "time",
  "tokio",
@@ -2645,6 +2646,8 @@ dependencies = [
  "itoa",
  "percent-encoding",
  "rinja_derive",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
