@@ -222,27 +222,33 @@ body.sidebar sl-split-panel {
       display: flex;
       flex-direction: column;
       align-items: stretch;
+
+      opacity: 0;
+      transition: opacity var(--sl-transition-slow) cubic-bezier(0.4, 0, 0.2, 1) 0ms;
+
+      &.visible {
+        opacity: 1;
+      }
     }
 
     .main {
       flex: 1;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-evenly;
+      font-size: 400%;
     }
 
     .controls {
-      opacity: 0;
       background: var(--sl-color-neutral-300);
       display: flex;
       flex-direction: row;
       align-items: center;
       gap: var(--sl-spacing-x-small);
-      transition: opacity var(--sl-transition-slow) cubic-bezier(0.4, 0, 0.2, 1) 0ms;
 
       --connected-color: var(--sl-color-primary-600);
       --disconnected-color: var(--sl-color-neutral-600);
-
-      &.visible {
-        opacity: 1;
-      }
     }
 
     sl-icon-button {

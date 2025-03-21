@@ -81,8 +81,8 @@ export class VideoPlayer extends LitElement {
   }
 
   showOverlay() {
-    let controls = this.renderRoot.querySelector(".controls");
-    controls.classList.add("visible");
+    let overlay = this.renderRoot.querySelector(".overlay");
+    overlay.classList.add("visible");
 
     if (this._overlayTimeout) {
       clearTimeout(this._overlayTimeout);
@@ -90,7 +90,7 @@ export class VideoPlayer extends LitElement {
 
     this._overlayTimeout = setTimeout(() => {
       this._overlayTimeout = null;
-      controls.classList.remove("visible");
+      overlay.classList.remove("visible");
     }, 3000);
   }
 
@@ -195,6 +195,24 @@ export class VideoPlayer extends LitElement {
     return templates;
   }
 
+  seekBack(event) {
+    if (event.button != 0) {
+      return;
+    }
+
+    event.stopPropagation();
+    this.seek(Math.max(0, this.currentTime - 30));
+  }
+
+  seekForward(event) {
+    if (event.button != 0) {
+      return;
+    }
+
+    event.stopPropagation();
+    this.seek(this.currentTime + 30);
+  }
+
   render() {
     let media = this.playlist[this.mediaIndex];
 
@@ -218,7 +236,14 @@ export class VideoPlayer extends LitElement {
         <source type="${media.mimeType}" src="${media.url}"></source>
       </video>
       <div class="overlay" @mousemove="${this.showOverlay}">
-        <div class="main" @click="${this.togglePlayback}"></div>
+        <div class="main" @click="${this.togglePlayback}">
+          <sl-icon-button name="skip-backward" @click="${
+            this.seekBack
+          }"></sl-icon-button>
+        <sl-icon-button name="skip-forward" @click="${
+          this.seekForward
+        }"></sl-icon-button>
+        </div>
         <div class="controls">
           <sl-icon-button name="${toggleIcon}" @click="${
       this.togglePlayback
