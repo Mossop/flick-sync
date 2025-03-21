@@ -1,10 +1,6 @@
-import {
-  LitElement,
-  html,
-  nothing,
-  ref,
-  keyed,
-} from "/resources/scripts/lit-all.min.js";
+import { LitElement, html, css, nothing, ref, keyed } from "lit";
+import shoelaceStyles from "@shoelace/themes/dark.styles.js";
+import "@shoelace/components/icon-button/icon-button.js";
 
 function pad(val) {
   if (val > 9) {
@@ -29,6 +25,116 @@ function formatTime(time) {
 }
 
 export class VideoPlayer extends LitElement {
+  static styles = [
+    shoelaceStyles,
+    css`
+      :host {
+        position: relative;
+      }
+
+      video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        object-position: center center;
+      }
+
+      .overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+
+        opacity: 0;
+        transition: opacity var(--sl-transition-slow)
+          cubic-bezier(0.4, 0, 0.2, 1) 0ms;
+
+        &.visible {
+          opacity: 1;
+        }
+      }
+
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-evenly;
+        font-size: 400%;
+      }
+
+      .controls {
+        background: var(--sl-color-neutral-300);
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: var(--sl-spacing-x-small);
+
+        --connected-color: var(--sl-color-primary-600);
+        --disconnected-color: var(--sl-color-neutral-600);
+      }
+
+      sl-icon-button {
+        font-size: 150%;
+      }
+
+      .time {
+        width: 4.2em;
+
+        &.start {
+          text-align: end;
+        }
+
+        &.end {
+          text-align: start;
+        }
+      }
+
+      google-cast-launcher {
+        height: 1.5em;
+
+        &:hover {
+          --connected-color: var(--sl-color-primary-700);
+          --disconnected-color: var(--sl-color-neutral-700);
+        }
+      }
+
+      .progress {
+        flex: 1;
+        background-color: black;
+        height: 10px;
+        margin-inline: var(--sl-spacing-x-small);
+        position: relative;
+
+        .buffer {
+          background-color: var(--sl-color-neutral-100);
+          position: absolute;
+          top: 0;
+          bottom: 0;
+        }
+
+        .played {
+          background-color: var(--sl-color-neutral-900);
+          position: absolute;
+          top: 0;
+          left: 0;
+          bottom: 0;
+        }
+
+        .mask {
+          position: absolute;
+          inset: -5px;
+          background-color: transparent;
+          border-color: var(--sl-color-neutral-300);
+          border-style: solid;
+          border-width: 5px;
+          border-radius: 10px;
+        }
+      }
+    `,
+  ];
+
   static properties = {
     playlist: { type: Array },
     mediaIndex: { state: true },
@@ -57,10 +163,6 @@ export class VideoPlayer extends LitElement {
     }
 
     this.addEventListener("fullscreenchange", () => this.onFullscreenChanged());
-  }
-
-  createRenderRoot() {
-    return this;
   }
 
   renderedVideo(element) {
