@@ -1,4 +1,10 @@
-import { LitElement, html, nothing } from "/resources/scripts/lit-core.min.js";
+import {
+  LitElement,
+  html,
+  nothing,
+  ref,
+  keyed,
+} from "/resources/scripts/lit-all.min.js";
 
 function pad(val) {
   if (val > 9) {
@@ -40,6 +46,7 @@ export class VideoPlayer extends LitElement {
     this.previousTime = 0;
     this.onFullscreenChanged();
     this.isCastAvailable = window.castState;
+    this.videoElement = null;
 
     if (!this.isCastAvailable) {
       document.addEventListener(
@@ -56,16 +63,26 @@ export class VideoPlayer extends LitElement {
     return this;
   }
 
+  renderedVideo(element) {
+    if (this.videoElement != element) {
+      this.videoElement?.pause();
+    }
+
+    this.videoElement = element;
+  }
+
+  disconnectedCallback() {
+    this.videoElement?.pause();
+
+    super.disconnectedCallback();
+  }
+
   willUpdate(changedProperties) {
     if (changedProperties.has("playlist")) {
       this.totalTime = this.playlist
         .map((m) => m.duration)
         .reduce((t, v) => t + v, 0);
     }
-  }
-
-  get videoElement() {
-    return this.renderRoot.querySelector("video");
   }
 
   togglePlayback(event) {
@@ -117,9 +134,12 @@ export class VideoPlayer extends LitElement {
   }
 
   onMediaStateChanged() {
-    let videoElement = this.videoElement;
-    this.isPlaying = !(videoElement.paused || videoElement.ended);
-    this.currentTime = this.previousTime + videoElement.currentTime;
+    if (!this.videoElement) {
+      return;
+    }
+
+    this.isPlaying = !(this.videoElement.paused || this.videoElement.ended);
+    this.currentTime = this.previousTime + this.videoElement.currentTime;
   }
 
   onMediaEnded() {
@@ -213,18 +233,14 @@ export class VideoPlayer extends LitElement {
     this.seek(this.currentTime + 30);
   }
 
-  render() {
+  renderVideo() {
     let media = this.playlist[this.mediaIndex];
 
-    let toggleIcon = this.isPlaying ? "pause-fill" : "play-fill";
-    let fullscreenIcon = this.isFullscreen
-      ? "fullscreen-exit"
-      : "arrows-fullscreen";
-
-    let playedPercent = (100 * this.currentTime) / this.totalTime;
-
-    return html`
+    return keyed(
+      media.url,
+      html`
       <video
+        ${ref(this.renderedVideo)}
         autoplay
         preload="auto"
         @ended="${this.onMediaEnded}"
@@ -234,23 +250,37 @@ export class VideoPlayer extends LitElement {
         @seeked="${this.onMediaStateChanged}"
       >
         <source type="${media.mimeType}" src="${media.url}"></source>
-      </video>
+      </video>`
+    );
+  }
+
+  render() {
+    let toggleIcon = this.isPlaying ? "pause-fill" : "play-fill";
+    let fullscreenIcon = this.isFullscreen
+      ? "fullscreen-exit"
+      : "arrows-fullscreen";
+
+    let playedPercent = (100 * this.currentTime) / this.totalTime;
+
+    return html`
+      ${this.renderVideo()}
       <div class="overlay" @mousemove="${this.showOverlay}">
         <div class="main" @click="${this.togglePlayback}">
-          <sl-icon-button name="skip-backward" @click="${
-            this.seekBack
-          }"></sl-icon-button>
-        <sl-icon-button name="skip-forward" @click="${
-          this.seekForward
-        }"></sl-icon-button>
+          <sl-icon-button
+            name="skip-backward"
+            @click="${this.seekBack}"
+          ></sl-icon-button>
+          <sl-icon-button
+            name="skip-forward"
+            @click="${this.seekForward}"
+          ></sl-icon-button>
         </div>
         <div class="controls">
-          <sl-icon-button name="${toggleIcon}" @click="${
-      this.togglePlayback
-    }"></sl-icon-button>
-          <div class="time start">
-            ${formatTime(this.currentTime)}
-          </div>
+          <sl-icon-button
+            name="${toggleIcon}"
+            @click="${this.togglePlayback}"
+          ></sl-icon-button>
+          <div class="time start">${formatTime(this.currentTime)}</div>
           <div class="progress" @click="${this.onProgressClicked}">
             ${this.renderBuffers()}
             <div class="played" style="width: ${playedPercent}%"></div>
@@ -259,14 +289,13 @@ export class VideoPlayer extends LitElement {
           <div class="time end">
             -${formatTime(this.totalTime - this.currentTime)}
           </div>
-          ${
-            this.isCastAvailable
-              ? html`<google-cast-launcher></google-cast-launcher>`
-              : nothing
-          }
-          <sl-icon-button name="${fullscreenIcon}" @click="${
-      this.toggleFullscreen
-    }"></sl-icon-button>
+          ${this.isCastAvailable
+            ? html`<google-cast-launcher></google-cast-launcher>`
+            : nothing}
+          <sl-icon-button
+            name="${fullscreenIcon}"
+            @click="${this.toggleFullscreen}"
+          ></sl-icon-button>
         </div>
       </div>
     `;
