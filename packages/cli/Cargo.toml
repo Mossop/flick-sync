@@ -50,3 +50,4 @@ regex = "1.11.1"
 lazy_static = "1.4.0"
 time = "0.3.20"
 serde = { version = "1.0.158", features = ["derive"] }
+rustls = "0.23.25"

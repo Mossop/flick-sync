@@ -3,6 +3,7 @@
 /packages/mobile/.expo/
 /packages/mobile/dist/
 /packages/mobile/web-build/
+/.lego/
 
 npm-debug.*
 *.jks

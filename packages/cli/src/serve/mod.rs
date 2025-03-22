@@ -17,6 +17,10 @@ use actix_web::{
 use clap::Args;
 use flick_sync::{DownloadProgress, FlickSync, Progress, Server, VideoPart};
 use futures::{StreamExt, select};
+use rustls::{
+    ServerConfig,
+    pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+};
 use tokio::{
     signal::unix::{SignalKind, signal},
     sync::broadcast,
@@ -42,6 +46,10 @@ pub struct Serve {
     /// The port to use for the web server.
     #[clap(short, long, env = "FLICK_SYNC_PORT")]
     port: Option<u16>,
+    #[clap(short, long, env = "FLICK_SYNC_CERTIFICATE")]
+    certificate: Option<String>,
+    #[clap(short = 'k', long, env = "FLICK_SYNC_PRIVATE_KEY")]
+    private_key: Option<String>,
 }
 
 #[derive(Default)]
@@ -300,7 +308,7 @@ impl Runnable for Serve {
 
         let status = Data::from(status);
 
-        let http_server = HttpServer::new(move || {
+        let mut http_server = HttpServer::new(move || {
             App::new()
                 .app_data(ThinData(flick_sync.clone()))
                 .app_data(ThinData(event_sender.clone()))
@@ -323,8 +331,23 @@ impl Runnable for Serve {
                 .service(services::index_page)
         })
         .on_connect(on_connect)
-        .bind((Ipv4Addr::UNSPECIFIED, port))?
-        .run();
+        .bind((Ipv4Addr::UNSPECIFIED, port))?;
+
+        if let (Some(cert_file), Some(key_file)) = (self.certificate, self.private_key) {
+            let certs = CertificateDer::pem_file_iter(cert_file)?
+                .map(|cert| cert.unwrap())
+                .collect();
+            let private_key = PrivateKeyDer::from_pem_file(key_file)?;
+            let server_config = ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(certs, private_key)
+                .unwrap();
+
+            http_server =
+                http_server.bind_rustls_0_23((Ipv4Addr::UNSPECIFIED, 443), server_config)?;
+        }
+
+        let http_server = http_server.run();
 
         let http_handle = http_server.handle();
 

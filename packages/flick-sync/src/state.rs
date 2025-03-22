@@ -786,7 +786,17 @@ impl VideoState {
             if server_state != self.playback_state {
                 match self.playback_state {
                     PlaybackState::Unplayed => {
-                        // Not going to mark as unplayed on the server for now.
+                        debug!(
+                            video = item.rating_key(),
+                            "Marking item as unwatched on server"
+                        );
+                        match plex_server.mark_unwatched(item).await {
+                            Ok(item) => {
+                                let metadata = item.metadata();
+                                self.playback_state = playback_state_from_metadata(metadata);
+                            }
+                            Err(e) => warn!("Failed to mark item as unwatched: {e}"),
+                        }
                     }
                     PlaybackState::InProgress { position } => {
                         debug!(
