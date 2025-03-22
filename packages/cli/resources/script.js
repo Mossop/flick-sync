@@ -39,10 +39,10 @@ window.__onGCastApiAvailable = function (isAvailable) {
       receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
     });
 
-    castState = true;
+    castAvailable = true;
 
     document.dispatchEvent(new CustomEvent("cast-available"));
   }
 };
 
-var castState = false;
+var castAvailable = false;

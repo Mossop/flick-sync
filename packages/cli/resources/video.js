@@ -142,6 +142,7 @@ export class VideoPlayer extends LitElement {
     isPlaying: { state: true },
     isFullscreen: { state: true },
     isCastAvailable: { state: true },
+    isCasting: { state: true },
   };
 
   constructor() {
@@ -151,18 +152,94 @@ export class VideoPlayer extends LitElement {
     this.isPlaying = false;
     this.previousTime = 0;
     this.onFullscreenChanged();
-    this.isCastAvailable = window.castState;
+    this.isCastAvailable = window.castAvailable;
+    this.isCasting = false;
     this.videoElement = null;
+    this.castSession = null;
 
-    if (!this.isCastAvailable) {
-      document.addEventListener(
-        "cast-available",
-        () => (this.isCastAvailable = true),
-        { once: true }
-      );
+    if (window.castAvailable) {
+      this.initCast();
+    } else {
+      document.addEventListener("cast-available", () => this.initCast(), {
+        once: true,
+      });
     }
 
     this.addEventListener("fullscreenchange", () => this.onFullscreenChanged());
+  }
+
+  initCast() {
+    this.isCastAvailable = true;
+
+    let castContext = cast.framework.CastContext.getInstance();
+    if (castContext.getCurrentSession()) {
+      this.updateCastSession(castContext.getCurrentSession());
+    }
+    castContext.addEventListener(
+      cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
+      this.castContextEventListener
+    );
+  }
+
+  castContextEventListener = (event) => {
+    this.updateCastSession(event.session);
+  };
+
+  castControllerEventListener = (event) => {
+    this.isPlaying = !this.castPlayer.isPaused;
+    this.currentTime = this.castPlayer.currentTime + this.previousTime;
+  };
+
+  updateCastSession(session) {
+    if (
+      session &&
+      [
+        cast.framework.SessionState.NO_SESSION,
+        cast.framework.SessionState.SESSION_START_FAILED,
+        cast.framework.SessionState.SESSION_ENDING,
+        cast.framework.SessionState.SESSION_ENDED,
+      ].includes(session.getSessionState())
+    ) {
+      session = null;
+    }
+
+    if (this.castSession == session) {
+      return;
+    }
+
+    if (this.castSession) {
+      this.castController.removeEventListener(
+        cast.framework.RemotePlayerEventType.ANY_CHANGE,
+        this.castControllerEventListener
+      );
+      this.castPlayer = null;
+      this.castController = null;
+    }
+
+    if (session) {
+      this.castPlayer = new cast.framework.RemotePlayer();
+      this.castController = new cast.framework.RemotePlayerController(
+        this.castPlayer
+      );
+      this.castController.addEventListener(
+        cast.framework.RemotePlayerEventType.ANY_CHANGE,
+        this.castControllerEventListener
+      );
+
+      this.isCasting = true;
+      this.classList.add("casting");
+    } else {
+      this.castPlayer = null;
+      this.castController = null;
+
+      this.isCasting = false;
+      this.classList.remove("casting");
+    }
+
+    this.castSession = session;
+
+    this.mediaIndex = -1;
+    this.seek(this.currentTime);
   }
 
   renderedVideo(element) {
@@ -173,7 +250,34 @@ export class VideoPlayer extends LitElement {
     this.videoElement = element;
   }
 
+  connectedCallback() {
+    super.connectedCallback();
+
+    if (this.isCasting) {
+      this.mediaIndex = -1;
+      this.seek(this.currentTime);
+    }
+  }
+
   disconnectedCallback() {
+    if (this.isCastAvailable) {
+      cast.framework.CastContext.getInstance().removeEventListener(
+        cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
+        this.castContextEventListener
+      );
+
+      if (this.castSession) {
+        this.castController.removeEventListener(
+          cast.framework.RemotePlayerEventType.ANY_CHANGE,
+          this.castControllerEventListener
+        );
+
+        if (this.isCasting()) {
+          this.castSession.endSession(true);
+        }
+      }
+    }
+
     this.videoElement?.pause();
 
     super.disconnectedCallback();
@@ -192,7 +296,9 @@ export class VideoPlayer extends LitElement {
       return;
     }
 
-    if (this.isPlaying) {
+    if (this.isCasting) {
+      this.castController.playOrPause();
+    } else if (this.isPlaying) {
       this.videoElement.pause();
     } else {
       this.videoElement.play();
@@ -269,13 +375,32 @@ export class VideoPlayer extends LitElement {
       targetTime -= this.playlist[mediaIndex].duration;
     }
 
-    if (mediaIndex == this.mediaIndex) {
+    this.previousTime = previousTime;
+
+    if (this.isCasting) {
+      if (mediaIndex == this.mediaIndex) {
+        this.castPlayer.currentTime = targetTime;
+        this.castController.seek();
+      } else {
+        this.mediaIndex = mediaIndex;
+
+        let url = new URL(this.playlist[mediaIndex].url, document.documentURI);
+        let mediaInfo = new chrome.cast.media.MediaInfo(
+          url.toString(),
+          this.playlist[mediaIndex].mimeType
+        );
+        let loadRequest = new chrome.cast.media.LoadRequest(mediaInfo);
+        loadRequest.currentTime = targetTime;
+        await this.castSession.loadMedia(loadRequest);
+      }
+    } else if (mediaIndex == this.mediaIndex) {
+      await this.updateComplete;
+
       this.videoElement.currentTime = targetTime;
     } else {
-      this.previousTime = previousTime;
       this.mediaIndex = mediaIndex;
 
-      while (!(await this.updateComplete)) {}
+      await this.updateComplete;
 
       this.videoElement.currentTime = targetTime;
     }
@@ -336,6 +461,10 @@ export class VideoPlayer extends LitElement {
   }
 
   renderVideo() {
+    if (this.isCasting) {
+      return nothing;
+    }
+
     let media = this.playlist[this.mediaIndex];
 
     return keyed(
