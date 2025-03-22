@@ -4,6 +4,7 @@ use std::{
     pin::Pin,
     str::FromStr,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -16,7 +17,7 @@ use flick_sync::{
     Collection, FlickSync, Library, LockedFile, LockedFileAsyncRead, MovieCollection, MovieLibrary,
     Playlist, Season, Server, Show, ShowCollection, ShowLibrary, Timeout, Video, VideoPart,
 };
-use futures::Stream;
+use futures::{Stream, TryStreamExt};
 use image::ImageReader;
 use lazy_static::lazy_static;
 use mime::Mime;
@@ -26,10 +27,7 @@ use tokio::io::{AsyncSeekExt, BufReader};
 use tokio_util::io::ReaderStream;
 use tracing::{Level, Span, field, instrument, span, warn};
 
-use crate::{
-    Console, EmbeddedFileStream, Resources,
-    console::{Bar, ProgressType},
-};
+use crate::{EmbeddedFileStream, Resources};
 
 lazy_static! {
     static ref RE_VIDEO_PART: Regex = Regex::new("^video/(.+)/VP:(.+)/(\\d+)$").unwrap();
@@ -81,8 +79,7 @@ where
 #[pin_project(PinnedDrop)]
 struct StreamLimiter<S> {
     start_position: u64,
-    seen_bytes: u64,
-    bar: Bar,
+    position: u64,
     limit: u64,
     span: Span,
     #[pin]
@@ -90,7 +87,7 @@ struct StreamLimiter<S> {
 }
 
 impl<S> StreamLimiter<S> {
-    fn new(stream: S, start_position: u64, bar: Bar, limit: u64) -> Self {
+    async fn new(stream: S, start_position: u64, limit: u64) -> Self {
         let span = span!(
             Level::INFO,
             "response_stream",
@@ -101,8 +98,7 @@ impl<S> StreamLimiter<S> {
 
         Self {
             start_position,
-            seen_bytes: 0,
-            bar,
+            position: start_position,
             limit,
             inner: stream,
             span,
@@ -113,7 +109,8 @@ impl<S> StreamLimiter<S> {
 #[pinned_drop]
 impl<S> PinnedDrop for StreamLimiter<S> {
     fn drop(self: Pin<&mut Self>) {
-        self.span.record("streamed_bytes", self.seen_bytes);
+        self.span
+            .record("streamed_bytes", self.position - self.start_position);
     }
 }
 
@@ -126,7 +123,7 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let _entered = self.span.clone().entered();
 
-        if self.seen_bytes >= self.limit {
+        if self.position >= self.limit {
             return Poll::Ready(None);
         }
 
@@ -134,15 +131,12 @@ where
 
         match this.inner.poll_next(cx) {
             Poll::Ready(Some(Ok(mut bytes))) => {
-                *this.seen_bytes += bytes.len() as u64;
+                *this.position += bytes.len() as u64;
 
-                if this.limit < this.seen_bytes {
-                    bytes.truncate(bytes.len() - (*this.seen_bytes - *this.limit) as usize);
-                    *this.seen_bytes = *this.limit;
+                if this.limit < this.position {
+                    bytes.truncate(bytes.len() - (*this.position - *this.limit) as usize);
+                    *this.position = *this.limit;
                 }
-
-                this.bar
-                    .set_position(*this.start_position + *this.seen_bytes);
 
                 Poll::Ready(Some(Ok(bytes)))
             }
@@ -151,7 +145,7 @@ where
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = (self.limit - self.seen_bytes) as usize;
+        let len = (self.limit - self.position) as usize;
         (len, Some(len))
     }
 }
@@ -840,7 +834,6 @@ impl ToObject for Collections {
 
 pub(crate) struct DlnaHandler {
     flick_sync: FlickSync,
-    console: Console,
 }
 
 impl DlnaHandler {
@@ -1058,12 +1051,6 @@ impl DlnaRequestHandler for DlnaHandler {
             return Err(UpnpError::unknown_object());
         };
 
-        let bar = self
-            .console
-            .add_progress_bar(&format!("🌍 {}", file.file_name()), ProgressType::Bytes);
-        bar.set_length(size);
-        bar.set_position(0);
-
         stream_file(file, async move |mut reader| {
             let (range, position, limit) = if let Some(seek) = seek {
                 let mut length = length.unwrap_or_else(|| size - seek);
@@ -1071,11 +1058,7 @@ impl DlnaRequestHandler for DlnaHandler {
 
                 if seek > 0 {
                     match reader.seek(SeekFrom::Start(seek)).await {
-                        Ok(start) => {
-                            bar.set_position(seek);
-
-                            (Some(Range { start, length }), start, length)
-                        }
+                        Ok(start) => (Some(Range { start, length }), start, length),
                         Err(e) => {
                             warn!(error=%e, "Failed to seek source file");
                             (None, 0, size)
@@ -1091,7 +1074,34 @@ impl DlnaRequestHandler for DlnaHandler {
                 (None, 0, size)
             };
 
-            let stream = StreamLimiter::new(ReaderStream::new(reader), position, bar, limit);
+            let video = part.video().await;
+            let duration = part.duration().await.as_millis() as u64;
+            let mut preceeding = Duration::from_millis(0);
+            if part.index() > 0 {
+                for previous in video.parts().await.into_iter().take(part.index()) {
+                    preceeding += previous.duration().await;
+                }
+            }
+
+            let preceeding = preceeding.as_millis() as u64;
+            let mut current_position = position;
+
+            let stream = StreamLimiter::new(ReaderStream::new(reader), position, limit + position)
+                .await
+                .and_then(move |bytes| {
+                    let video = video.clone();
+                    async move {
+                        current_position += bytes.len() as u64;
+
+                        let _ = video
+                            .set_playback_position(
+                                preceeding + (duration * current_position) / size,
+                            )
+                            .await;
+
+                        Ok(bytes)
+                    }
+                });
 
             (range, stream)
         })
@@ -1101,14 +1111,10 @@ impl DlnaRequestHandler for DlnaHandler {
 
 pub(crate) async fn build_dlna(
     flick_sync: FlickSync,
-    console: Console,
     port: u16,
 ) -> anyhow::Result<(DlnaServer, DlnaServiceFactory<DlnaHandler>)> {
     let uuid = flick_sync.client_id().await;
-    let handler = DlnaHandler {
-        flick_sync,
-        console,
-    };
+    let handler = DlnaHandler { flick_sync };
 
     DlnaServer::builder(handler)
         .uuid(uuid)

@@ -261,10 +261,10 @@ async fn background_task(
 }
 
 impl Runnable for Serve {
-    async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
+    async fn run(self, flick_sync: FlickSync, _console: Console) -> Result {
         let port = self.port.unwrap_or(80);
 
-        let (dlna_server, service_factory) = build_dlna(flick_sync.clone(), console, port).await?;
+        let (dlna_server, service_factory) = build_dlna(flick_sync.clone(), port).await?;
 
         let (event_sender, _) = broadcast::channel::<Event>(20);
 

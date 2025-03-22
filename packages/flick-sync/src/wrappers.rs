@@ -1352,6 +1352,27 @@ impl Episode {
         self.with_state(|vs| vs.playback_state.clone()).await
     }
 
+    pub async fn set_playback_state(&self, state: PlaybackState) -> Result {
+        self.update_state(|vs| {
+            if vs.playback_state != PlaybackState::Played && state == PlaybackState::Played {
+                vs.last_viewed_at = Some(OffsetDateTime::now_utc());
+            }
+
+            vs.playback_state = state;
+        })
+        .await
+    }
+
+    pub async fn duration(&self) -> Duration {
+        let mut total = Duration::from_millis(0);
+
+        for part in self.parts().await {
+            total += part.duration().await;
+        }
+
+        total
+    }
+
     async fn write_metadata(&self, writer: &mut EventWriter) -> Result {
         let season = self.season().await.with_state(|ss| ss.index).await;
         let show = self.show().await.with_state(|ss| ss.title.clone()).await;
@@ -1502,6 +1523,27 @@ impl Movie {
         self.with_state(|vs| vs.playback_state.clone()).await
     }
 
+    pub async fn set_playback_state(&self, state: PlaybackState) -> Result {
+        self.update_state(|vs| {
+            if vs.playback_state != PlaybackState::Played && state == PlaybackState::Played {
+                vs.last_viewed_at = Some(OffsetDateTime::now_utc());
+            }
+
+            vs.playback_state = state;
+        })
+        .await
+    }
+
+    pub async fn duration(&self) -> Duration {
+        let mut total = Duration::from_millis(0);
+
+        for part in self.parts().await {
+            total += part.duration().await;
+        }
+
+        total
+    }
+
     async fn write_metadata(&self, writer: &mut EventWriter) -> Result {
         self.with_state(|state| {
             writer.write(XmlEvent::start_element("movie"))?;
@@ -1606,6 +1648,36 @@ impl Video {
         match self {
             Self::Movie(v) => v.playback_state().await,
             Self::Episode(v) => v.playback_state().await,
+        }
+    }
+
+    pub async fn set_playback_state(&self, state: PlaybackState) -> Result {
+        match self {
+            Self::Movie(v) => v.set_playback_state(state).await,
+            Self::Episode(v) => v.set_playback_state(state).await,
+        }
+    }
+
+    pub async fn set_playback_position(&self, position: u64) -> Result {
+        let new_state = if position <= 60000 {
+            PlaybackState::Unplayed
+        } else {
+            let duration = self.duration().await.as_millis() as u64;
+
+            if position > (duration - 5 * 60000) {
+                PlaybackState::Played
+            } else {
+                PlaybackState::InProgress { position }
+            }
+        };
+
+        self.set_playback_state(new_state).await
+    }
+
+    pub async fn duration(&self) -> Duration {
+        match self {
+            Self::Movie(v) => v.duration().await,
+            Self::Episode(v) => v.duration().await,
         }
     }
 
