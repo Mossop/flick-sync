@@ -59,6 +59,24 @@ impl FromRequest for HxTarget {
     }
 }
 
+async fn async_sort<T, F, R, C>(list: &mut Vec<T>, mut mapper: F, mut comparator: C)
+where
+    F: AsyncFnMut(&T) -> R,
+    C: FnMut(&R, &R) -> Ordering,
+{
+    let mut items: Vec<(T, R)> = Vec::new();
+
+    for item in list.drain(..) {
+        let comparable = mapper(&item).await;
+        items.push((item, comparable));
+    }
+
+    items.sort_by(|a, b| comparator(&a.1, &b.1));
+
+    list.clear();
+    list.extend(items.into_iter().map(|(item, _)| item));
+}
+
 fn render<T: Template>(template: T) -> HttpResponse {
     match template.render() {
         Ok(body) => HttpResponse::Ok()
@@ -622,20 +640,33 @@ pub(super) async fn collection_contents(
     let mut thumbs = Vec::new();
     match collection {
         Collection::Movie(ref c) => {
+            let mut movies = Vec::new();
+
             for movie in c.movies().await {
                 if movie.is_downloaded().await {
-                    thumbs.push(Thumbnail::from_video(Video::Movie(movie)).await);
+                    movies.push(movie);
                 }
+            }
+
+            async_sort(
+                &mut movies,
+                async |movie| movie.air_date().await,
+                |da, db| da.cmp(db),
+            )
+            .await;
+
+            for movie in movies {
+                thumbs.push(Thumbnail::from_video(Video::Movie(movie)).await);
             }
         }
         Collection::Show(ref c) => {
             for show in c.shows().await {
                 thumbs.push(Thumbnail::from_show(show).await);
             }
+
+            thumbs.sort();
         }
     };
-
-    thumbs.sort();
 
     let template = ListTemplate {
         sidebar,
@@ -913,13 +944,24 @@ pub(super) async fn index_page(
         Some(Sidebar::build(&flick_sync, &status).await)
     };
 
-    #[derive(Template, Debug)]
+    let mut thumbs: Vec<Thumbnail> = Vec::new();
+    for video in flick_sync.on_deck().await {
+        thumbs.push(Thumbnail::from_video(video).await);
+    }
+
+    thumbs.sort();
+
+    #[derive(Template)]
     #[template(path = "index.html")]
     struct Index {
         sidebar: Option<Sidebar>,
+        items: Vec<Thumbnail>,
     }
 
-    let template = Index { sidebar };
+    let template = Index {
+        sidebar,
+        items: thumbs,
+    };
 
     render(template)
 }

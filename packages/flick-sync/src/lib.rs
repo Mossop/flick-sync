@@ -25,6 +25,7 @@ use plex_api::{
 };
 use serde_json::to_string_pretty;
 use state::{ServerState, State};
+use time::OffsetDateTime;
 use tokio::{
     fs::{read_dir, remove_dir_all, remove_file, write},
     sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, Semaphore},
@@ -221,6 +222,39 @@ impl FlickSync {
         self.inner.persist_state(&state).await?;
 
         Ok(())
+    }
+
+    pub async fn on_deck(&self) -> Vec<Video> {
+        let mut items: Vec<Video> = Vec::new();
+        let now = OffsetDateTime::now_utc();
+
+        for server in self.servers().await {
+            for video in server.videos().await {
+                match video.playback_state().await {
+                    PlaybackState::Played => {
+                        if let Some(last_played) = video.last_played().await {
+                            if (now - last_played).whole_days() <= 7 {
+                                if let Some(next) = video.next_video().await {
+                                    if next.playback_state().await == PlaybackState::Unplayed
+                                        && next.is_downloaded().await
+                                    {
+                                        items.push(next);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    PlaybackState::InProgress { .. } => {
+                        if video.is_downloaded().await {
+                            items.push(video);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        items
     }
 
     pub async fn server(&self, id: &str) -> Option<Server> {

@@ -254,7 +254,7 @@ pub(crate) struct LibraryState {
 pub(crate) struct SeasonState {
     pub(crate) id: String,
     pub(crate) show: String,
-    pub(crate) index: u32,
+    pub(crate) index: usize,
     pub(crate) title: String,
 }
 
@@ -265,7 +265,7 @@ impl SeasonState {
         Self {
             id: season.rating_key().to_owned(),
             show: metadata.parent.parent_rating_key.clone().unwrap(),
-            index: metadata.index.unwrap(),
+            index: metadata.index.unwrap() as usize,
             title: season.title().to_owned(),
         }
     }
@@ -273,7 +273,7 @@ impl SeasonState {
     pub(crate) fn update(&mut self, season: &Season) {
         let metadata = season.metadata();
 
-        self.index = metadata.index.unwrap();
+        self.index = metadata.index.unwrap() as usize;
         self.show = metadata.parent.parent_rating_key.clone().unwrap();
         self.title = season.title().to_owned();
     }
@@ -356,20 +356,20 @@ impl MovieDetail {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct EpisodeDetail {
     pub(crate) season: String,
-    pub(crate) index: u32,
+    pub(crate) index: usize,
 }
 
 impl EpisodeDetail {
     pub(crate) fn from(metadata: &Metadata) -> Self {
         EpisodeDetail {
             season: metadata.parent.parent_rating_key.clone().unwrap(),
-            index: metadata.index.unwrap(),
+            index: metadata.index.unwrap() as usize,
         }
     }
 
     pub(crate) fn update(&mut self, metadata: &Metadata) {
         self.season = metadata.parent.parent_rating_key.clone().unwrap();
-        self.index = metadata.index.unwrap();
+        self.index = metadata.index.unwrap() as usize;
     }
 }
 

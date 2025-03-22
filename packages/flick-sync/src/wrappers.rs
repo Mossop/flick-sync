@@ -19,7 +19,7 @@ use plex_api::{
     media_container::server::library::ContainerFormat,
     transcode::TranscodeStatus,
 };
-use time::OffsetDateTime;
+use time::{Date, OffsetDateTime};
 use tokio::{
     fs::{File, OpenOptions, create_dir_all, metadata, remove_file},
     io::{AsyncWriteExt, BufWriter},
@@ -428,9 +428,13 @@ wrapper_builders!(Season, SeasonState);
 impl Season {
     parent!(show, Show, show);
 
+    pub async fn index(&self) -> usize {
+        self.with_state(|ss| ss.index).await
+    }
+
     pub async fn episodes(&self) -> Vec<Episode> {
         self.with_server_state(|ss| {
-            let mut episode_states: Vec<(u32, &VideoState)> = ss
+            let mut episode_states: Vec<(usize, &VideoState)> = ss
                 .videos
                 .values()
                 .filter_map(|vs| {
@@ -1348,8 +1352,40 @@ impl Episode {
     metadata_methods!();
     parent!(season, Season, episode_state().season);
 
+    pub async fn index(&self) -> usize {
+        self.with_state(|vs| vs.episode_state().index).await
+    }
+
     pub async fn playback_state(&self) -> PlaybackState {
         self.with_state(|vs| vs.playback_state.clone()).await
+    }
+
+    pub async fn last_played(&self) -> Option<OffsetDateTime> {
+        self.with_state(|vs| vs.last_viewed_at).await
+    }
+
+    pub async fn next_episode(&self) -> Option<Episode> {
+        let season = self.season().await;
+        if let Some(ep) = season
+            .episodes()
+            .await
+            .into_iter()
+            .nth(self.index().await + 1)
+        {
+            return Some(ep);
+        }
+
+        let show = season.show().await;
+        if let Some(season) = show
+            .seasons()
+            .await
+            .into_iter()
+            .nth(season.index().await + 1)
+        {
+            season.episodes().await.into_iter().next()
+        } else {
+            None
+        }
     }
 
     pub async fn set_playback_state(&self, state: PlaybackState) -> Result {
@@ -1519,8 +1555,52 @@ impl Movie {
     metadata_methods!();
     parent!(library, MovieLibrary, movie_state().library);
 
+    pub async fn air_date(&self) -> Date {
+        self.with_state(|vs| vs.air_date).await
+    }
+
     pub async fn playback_state(&self) -> PlaybackState {
         self.with_state(|vs| vs.playback_state.clone()).await
+    }
+
+    pub async fn last_played(&self) -> Option<OffsetDateTime> {
+        self.with_state(|vs| vs.last_viewed_at).await
+    }
+
+    pub async fn next_movie(&self) -> Option<Movie> {
+        let self_air_date = self.with_state(|vs| vs.air_date).await;
+        let mut lowest = None;
+
+        for collection in self.library().await.collections().await {
+            if collection.contains(self).await {
+                for movie in collection.movies().await {
+                    if movie.id() == self.id() {
+                        continue;
+                    }
+
+                    let movie_air_date = movie.with_state(|vs| vs.air_date).await;
+                    if movie_air_date < self_air_date {
+                        continue;
+                    }
+
+                    if let Some((current_lowest, current_movie)) = lowest.take() {
+                        if current_lowest < movie_air_date {
+                            lowest = Some((current_lowest, current_movie));
+                        } else {
+                            lowest = Some((movie_air_date, movie));
+                        }
+                    } else {
+                        lowest = Some((movie_air_date, movie));
+                    }
+                }
+
+                if let Some((_, movie)) = lowest {
+                    return Some(movie);
+                }
+            }
+        }
+
+        None
     }
 
     pub async fn set_playback_state(&self, state: PlaybackState) -> Result {
@@ -1648,6 +1728,20 @@ impl Video {
         match self {
             Self::Movie(v) => v.playback_state().await,
             Self::Episode(v) => v.playback_state().await,
+        }
+    }
+
+    pub async fn last_played(&self) -> Option<OffsetDateTime> {
+        match self {
+            Self::Movie(v) => v.last_played().await,
+            Self::Episode(v) => v.last_played().await,
+        }
+    }
+
+    pub async fn next_video(&self) -> Option<Video> {
+        match self {
+            Self::Movie(v) => v.next_movie().await.map(Video::Movie),
+            Self::Episode(v) => v.next_episode().await.map(Video::Episode),
         }
     }
 
@@ -1868,6 +1962,13 @@ wrapper_builders!(MovieCollection, CollectionState);
 impl MovieCollection {
     thumbnail_methods!();
     parent!(library, MovieLibrary, library);
+
+    pub async fn contains(&self, movie: &Movie) -> bool {
+        let id = movie.id();
+
+        self.with_state(|cs| cs.contents.iter().any(|i| i == id))
+            .await
+    }
 
     pub async fn movies(&self) -> Vec<Movie> {
         self.with_state(|cs| {

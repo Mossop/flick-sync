@@ -103,6 +103,7 @@ where
 // Object ID forms and hierarchy:
 //
 // 0                         - root
+//   O                       - On Deck
 //   L                       - Libraries
 //     <server>/L:<id>       - Library
 //       <server>/V:<id>     - Movie
@@ -618,6 +619,11 @@ impl ToObject for Root {
 
     async fn to_children(self) -> Vec<Self::Children> {
         vec![
+            OnDeck {
+                flick_sync: self.flick_sync.clone(),
+            }
+            .to_object()
+            .await,
             Libraries {
                 flick_sync: self.flick_sync.clone(),
             }
@@ -637,6 +643,34 @@ impl ToObject for Root {
     }
 
     fn sort_children(_: &mut Vec<Object>) {}
+}
+
+struct OnDeck {
+    flick_sync: FlickSync,
+}
+
+impl ToObject for OnDeck {
+    type Children = Video;
+
+    async fn to_object(self) -> Object {
+        Object::Container(Container {
+            id: "O".to_string(),
+            parent_id: "0".to_string(),
+            child_count: Some(self.flick_sync.on_deck().await.len()),
+            title: "On Deck".to_string(),
+            thumbnail: Some(Icon {
+                id: "resource/logo-256.png".to_string(),
+                mime_type: mime::IMAGE_PNG,
+                width: 256,
+                height: 256,
+                depth: 32,
+            }),
+        })
+    }
+
+    async fn to_children(self) -> Vec<Self::Children> {
+        self.flick_sync.on_deck().await
+    }
 }
 
 struct Libraries {
@@ -780,6 +814,12 @@ impl DlnaRequestHandler for DlnaHandler {
             }
             .to_object()
             .await)
+        } else if object_id == "O" {
+            Ok(OnDeck {
+                flick_sync: self.flick_sync.clone(),
+            }
+            .to_object()
+            .await)
         } else if object_id == "L" {
             Ok(Libraries {
                 flick_sync: self.flick_sync.clone(),
@@ -822,6 +862,12 @@ impl DlnaRequestHandler for DlnaHandler {
     async fn list_children(&self, object_id: &str) -> Result<Vec<Object>, UpnpError> {
         if object_id == "0" {
             Ok(Root {
+                flick_sync: self.flick_sync.clone(),
+            }
+            .collect_children()
+            .await)
+        } else if object_id == "O" {
+            Ok(OnDeck {
                 flick_sync: self.flick_sync.clone(),
             }
             .collect_children()
