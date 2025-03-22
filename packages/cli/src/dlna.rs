@@ -21,13 +21,16 @@ use futures::{Stream, TryStreamExt};
 use image::ImageReader;
 use lazy_static::lazy_static;
 use mime::Mime;
-use pin_project::{pin_project, pinned_drop};
+use pin_project::pin_project;
 use regex::Regex;
 use tokio::io::{AsyncSeekExt, BufReader};
 use tokio_util::io::ReaderStream;
-use tracing::{Level, Span, field, instrument, span, warn};
+use tracing::{instrument, warn};
 
-use crate::{EmbeddedFileStream, Resources};
+use crate::{
+    EmbeddedFileStream, Resources,
+    shared::{StreamLimiter, uniform_title},
+};
 
 lazy_static! {
     static ref RE_VIDEO_PART: Regex = Regex::new("^video/(.+)/VP:(.+)/(\\d+)$").unwrap();
@@ -76,80 +79,6 @@ where
     })
 }
 
-#[pin_project(PinnedDrop)]
-struct StreamLimiter<S> {
-    start_position: u64,
-    position: u64,
-    limit: u64,
-    span: Span,
-    #[pin]
-    inner: S,
-}
-
-impl<S> StreamLimiter<S> {
-    async fn new(stream: S, start_position: u64, limit: u64) -> Self {
-        let span = span!(
-            Level::INFO,
-            "response_stream",
-            "streamed_bytes" = field::Empty,
-            "start_position" = start_position,
-            "limit" = limit,
-        );
-
-        Self {
-            start_position,
-            position: start_position,
-            limit,
-            inner: stream,
-            span,
-        }
-    }
-}
-
-#[pinned_drop]
-impl<S> PinnedDrop for StreamLimiter<S> {
-    fn drop(self: Pin<&mut Self>) {
-        self.span
-            .record("streamed_bytes", self.position - self.start_position);
-    }
-}
-
-impl<S> Stream for StreamLimiter<S>
-where
-    S: Stream<Item = Result<Bytes, io::Error>>,
-{
-    type Item = Result<Bytes, io::Error>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let _entered = self.span.clone().entered();
-
-        if self.position >= self.limit {
-            return Poll::Ready(None);
-        }
-
-        let this = self.project();
-
-        match this.inner.poll_next(cx) {
-            Poll::Ready(Some(Ok(mut bytes))) => {
-                *this.position += bytes.len() as u64;
-
-                if this.limit < this.position {
-                    bytes.truncate(bytes.len() - (*this.position - *this.limit) as usize);
-                    *this.position = *this.limit;
-                }
-
-                Poll::Ready(Some(Ok(bytes)))
-            }
-            o => o,
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = (self.limit - self.position) as usize;
-        (len, Some(len))
-    }
-}
-
 #[pin_project(project = EitherProj)]
 enum EitherStream<A, B> {
     A(#[pin] A),
@@ -188,20 +117,15 @@ where
 //     <server>/P:<id>       - Playlist
 //       <server>/V:<id>     - Video
 
-fn uniform_title(obj: &Object) -> String {
-    let title = match obj {
-        Object::Container(o) => o.title.to_lowercase(),
-        Object::Item(o) => o.title.to_lowercase(),
-    };
-
-    let mut trimmed = title.trim().trim_start_matches("a ").trim();
-    trimmed = trimmed.trim().trim_start_matches("the ").trim();
-
-    trimmed.to_string()
+fn object_title(obj: &Object) -> String {
+    match obj {
+        Object::Container(o) => uniform_title(&o.title),
+        Object::Item(o) => uniform_title(&o.title),
+    }
 }
 
 fn sort_by_title(a: &Object, b: &Object) -> Ordering {
-    uniform_title(a).cmp(&uniform_title(b))
+    object_title(a).cmp(&object_title(b))
 }
 
 async fn icon_resource(id: &str, file: Result<Option<LockedFile>, Timeout>) -> Option<Icon> {
@@ -1087,7 +1011,6 @@ impl DlnaRequestHandler for DlnaHandler {
             let mut current_position = position;
 
             let stream = StreamLimiter::new(ReaderStream::new(reader), position, limit + position)
-                .await
                 .and_then(move |bytes| {
                     let video = video.clone();
                     async move {

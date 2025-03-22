@@ -23,6 +23,7 @@ mod console;
 mod dlna;
 mod serve;
 mod server;
+pub(crate) mod shared;
 mod sync;
 mod util;
 

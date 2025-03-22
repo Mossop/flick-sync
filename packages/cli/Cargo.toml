@@ -42,7 +42,9 @@ tokio-stream = { version = "0.1.17", features = ["signal", "sync"] }
 actix-web = { version = "4.9.0", default-features = false, features = [
   "macros",
   "compat",
+  "rustls-0_23",
 ] }
+actix-tls = "3.4.0"
 rinja = { version = "0.3.5", features = ["serde_json"] }
 regex = "1.11.1"
 lazy_static = "1.4.0"

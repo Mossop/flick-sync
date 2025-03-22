@@ -1,22 +1,28 @@
 use std::{
     cmp::Ordering,
     future::{Ready, ready},
+    io::SeekFrom,
+    str::FromStr,
     sync::Mutex,
 };
 
 use actix_web::{
-    FromRequest, HttpResponse,
+    FromRequest, HttpRequest, HttpResponse,
     body::SizedStream,
     get,
     http::header,
-    web::{Data, Path, ThinData},
+    post,
+    web::{Data, Path, Query, ThinData},
 };
 use bytes::Bytes;
 use flick_sync::{Collection, FlickSync, Library, LibraryType, PlaybackState, Season, Show, Video};
 use futures::TryStreamExt;
 use rinja::Template;
-use serde::Serialize;
-use tokio::{io::BufReader, sync::broadcast::Sender};
+use serde::{Deserialize, Serialize};
+use tokio::{
+    io::{AsyncSeekExt, BufReader},
+    sync::broadcast::Sender,
+};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
 use tracing::error;
@@ -24,9 +30,10 @@ use tracing::error;
 use crate::{
     EmbeddedFileStream, Resources,
     serve::{
-        Event, SyncStatus,
+        ConnectionInfo, Event, SyncStatus,
         events::{ProgressBarTemplate, SyncLogTemplate, SyncProgressBar},
     },
+    shared::{StreamLimiter, uniform_title},
 };
 
 struct HxTarget(Option<String>);
@@ -203,6 +210,112 @@ pub(super) async fn thumbnail(
     }
 }
 
+#[get("/stream/{server}/{video_id}/{part}")]
+pub(super) async fn video_stream(
+    ThinData(flick_sync): ThinData<FlickSync>,
+    req: HttpRequest,
+    path: Path<(String, String, usize)>,
+) -> HttpResponse {
+    let (server_id, video_id, part_index) = path.into_inner();
+
+    let Some(server) = flick_sync.server(&server_id).await else {
+        return HttpResponse::NotFound().finish();
+    };
+
+    let Some(video) = server.video(&video_id).await else {
+        return HttpResponse::NotFound().finish();
+    };
+
+    let parts = video.parts().await;
+    let Some(part) = parts.get(part_index) else {
+        return HttpResponse::NotFound().finish();
+    };
+
+    let Ok(Some(file)) = part.file().await else {
+        return HttpResponse::NotFound().finish();
+    };
+
+    let Ok(mime_type) = file.mime_type().await else {
+        return HttpResponse::NotFound().finish();
+    };
+
+    let Ok(size) = file.len().await else {
+        return HttpResponse::NotFound().finish();
+    };
+
+    let Ok(reader) = file.async_read().await else {
+        return HttpResponse::NotFound().finish();
+    };
+    let mut reader = BufReader::new(reader);
+
+    if let Some(header::Range::Bytes(spec)) = req
+        .headers()
+        .get(header::RANGE)
+        .and_then(|hv| hv.to_str().ok())
+        .and_then(|hv| header::Range::from_str(hv).ok())
+    {
+        if spec.len() == 1 {
+            match spec[0] {
+                header::ByteRangeSpec::From(start) => {
+                    if reader.seek(SeekFrom::Start(start)).await.is_err() {
+                        return HttpResponse::NotFound().finish();
+                    }
+
+                    HttpResponse::PartialContent()
+                        .append_header(header::ContentRange(header::ContentRangeSpec::Bytes {
+                            range: Some((start, size - 1)),
+                            instance_length: Some(size),
+                        }))
+                        .append_header(header::ContentType(mime_type))
+                        .append_header((header::ACCEPT_RANGES, "bytes"))
+                        .body(SizedStream::new(size - start, ReaderStream::new(reader)))
+                }
+                header::ByteRangeSpec::Last(end) => {
+                    if reader.seek(SeekFrom::End(-(end as i64))).await.is_err() {
+                        return HttpResponse::NotFound().finish();
+                    }
+
+                    HttpResponse::PartialContent()
+                        .append_header(header::ContentRange(header::ContentRangeSpec::Bytes {
+                            range: Some((size - end, end)),
+                            instance_length: Some(size),
+                        }))
+                        .append_header(header::ContentType(mime_type))
+                        .append_header((header::ACCEPT_RANGES, "bytes"))
+                        .body(SizedStream::new(end, ReaderStream::new(reader)))
+                }
+                header::ByteRangeSpec::FromTo(start, end) => {
+                    if reader.seek(SeekFrom::Start(start)).await.is_err() {
+                        return HttpResponse::NotFound().finish();
+                    }
+
+                    HttpResponse::PartialContent()
+                        .append_header(header::ContentRange(header::ContentRangeSpec::Bytes {
+                            range: Some((start, end)),
+                            instance_length: Some(size),
+                        }))
+                        .append_header(header::ContentType(mime_type))
+                        .append_header((header::ACCEPT_RANGES, "bytes"))
+                        .body(SizedStream::new(
+                            end - start + 1,
+                            StreamLimiter::new(ReaderStream::new(reader), start, end + 1),
+                        ))
+                }
+            }
+        } else {
+            HttpResponse::Ok()
+                .append_header(header::ContentType(mime_type))
+                .append_header((header::ACCEPT_RANGES, "bytes"))
+                .body(SizedStream::new(size, ReaderStream::new(reader)))
+        }
+    } else {
+        HttpResponse::Ok()
+            .append_header(header::ContentType(mime_type))
+            .append_header((header::ACCEPT_RANGES, "bytes"))
+            .body(SizedStream::new(size, ReaderStream::new(reader)))
+    }
+}
+
 #[derive(Debug)]
 struct SidebarLibrary {
     id: String,
@@ -263,18 +376,6 @@ struct Thumbnail {
     url: String,
     image: String,
     name: String,
-}
-
-fn uniform_title(st: &str) -> String {
-    let title = st.to_lowercase();
-
-    title
-        .trim()
-        .trim_start_matches("a ")
-        .trim()
-        .trim_start_matches("the ")
-        .trim()
-        .to_string()
 }
 
 impl PartialEq for Thumbnail {
@@ -672,11 +773,39 @@ pub(super) async fn playlist_contents(
     render(template)
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PlaybackPosition {
+    position: f64,
+}
+
+#[post("/playback/{server}/{library_id}/video/{video_id}")]
+pub(super) async fn update_playback_position(
+    ThinData(flick_sync): ThinData<FlickSync>,
+    path: Path<(String, String, String)>,
+    query: Query<PlaybackPosition>,
+) -> HttpResponse {
+    let (server_id, _, video_id) = path.into_inner();
+
+    let Some(server) = flick_sync.server(&server_id).await else {
+        return HttpResponse::NotFound().finish();
+    };
+
+    let Some(video) = server.video(&video_id).await else {
+        return HttpResponse::NotFound().finish();
+    };
+
+    let position = (query.position * 1000.0).round() as u64;
+    let _ = video.set_playback_position(position).await;
+
+    HttpResponse::Ok().finish()
+}
+
 #[get("/library/{server}/{library_id}/video/{video_id}")]
 pub(super) async fn video_page(
     ThinData(flick_sync): ThinData<FlickSync>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
+    req: HttpRequest,
     path: Path<(String, String, String)>,
 ) -> HttpResponse {
     let (server_id, _, video_id) = path.into_inner();
@@ -693,6 +822,16 @@ pub(super) async fn video_page(
         None
     } else {
         Some(Sidebar::build(&flick_sync, &status).await)
+    };
+
+    let url_base = if let Some(conn_info) = req.conn_data::<ConnectionInfo>() {
+        if conn_info.local_addr.port() == 443 {
+            format!("http://{}/", conn_info.local_addr.ip())
+        } else {
+            format!("http://{}/", conn_info.local_addr)
+        }
+    } else {
+        "".to_string()
     };
 
     #[derive(Serialize)]
@@ -715,7 +854,7 @@ pub(super) async fn video_page(
 
         parts.push(VideoPart {
             url: format!(
-                "/upnp/resource/video/{server_id}/VP:{}/{}",
+                "{url_base}stream/{server_id}/{}/{}",
                 video.id(),
                 part.index()
             ),

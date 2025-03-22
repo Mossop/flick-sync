@@ -148,6 +148,7 @@ export class VideoPlayer extends LitElement {
   constructor() {
     super();
     this.currentTime = 0;
+    this.lastReportedTime = 0;
     this.mediaIndex = 0;
     this.isPlaying = false;
     this.previousTime = 0;
@@ -353,8 +354,15 @@ export class VideoPlayer extends LitElement {
   }
 
   updateTime(newTime) {
-    if (Math.abs(this.currentTime - newTime)) {
-      // Update playback position
+    if (Math.abs(this.lastReportedTime - newTime) > 10) {
+      this.lastReportedTime = newTime;
+
+      let updateUrl = document.documentURI.replace("/library/", "/playback/");
+      fetch(`${updateUrl}?position=${this.currentTime}`, {
+        method: "POST",
+      }).catch((e) => {
+        console.error(e);
+      });
     }
 
     this.currentTime = newTime;

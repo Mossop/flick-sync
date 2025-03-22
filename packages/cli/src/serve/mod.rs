@@ -1,13 +1,17 @@
 use std::{
+    any::Any,
     collections::{HashMap, VecDeque},
-    net::Ipv4Addr,
+    net::{Ipv4Addr, SocketAddr},
     sync::{Arc, Mutex},
     time::Duration,
 };
 
+use actix_tls::accept::rustls_0_23::TlsStream;
 use actix_web::{
     App, HttpServer,
+    dev::Extensions,
     middleware::from_fn,
+    rt::net::TcpStream,
     web::{Data, ThinData},
 };
 use clap::Args;
@@ -260,6 +264,24 @@ async fn background_task(
     }
 }
 
+struct ConnectionInfo {
+    local_addr: SocketAddr,
+}
+
+fn on_connect(connection: &dyn Any, data: &mut Extensions) {
+    if let Some(stream) = connection.downcast_ref::<TcpStream>() {
+        if let Ok(addr) = stream.local_addr() {
+            data.insert(ConnectionInfo { local_addr: addr });
+        }
+    } else if let Some(tls) = connection.downcast_ref::<TlsStream<TcpStream>>() {
+        let (stream, _) = tls.get_ref();
+
+        if let Ok(addr) = stream.local_addr() {
+            data.insert(ConnectionInfo { local_addr: addr });
+        }
+    }
+}
+
 impl Runnable for Serve {
     async fn run(self, flick_sync: FlickSync, _console: Console) -> Result {
         let port = self.port.unwrap_or(80);
@@ -293,11 +315,14 @@ impl Runnable for Serve {
                 .service(services::collection_contents)
                 .service(services::show_contents)
                 .service(services::season_contents)
+                .service(services::video_stream)
+                .service(services::update_playback_position)
                 .service(services::video_page)
                 .service(services::library_contents)
                 .service(services::sync_list)
                 .service(services::index_page)
         })
+        .on_connect(on_connect)
         .bind((Ipv4Addr::UNSPECIFIED, port))?
         .run();
 
