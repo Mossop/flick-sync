@@ -71,7 +71,7 @@ body.sidebar sl-split-panel {
   flex-direction: column;
   align-items: stretch;
   justify-content: start;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .tab-group {
