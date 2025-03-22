@@ -34,8 +34,9 @@ use crate::{
     config::OutputStyle,
     server::Progress,
     state::{
-        CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, RelatedFileState,
-        SeasonState, ServerState, ShowState, VideoDetail, VideoPartState, VideoState,
+        CollectionState, DownloadState, LibraryState, LibraryType, PlaybackState, PlaylistState,
+        RelatedFileState, SeasonState, ServerState, ShowState, VideoDetail, VideoPartState,
+        VideoState,
     },
     sync::{OpReadGuard, OpWriteGuard, Timeout},
     util::{AsyncWriteAdapter, safe},
@@ -1347,6 +1348,10 @@ impl Episode {
     metadata_methods!();
     parent!(season, Season, episode_state().season);
 
+    pub async fn playback_state(&self) -> PlaybackState {
+        self.with_state(|vs| vs.playback_state.clone()).await
+    }
+
     async fn write_metadata(&self, writer: &mut EventWriter) -> Result {
         let season = self.season().await.with_state(|ss| ss.index).await;
         let show = self.show().await.with_state(|ss| ss.title.clone()).await;
@@ -1493,6 +1498,10 @@ impl Movie {
     metadata_methods!();
     parent!(library, MovieLibrary, movie_state().library);
 
+    pub async fn playback_state(&self) -> PlaybackState {
+        self.with_state(|vs| vs.playback_state.clone()).await
+    }
+
     async fn write_metadata(&self, writer: &mut EventWriter) -> Result {
         self.with_state(|state| {
             writer.write(XmlEvent::start_element("movie"))?;
@@ -1593,6 +1602,13 @@ pub enum Video {
 }
 
 impl Video {
+    pub async fn playback_state(&self) -> PlaybackState {
+        match self {
+            Self::Movie(v) => v.playback_state().await,
+            Self::Episode(v) => v.playback_state().await,
+        }
+    }
+
     pub async fn thumbnail(&self) -> result::Result<Option<LockedFile>, Timeout> {
         match self {
             Self::Movie(v) => v.thumbnail().await,

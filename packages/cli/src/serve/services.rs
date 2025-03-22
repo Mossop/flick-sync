@@ -12,7 +12,7 @@ use actix_web::{
     web::{Data, Path, ThinData},
 };
 use bytes::Bytes;
-use flick_sync::{Collection, FlickSync, Library, LibraryType, Season, Show, Video};
+use flick_sync::{Collection, FlickSync, Library, LibraryType, PlaybackState, Season, Show, Video};
 use futures::TryStreamExt;
 use rinja::Template;
 use serde::Serialize;
@@ -730,12 +730,20 @@ pub(super) async fn video_page(
         sidebar: Option<Sidebar>,
         title: String,
         parts: Vec<VideoPart>,
+        playback_position: f64,
     }
+
+    let playback_state = video.playback_state().await;
+    let playback_position = match playback_state {
+        PlaybackState::Unplayed | PlaybackState::Played => 0.0,
+        PlaybackState::InProgress { position } => position as f64 / 1000.0,
+    };
 
     let template = Video {
         sidebar,
         title: video.title().await,
         parts,
+        playback_position,
     };
 
     render(template)

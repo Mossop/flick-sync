@@ -687,7 +687,7 @@ pub(crate) enum VideoDetail {
 
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 #[serde(tag = "state", rename_all = "lowercase")]
-pub(crate) enum PlaybackState {
+pub enum PlaybackState {
     Unplayed,
     InProgress { position: u64 },
     Played,

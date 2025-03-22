@@ -100,7 +100,7 @@ body.sidebar sl-split-panel {
   display: grid;
   gap: var(--sl-spacing-x-small);
   padding-inline: var(--sl-spacing-x-small);
-  padding-bottom: var(--sl-spacing-medium);
+  padding-block: var(--sl-spacing-medium);
   grid-template-columns: repeat(auto-fill, minmax(calc(150px + 1rem),1fr));
 }
 

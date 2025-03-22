@@ -35,7 +35,7 @@ use uuid::Uuid;
 pub use crate::{
     config::ServerConnection,
     server::{DownloadProgress, ItemType, Progress, Server, SyncItemInfo},
-    state::LibraryType,
+    state::{LibraryType, PlaybackState},
     sync::{LockedFile, LockedFileAsyncRead, LockedFileRead, Timeout},
     wrappers::*,
 };

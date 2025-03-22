@@ -138,7 +138,7 @@ export class VideoPlayer extends LitElement {
   static properties = {
     playlist: { type: Array },
     mediaIndex: { state: true },
-    currentTime: { state: true },
+    currentTime: { type: Number },
     isPlaying: { state: true },
     isFullscreen: { state: true },
     isCastAvailable: { state: true },
@@ -187,7 +187,7 @@ export class VideoPlayer extends LitElement {
 
   castControllerEventListener = (event) => {
     this.isPlaying = !this.castPlayer.isPaused;
-    this.currentTime = this.castPlayer.currentTime + this.previousTime;
+    this.updateTime(this.castPlayer.currentTime + this.previousTime);
   };
 
   updateCastSession(session) {
@@ -248,6 +248,10 @@ export class VideoPlayer extends LitElement {
     }
 
     this.videoElement = element;
+
+    if (this.videoElement) {
+      this.videoElement.currentTime = this.currentTime - this.previousTime;
+    }
   }
 
   connectedCallback() {
@@ -286,6 +290,13 @@ export class VideoPlayer extends LitElement {
   willUpdate(changedProperties) {
     if (changedProperties.has("playlist")) {
       this.totalTime = this.playlist
+        .map((m) => m.duration)
+        .reduce((t, v) => t + v, 0);
+    }
+
+    if (changedProperties.has("mediaIndex")) {
+      this.previousTime = this.playlist
+        .slice(0, this.mediaIndex)
         .map((m) => m.duration)
         .reduce((t, v) => t + v, 0);
     }
@@ -341,13 +352,21 @@ export class VideoPlayer extends LitElement {
     }
   }
 
+  updateTime(newTime) {
+    if (Math.abs(this.currentTime - newTime)) {
+      // Update playback position
+    }
+
+    this.currentTime = newTime;
+  }
+
   onMediaStateChanged() {
     if (!this.videoElement) {
       return;
     }
 
     this.isPlaying = !(this.videoElement.paused || this.videoElement.ended);
-    this.currentTime = this.previousTime + this.videoElement.currentTime;
+    this.updateTime(this.previousTime + this.videoElement.currentTime);
   }
 
   onMediaEnded() {
@@ -394,15 +413,9 @@ export class VideoPlayer extends LitElement {
         await this.castSession.loadMedia(loadRequest);
       }
     } else if (mediaIndex == this.mediaIndex) {
-      await this.updateComplete;
-
       this.videoElement.currentTime = targetTime;
     } else {
       this.mediaIndex = mediaIndex;
-
-      await this.updateComplete;
-
-      this.videoElement.currentTime = targetTime;
     }
   }
 

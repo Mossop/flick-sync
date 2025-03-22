@@ -4,6 +4,6 @@
 
 {% block content %}
   <div id="video-container">
-    <video-player playlist="{{ parts|json }}"></video-player>
+    <video-player playlist="{{ parts|json }}" currentTime="{{ playback_position }}"></video-player>
   </div>
 {% endblock %}
