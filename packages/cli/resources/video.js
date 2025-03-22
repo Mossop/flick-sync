@@ -487,9 +487,11 @@ export class VideoPlayer extends LitElement {
     }
 
     let media = this.playlist[this.mediaIndex];
+    let mediaUrl = new URL(media.url, document.documentURI);
+    mediaUrl = new URL(mediaUrl.pathname, document.documentURI);
 
     return keyed(
-      media.url,
+      mediaUrl.toString(),
       html`
       <video
         ${ref(this.renderedVideo)}
@@ -501,7 +503,7 @@ export class VideoPlayer extends LitElement {
         @timeupdate="${this.onMediaStateChanged}"
         @seeked="${this.onMediaStateChanged}"
       >
-        <source type="${media.mimeType}" src="${media.url}"></source>
+        <source type="${media.mimeType}" src="${mediaUrl.toString()}"></source>
       </video>`
     );
   }
