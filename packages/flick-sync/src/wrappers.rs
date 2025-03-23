@@ -1261,8 +1261,6 @@ pub struct VideoStats {
     pub downloaded_parts: u32,
     pub total_parts: u32,
     pub local_bytes: u64,
-    pub remote_bytes: u64,
-    pub remaining_bytes: u64,
     pub local_duration: Duration,
     pub remote_duration: Duration,
 }
@@ -1275,8 +1273,6 @@ impl Add for VideoStats {
             downloaded_parts: self.downloaded_parts + rhs.downloaded_parts,
             total_parts: self.total_parts + rhs.total_parts,
             local_bytes: self.local_bytes + rhs.local_bytes,
-            remote_bytes: self.remote_bytes + rhs.remote_bytes,
-            remaining_bytes: self.remaining_bytes + rhs.remaining_bytes,
             local_duration: self.local_duration + rhs.local_duration,
             remote_duration: self.remote_duration + rhs.remote_duration,
         }
@@ -1288,47 +1284,36 @@ impl AddAssign for VideoStats {
         self.downloaded_parts += rhs.downloaded_parts;
         self.total_parts += rhs.total_parts;
         self.local_bytes += rhs.local_bytes;
-        self.remote_bytes += rhs.remote_bytes;
-        self.remaining_bytes += rhs.remaining_bytes;
         self.local_duration += rhs.local_duration;
         self.remote_duration += rhs.remote_duration;
     }
 }
 
 impl VideoStats {
-    async fn try_from<M: MediaItem>(item: M, parts: Vec<VideoPart>) -> Result<Self> {
-        let media = item.media();
-        let media = &media[0];
-
+    async fn from(parts: Vec<VideoPart>) -> Self {
         let mut stats = VideoStats::default();
 
-        for (local_part, remote_part) in parts.into_iter().zip(media.parts()) {
+        for part in parts.into_iter() {
             stats.total_parts += 1;
 
-            let part_duration = local_part.duration().await;
+            let part_duration = part.duration().await;
             stats.remote_duration += part_duration;
-            let state = local_part.download_state().await;
+            let state = part.download_state().await;
 
             if !state.needs_download() {
                 stats.local_duration += part_duration;
+                stats.downloaded_parts += 1;
             }
 
             if let Some(path) = state.path() {
-                let path = local_part.server.inner.path.join(path);
+                let path = part.server.inner.path.join(path);
                 if let Ok(file_stats) = metadata(path).await {
                     stats.local_bytes += file_stats.len();
                 }
             }
-
-            if !state.needs_download() {
-                stats.downloaded_parts += 1;
-                stats.remote_bytes += remote_part.metadata().size.unwrap();
-            } else {
-                stats.remaining_bytes += remote_part.metadata().size.unwrap();
-            }
         }
 
-        Ok(stats)
+        stats
     }
 }
 
@@ -1445,10 +1430,8 @@ impl Episode {
         .await
     }
 
-    pub async fn stats(&self) -> Result<VideoStats> {
-        let server = self.server.connect().await?;
-        let item = server.item_by_id(&self.id).await?;
-        VideoStats::try_from(item, self.parts().await).await
+    pub async fn stats(&self) -> VideoStats {
+        VideoStats::from(self.parts().await).await
     }
 
     pub async fn is_downloaded(&self) -> bool {
@@ -1653,10 +1636,8 @@ impl Movie {
         true
     }
 
-    pub async fn stats(&self) -> Result<VideoStats> {
-        let server = self.server.connect().await?;
-        let item = server.item_by_id(&self.id).await?;
-        VideoStats::try_from(item, self.parts().await).await
+    pub async fn stats(&self) -> VideoStats {
+        VideoStats::from(self.parts().await).await
     }
 
     pub async fn parts(&self) -> Vec<VideoPart> {
@@ -1824,7 +1805,7 @@ impl Video {
         }
     }
 
-    pub async fn stats(&self) -> Result<VideoStats> {
+    pub async fn stats(&self) -> VideoStats {
         match self {
             Self::Movie(v) => v.stats().await,
             Self::Episode(v) => v.stats().await,

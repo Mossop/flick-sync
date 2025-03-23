@@ -12,14 +12,14 @@ use actix_web::{
 };
 use clap::Args;
 use flick_sync::{DownloadProgress, FlickSync, Progress, Server, VideoPart};
-use futures::{StreamExt, select};
+use futures::{FutureExt, StreamExt, select};
 use rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
 };
 use tokio::{
     signal::unix::{SignalKind, signal},
-    sync::broadcast,
+    sync::{Notify, broadcast},
     time,
 };
 use tokio_stream::wrappers::SignalStream;
@@ -232,6 +232,7 @@ async fn background_task(
     flick_sync: FlickSync,
     status: Arc<Mutex<SyncStatus>>,
     event_sender: broadcast::Sender<Event>,
+    wakeup: Arc<Notify>,
 ) {
     loop {
         status.lock().unwrap().is_syncing = true;
@@ -248,6 +249,8 @@ async fn background_task(
                 continue;
             }
 
+            task.send_event(Event::SyncChange);
+
             if let Err(e) = server.prune().await {
                 warn!(server=server.id(), error=?e, "Failed to prune server directory");
             }
@@ -263,8 +266,12 @@ async fn background_task(
 
         status.lock().unwrap().is_syncing = false;
         task.send_event(Event::SyncEnd);
+        task.send_event(Event::SyncChange);
 
-        time::sleep(Duration::from_secs(30 * 60)).await;
+        select! {
+            _ = time::sleep(Duration::from_secs(30 * 60)).fuse() => {},
+            _ = wakeup.notified().fuse() => {},
+        }
     }
 }
 
@@ -292,6 +299,7 @@ struct ServiceData {
     http_port: u16,
     status: Arc<Mutex<SyncStatus>>,
     event_sender: broadcast::Sender<Event>,
+    sync_trigger: Arc<Notify>,
 }
 
 impl Runnable for Serve {
@@ -303,11 +311,13 @@ impl Runnable for Serve {
         let (event_sender, _) = broadcast::channel::<Event>(20);
 
         let status: Arc<Mutex<SyncStatus>> = Default::default();
+        let sync_trigger = Arc::new(Notify::new());
 
         let background_task = tokio::spawn(background_task(
             flick_sync.clone(),
             status.clone(),
             event_sender.clone(),
+            sync_trigger.clone(),
         ));
 
         let service_data = ServiceData {
@@ -315,6 +325,7 @@ impl Runnable for Serve {
             http_port: port,
             status,
             event_sender,
+            sync_trigger,
         };
 
         let mut http_server = HttpServer::new(move || {
@@ -335,6 +346,10 @@ impl Runnable for Serve {
                 .service(services::video_page)
                 .service(services::library_contents)
                 .service(services::status_page)
+                .service(services::sync_list)
+                .service(services::delete_sync)
+                .service(services::delete_server)
+                .service(services::create_sync)
                 .service(services::index_page)
         })
         .on_connect(on_connect)

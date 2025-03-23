@@ -29,8 +29,8 @@ use tokio::{
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
-    DEFAULT_PROFILES, FileType, Inner, Library, OutputStyle, Result, ServerConnection,
-    TransferState,
+    Collection, DEFAULT_PROFILES, FileType, Inner, Library, OutputStyle, Result, ServerConnection,
+    TransferState, VideoStats,
     config::{Config, ServerConfig, SyncItem, TranscodeProfile},
     state::{
         CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, SeasonState,
@@ -83,11 +83,70 @@ pub trait DownloadProgress: Clone {
 }
 
 pub struct SyncItemInfo {
+    pub(super) server: Server,
     pub id: String,
     pub item_type: ItemType,
     pub title: String,
     pub transcode_profile: Option<String>,
     pub only_unplayed: bool,
+}
+
+impl SyncItemInfo {
+    async fn show_stats(show: wrappers::Show) -> VideoStats {
+        let mut stats = VideoStats::default();
+
+        for season in show.seasons().await {
+            stats += Self::season_stats(season).await;
+        }
+
+        stats
+    }
+
+    async fn season_stats(season: wrappers::Season) -> VideoStats {
+        let mut stats = VideoStats::default();
+
+        for video in season.episodes().await {
+            stats += video.stats().await;
+        }
+
+        stats
+    }
+
+    pub async fn stats(&self) -> VideoStats {
+        if let Some(playlist) = self.server.playlist(&self.id).await {
+            let mut stats = VideoStats::default();
+
+            for video in playlist.videos().await {
+                stats += video.stats().await;
+            }
+
+            stats
+        } else if let Some(collection) = self.server.collection(&self.id).await {
+            let mut stats = VideoStats::default();
+
+            match collection {
+                Collection::Movie(c) => {
+                    for video in c.movies().await {
+                        stats += video.stats().await;
+                    }
+                }
+                Collection::Show(c) => {
+                    for show in c.shows().await {
+                        stats += Self::show_stats(show).await
+                    }
+                }
+            }
+            stats
+        } else if let Some(show) = self.server.show(&self.id).await {
+            Self::show_stats(show).await
+        } else if let Some(season) = self.server.season(&self.id).await {
+            Self::season_stats(season).await
+        } else if let Some(video) = self.server.video(&self.id).await {
+            video.stats().await
+        } else {
+            VideoStats::default()
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -184,6 +243,17 @@ impl Server {
         }
     }
 
+    pub async fn delete(self) -> Result {
+        #[expect(unused)]
+        let guard = self.try_lock_write().await?;
+
+        let mut state = self.inner.state.write().await;
+        state.servers.remove(&self.id);
+        self.inner.persist_state(&state).await?;
+
+        Ok(())
+    }
+
     pub(crate) async fn try_lock_write(&self) -> result::Result<OpWriteGuard, Timeout> {
         OpMutex::try_lock_write_key(self.id.clone()).await
     }
@@ -207,38 +277,44 @@ impl Server {
         &self.id
     }
 
-    pub async fn list_syncs(&self) -> Result<Vec<SyncItemInfo>> {
-        let plex_server = self.connect().await?;
-
+    pub async fn list_syncs(&self) -> Vec<SyncItemInfo> {
         let config = self.inner.config.read().await;
         let server_config = config.servers.get(&self.id).unwrap();
 
         let mut results: Vec<SyncItemInfo> = Vec::new();
 
         for sync in server_config.syncs.values() {
-            let item = plex_server.item_by_id(&sync.id).await?;
-
-            let item_type = match item {
-                Item::Movie(_) => ItemType::Movie,
-                Item::Episode(_) => ItemType::Episode,
-                Item::VideoPlaylist(_) => ItemType::Playlist,
-                Item::MovieCollection(_) => ItemType::MovieCollection,
-                Item::ShowCollection(_) => ItemType::ShowCollection,
-                Item::Show(_) => ItemType::Show,
-                Item::Season(_) => ItemType::Season,
-                _ => ItemType::Unknown,
+            let (title, item_type) = if let Some(playlist) = self.playlist(&sync.id).await {
+                (playlist.title().await, ItemType::Playlist)
+            } else if let Some(collection) = self.collection(&sync.id).await {
+                match collection {
+                    Collection::Movie(c) => (c.title().await, ItemType::MovieCollection),
+                    Collection::Show(c) => (c.title().await, ItemType::ShowCollection),
+                }
+            } else if let Some(show) = self.show(&sync.id).await {
+                (show.title().await, ItemType::Show)
+            } else if let Some(season) = self.season(&sync.id).await {
+                (season.title().await, ItemType::Season)
+            } else if let Some(video) = self.video(&sync.id).await {
+                match video {
+                    wrappers::Video::Episode(_) => (video.title().await, ItemType::Episode),
+                    _ => (video.title().await, ItemType::Movie),
+                }
+            } else {
+                ("Unknown".to_string(), ItemType::Unknown)
             };
 
             results.push(SyncItemInfo {
-                id: item.rating_key().to_owned(),
+                server: self.clone(),
+                id: sync.id.clone(),
                 item_type,
-                title: item.title().to_owned(),
+                title,
                 transcode_profile: sync.transcode_profile.clone(),
                 only_unplayed: sync.only_unplayed,
             });
         }
 
-        Ok(results)
+        results
     }
 
     pub(crate) async fn transcode_profile(&self) -> Option<String> {

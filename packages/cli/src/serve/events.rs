@@ -1,11 +1,90 @@
-use flick_sync::{Server, VideoPart};
+use flick_sync::{FlickSync, Server, VideoPart, VideoStats};
 use rinja::Template;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tracing::warn;
 
+use crate::shared::uniform_title;
+
+pub(super) struct SyncTemplate {
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) duration: String,
+    pub(super) size: u64,
+    pub(super) percent: f64,
+}
+
+pub(super) struct ServerTemplate {
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) duration: String,
+    pub(super) size: u64,
+    pub(super) syncs: Vec<SyncTemplate>,
+}
+
+fn format_duration(mut total: u64) -> String {
+    let seconds = total % 60;
+    total = (total - seconds) / 60;
+    let minutes = total % 60;
+    total = (total - minutes) / 60;
+    let hours = total % 24;
+    let days = (total - hours) / 24;
+
+    if days > 0 {
+        format!("{days} days, {hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    }
+}
+
+impl ServerTemplate {
+    pub(super) async fn build(flick_sync: &FlickSync) -> Vec<Self> {
+        let mut servers = Vec::new();
+        for server in flick_sync.servers().await {
+            let mut stats = VideoStats::default();
+
+            for video in server.videos().await {
+                stats += video.stats().await;
+            }
+
+            let mut syncs = Vec::new();
+
+            for sync in server.list_syncs().await {
+                let stats = sync.stats().await;
+
+                syncs.push(SyncTemplate {
+                    id: sync.id,
+                    name: sync.title,
+                    duration: format_duration(stats.local_duration.as_secs()),
+                    size: stats.local_bytes,
+                    percent: if stats.total_parts == 0 {
+                        0.0
+                    } else {
+                        (100.0 * stats.downloaded_parts as f64) / stats.total_parts as f64
+                    },
+                });
+            }
+
+            syncs.sort_by(|sa, sb| uniform_title(&sa.name).cmp(&uniform_title(&sb.name)));
+
+            servers.push(ServerTemplate {
+                id: server.id().to_owned(),
+                name: server.name().await,
+                size: stats.local_bytes,
+                duration: format_duration(stats.local_duration.as_secs()),
+                syncs,
+            });
+        }
+
+        servers.sort_by(|sa, sb| uniform_title(&sa.name).cmp(&uniform_title(&sb.name)));
+
+        servers
+    }
+}
+
 #[derive(Clone)]
 pub(super) enum Event {
     SyncStart,
+    SyncChange,
     SyncEnd,
     Log(SyncLogItem),
     Progress(Vec<SyncProgressBar>),
@@ -16,11 +95,12 @@ impl Event {
         match self {
             Self::SyncStart | Self::SyncEnd => "sync-status",
             Self::Log(_) => "sync-log",
+            Self::SyncChange => "sync-change",
             Self::Progress(_) => "sync-progress",
         }
     }
 
-    pub async fn event_data(&self) -> Result<String, rinja::Error> {
+    pub async fn event_data(&self, flick_sync: &FlickSync) -> Result<String, rinja::Error> {
         match self {
             Self::SyncStart => Ok(
                 r#"<sl-icon id="spinner" class="spinning" name="arrow-repeat"></sl-icon> Syncing"#
@@ -30,6 +110,19 @@ impl Event {
                 r#"<sl-icon id="spinner" class="paused" name="arrow-repeat"></sl-icon> Status"#
                     .to_string(),
             ),
+            Self::SyncChange => {
+                #[derive(Template)]
+                #[template(path = "syncservers.html")]
+                struct SyncList {
+                    servers: Vec<ServerTemplate>,
+                }
+
+                let template = SyncList {
+                    servers: ServerTemplate::build(flick_sync).await,
+                };
+
+                template.render()
+            }
             Self::Log(message) => message.template().await.render(),
             Self::Progress(bars) => {
                 let mut lines = Vec::new();
@@ -42,8 +135,8 @@ impl Event {
         }
     }
 
-    pub(super) async fn to_string(&self) -> Option<String> {
-        match self.event_data().await {
+    pub(super) async fn to_string(&self, flick_sync: &FlickSync) -> Option<String> {
+        match self.event_data(flick_sync).await {
             Ok(data) => {
                 let lines: Vec<String> = data
                     .trim()

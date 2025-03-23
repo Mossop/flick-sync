@@ -3,13 +3,13 @@
 {% block title %}Syncing{% endblock %}
 
 {% block content %}
-  <div id="sync-log" hx-target="#sync-log" hx-swap="beforeend scroll:bottom" sse-swap="sync-log">
+  <div id="sync-log" hx-target="this" hx-swap="beforeend scroll:bottom" sse-swap="sync-log">
     {% for item in log %}
       {{ item|safe }}
     {% endfor %}
   </div>
 
-  <div id="progress-bars" hx-target="#progress-bars" sse-swap="sync-progress" hx-swap="morph:innerHTML">
+  <div id="progress-bars" hx-target="this" sse-swap="sync-progress" hx-swap="morph:innerHTML">
     {% for progress in progress_bars %}
       {{ progress|safe }}
     {% endfor %}

@@ -1,0 +1,9 @@
+{% extends "sidebar.html" %}
+
+{% block title %}Sync List{% endblock %}
+
+{% block content %}
+<div id="server-cards" hx-target="this" sse-swap="sync-change" hx-swap="morph:innerHTML">
+  {% include "syncservers.html" %}
+</div>
+{% endblock %}

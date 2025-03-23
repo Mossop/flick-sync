@@ -8,13 +8,15 @@ use std::{
 use actix_web::{
     FromRequest, HttpRequest, HttpResponse,
     body::{MessageBody, SizedStream},
-    get,
+    delete, get,
     http::header::{self, CacheDirective},
     post,
-    web::{Path, Query, ThinData},
+    web::{Form, Path, Query, ThinData},
 };
 use bytes::Bytes;
-use flick_sync::{Collection, Library, LibraryType, PlaybackState, Season, Show, Video};
+use flick_sync::{
+    Collection, Library, LibraryType, PlaybackState, Season, Show, Video, plex_api::library::Item,
+};
 use futures::TryStreamExt;
 use rinja::Template;
 use serde::{Deserialize, Serialize};
@@ -22,12 +24,13 @@ use tokio::io::{AsyncSeekExt, BufReader};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
 use tracing::error;
+use url::Url;
 
 use crate::{
     EmbeddedFileStream, Resources,
     serve::{
-        ConnectionInfo, ServiceData,
-        events::{ProgressBarTemplate, SyncLogTemplate, SyncProgressBar},
+        ConnectionInfo, Event, ServiceData,
+        events::{ProgressBarTemplate, ServerTemplate, SyncLogTemplate, SyncProgressBar},
     },
     shared::{StreamLimiter, uniform_title},
 };
@@ -99,7 +102,7 @@ pub(super) async fn status_page(
     };
 
     #[derive(Template)]
-    #[template(path = "sync.html")]
+    #[template(path = "status.html")]
     struct SyncTemplate {
         sidebar: Option<Sidebar>,
         log: Vec<SyncLogTemplate>,
@@ -977,13 +980,174 @@ pub(super) async fn video_page(
 pub(super) async fn events(ThinData(service_data): ThinData<ServiceData>) -> HttpResponse {
     let receiver = service_data.event_sender.subscribe();
 
+    let flick_sync = service_data.flick_sync;
     let event_stream = BroadcastStream::new(receiver)
-        .try_filter_map(async |event| Ok(event.to_string().await))
+        .try_filter_map(move |event| {
+            let flick_sync = flick_sync.clone();
+            async move { Ok(event.to_string(&flick_sync).await) }
+        })
         .map_ok(Bytes::from_owner);
 
     HttpResponse::Ok()
         .append_header(header::ContentType(mime::TEXT_EVENT_STREAM))
         .streaming(event_stream)
+}
+
+#[delete("/sync/{server_id}")]
+pub(super) async fn delete_server(
+    ThinData(service_data): ThinData<ServiceData>,
+    server: Path<String>,
+) -> HttpResponse {
+    let Some(server) = service_data.flick_sync.server(&server).await else {
+        return HttpResponse::NotFound().finish();
+    };
+
+    if server.delete().await.is_err() {
+        return HttpResponse::InternalServerError().finish();
+    }
+
+    let _ = service_data.event_sender.send(Event::SyncChange);
+    service_data.sync_trigger.notify_waiters();
+
+    HttpResponse::Ok().finish()
+}
+
+#[delete("/sync/{server_id}/{sync_id}")]
+pub(super) async fn delete_sync(
+    ThinData(service_data): ThinData<ServiceData>,
+    path: Path<(String, String)>,
+) -> HttpResponse {
+    let (server_id, sync_id) = path.into_inner();
+
+    let Some(server) = service_data.flick_sync.server(&server_id).await else {
+        return HttpResponse::NotFound().finish();
+    };
+
+    match server.remove_sync(&sync_id).await {
+        Err(_) => HttpResponse::InternalServerError().finish(),
+        Ok(false) => HttpResponse::NotFound().finish(),
+        Ok(true) => {
+            let _ = service_data.event_sender.send(Event::SyncChange);
+            service_data.sync_trigger.notify_waiters();
+            HttpResponse::Ok().finish()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct CreateSyncRequest {
+    url: String,
+}
+
+impl CreateSyncRequest {
+    fn parse(&self) -> Option<(String, String)> {
+        let url = Url::parse(&self.url).ok()?;
+        let fragment = url.fragment()?;
+        if fragment.get(0..1) != Some("!") {
+            return None;
+        }
+        let fragment = &fragment[1..];
+
+        let url = Url::options()
+            .base_url(Some(&Url::parse("https://nowhere.flick-sync").ok()?))
+            .parse(fragment)
+            .ok()?;
+
+        let mut segments = url.path_segments()?;
+        if !matches!(segments.next(), Some("server")) {
+            return None;
+        }
+
+        let machine_id = segments.next()?;
+        let key = url
+            .query_pairs()
+            .find_map(|(k, v)| if k == "key" { Some(v) } else { None })?;
+
+        key.rfind('/')
+            .map(|idx| (machine_id.to_owned(), key[idx + 1..].to_owned()))
+    }
+}
+
+#[post("/sync/{server_id}")]
+pub(super) async fn create_sync(
+    ThinData(service_data): ThinData<ServiceData>,
+    server_id: Path<String>,
+    data: Form<CreateSyncRequest>,
+) -> HttpResponse {
+    let Some(server) = service_data.flick_sync.server(&server_id).await else {
+        error!("No server");
+        return HttpResponse::NotFound().finish();
+    };
+
+    let Some((machine_id, rating_key)) = data.parse() else {
+        error!("Parse fail");
+        return HttpResponse::NotFound().finish();
+    };
+
+    let Ok(plex_server) = server.connect().await else {
+        error!("No plex server");
+        return HttpResponse::NotFound().finish();
+    };
+
+    if plex_server.machine_identifier() != machine_id {
+        error!(
+            remote = plex_server.machine_identifier(),
+            machine_id, "Bad machine id"
+        );
+        return HttpResponse::NotFound().finish();
+    }
+
+    let Ok(item) = plex_server.item_by_id(&rating_key).await else {
+        error!("No item");
+        return HttpResponse::NotFound().finish();
+    };
+
+    if matches!(
+        item,
+        Item::Photo(_)
+            | Item::Artist(_)
+            | Item::MusicAlbum(_)
+            | Item::Track(_)
+            | Item::PhotoPlaylist(_)
+            | Item::MusicPlaylist(_)
+            | Item::UnknownItem(_)
+    ) {
+        return HttpResponse::NotFound().finish();
+    }
+
+    if server.add_sync(&rating_key, None, false).await.is_err() {
+        HttpResponse::InternalServerError().finish()
+    } else {
+        let _ = service_data.event_sender.send(Event::SyncChange);
+        service_data.sync_trigger.notify_waiters();
+        HttpResponse::Ok().finish()
+    }
+}
+
+#[get("/syncs")]
+pub(super) async fn sync_list(
+    ThinData(service_data): ThinData<ServiceData>,
+    HxTarget(target): HxTarget,
+) -> HttpResponse {
+    let sidebar = if target.is_some() {
+        None
+    } else {
+        Some(Sidebar::build(&service_data).await)
+    };
+
+    #[derive(Template)]
+    #[template(path = "synclist.html")]
+    struct SyncList {
+        sidebar: Option<Sidebar>,
+        servers: Vec<ServerTemplate>,
+    }
+
+    let template = SyncList {
+        sidebar,
+        servers: ServerTemplate::build(&service_data.flick_sync).await,
+    };
+
+    render(template)
 }
 
 #[get("/")]

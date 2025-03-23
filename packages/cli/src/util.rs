@@ -26,7 +26,7 @@ impl Runnable for Stats {
             let mut stats = VideoStats::default();
 
             for video in server.videos().await {
-                stats += video.stats().await?;
+                stats += video.stats().await;
             }
 
             if pos > 0 {
@@ -41,14 +41,8 @@ impl Runnable for Stats {
                 percent(stats.downloaded_parts, stats.total_parts)
             ));
             console.println(format!(
-                "  Downloaded data: {} / {} ({})",
+                "  Downloaded data: {}",
                 DecimalBytes(stats.local_bytes),
-                DecimalBytes(stats.remote_bytes),
-                percent(stats.local_bytes, stats.remote_bytes)
-            ));
-            console.println(format!(
-                "  Remaining data: {}",
-                DecimalBytes(stats.remaining_bytes),
             ));
             console.println(format!(
                 "  Duration available offline: {}",
@@ -71,14 +65,8 @@ impl Runnable for Stats {
                 percent(total.downloaded_parts, total.total_parts)
             ));
             console.println(format!(
-                "Total downloaded data: {} / {} ({})",
+                "Total downloaded data: {}",
                 DecimalBytes(total.local_bytes),
-                DecimalBytes(total.remote_bytes),
-                percent(total.local_bytes, total.remote_bytes)
-            ));
-            console.println(format!(
-                "Total remaining data: {}",
-                DecimalBytes(total.remaining_bytes),
             ));
             console.println(format!(
                 "Total duration available offline: {}",
@@ -105,7 +93,7 @@ impl Runnable for List {
                 console.println("");
             }
 
-            for item in server.list_syncs().await? {
+            for item in server.list_syncs().await {
                 let type_name = match item.item_type {
                     ItemType::Playlist => "Playlist",
                     ItemType::MovieCollection => "Movie Collection",

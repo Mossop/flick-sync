@@ -19,7 +19,10 @@
       {% for playlist in sidebar.playlists %}
         <a class="sidebar-item link-item link-prefix" href="/playlist/{{ playlist.server }}/{{ playlist.id }}" ><sl-icon name="music-note-list"></sl-icon> {{ playlist.title }}</a>
       {% endfor %}
-      <a id="sync-item" class="sidebar-item link-item" href="/sync">
+      <a id="sync-item" class="sidebar-item link-item" href="/syncs">
+        <sl-icon name="list-check"></sl-icon> Sync List
+      </a>
+      <a class="sidebar-item link-item" href="/status">
         <div id="sync-throbber" hx-target="#sync-throbber" sse-swap="sync-status">
           {% if sidebar.is_syncing %}
             <sl-icon id="spinner" class="spinning" name="arrow-repeat"></sl-icon> Syncing

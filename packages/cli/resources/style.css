@@ -187,3 +187,70 @@ body.sidebar sl-split-panel {
     }
   }
 }
+
+#server-cards {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: var(--sl-spacing-4x-large);
+  gap: var(--sl-spacing-2x-large);
+
+  .header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+
+    .info {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: var(--sl-spacing-small);
+    }
+  }
+
+  .sync-table {
+    width: 100%;
+    table-layout: fixed;
+
+    th {
+      font-weight: bold;
+    }
+
+    .title {
+      text-align: left;
+    }
+
+    .completion {
+      text-align: right;
+      width: 3em;
+    }
+
+    .duration {
+      text-align: right;
+      width: 7em;
+    }
+
+    .size {
+      text-align: right;
+      width: 5em;
+    }
+
+    .buttons {
+      width: 2em;
+    }
+  }
+
+  form {
+    padding-top: var(--sl-spacing-2x-large);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sl-spacing-large);
+
+    sl-input {
+      flex: 1;
+    }
+  }
+}
