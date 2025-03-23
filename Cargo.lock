@@ -2480,6 +2480,7 @@ checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
 [[package]]
 name = "plex-api"
 version = "0.0.11"
+source = "git+https://github.com/Mossop/plex-api.rs.git?branch=container_limitations#adb88f52b47d21179c32f7553f0d77e65a4c181e"
 dependencies = [
  "enum_dispatch",
  "futures",
