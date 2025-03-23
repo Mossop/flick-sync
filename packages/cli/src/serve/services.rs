@@ -30,7 +30,7 @@ use tracing::error;
 use crate::{
     EmbeddedFileStream, Resources,
     serve::{
-        ConnectionInfo, Event, SyncStatus,
+        ConnectionInfo, Event, ServiceData, SyncStatus,
         events::{ProgressBarTemplate, SyncLogTemplate, SyncProgressBar},
     },
     shared::{StreamLimiter, uniform_title},
@@ -93,14 +93,14 @@ fn render<T: Template>(template: T) -> HttpResponse {
 
 #[get("/sync")]
 pub(super) async fn sync_list(
-    ThinData(flick_sync): ThinData<FlickSync>,
+    ThinData(service_data): ThinData<ServiceData>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
 ) -> HttpResponse {
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&flick_sync, &status).await)
+        Some(Sidebar::build(&service_data.flick_sync, &status).await)
     };
 
     #[derive(Template)]
@@ -164,12 +164,12 @@ pub(super) async fn resources(path: Path<String>) -> HttpResponse {
 
 #[get("/thumbnail/{server}/{type}/{id}")]
 pub(super) async fn thumbnail(
-    ThinData(flick_sync): ThinData<FlickSync>,
+    ThinData(service_data): ThinData<ServiceData>,
     path: Path<(String, String, String)>,
 ) -> HttpResponse {
     let (server_id, item_type, item_id) = path.into_inner();
 
-    let Some(server) = flick_sync.server(&server_id).await else {
+    let Some(server) = service_data.flick_sync.server(&server_id).await else {
         return HttpResponse::NotFound().finish();
     };
 
@@ -236,13 +236,13 @@ pub(super) async fn thumbnail(
 
 #[get("/stream/{server}/{video_id}/{part}")]
 pub(super) async fn video_stream(
-    ThinData(flick_sync): ThinData<FlickSync>,
+    ThinData(service_data): ThinData<ServiceData>,
     req: HttpRequest,
     path: Path<(String, String, usize)>,
 ) -> HttpResponse {
     let (server_id, video_id, part_index) = path.into_inner();
 
-    let Some(server) = flick_sync.server(&server_id).await else {
+    let Some(server) = service_data.flick_sync.server(&server_id).await else {
         return HttpResponse::NotFound().finish();
     };
 
@@ -537,14 +537,14 @@ struct ListTemplate {
 
 #[get("/library/{server}/{id}")]
 pub(super) async fn library_contents(
-    ThinData(flick_sync): ThinData<FlickSync>,
+    ThinData(service_data): ThinData<ServiceData>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String)>,
 ) -> HttpResponse {
     let (server_id, library_id) = path.into_inner();
 
-    let Some(server) = flick_sync.server(&server_id).await else {
+    let Some(server) = service_data.flick_sync.server(&server_id).await else {
         return HttpResponse::NotFound().finish();
     };
 
@@ -555,7 +555,7 @@ pub(super) async fn library_contents(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&flick_sync, &status).await)
+        Some(Sidebar::build(&service_data.flick_sync, &status).await)
     };
 
     let browse_url = format!("/library/{}/{}", server.id(), library.id());
@@ -605,14 +605,14 @@ pub(super) async fn library_contents(
 
 #[get("/library/{server}/{id}/collections")]
 pub(super) async fn library_collections(
-    ThinData(flick_sync): ThinData<FlickSync>,
+    ThinData(service_data): ThinData<ServiceData>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String)>,
 ) -> HttpResponse {
     let (server_id, library_id) = path.into_inner();
 
-    let Some(server) = flick_sync.server(&server_id).await else {
+    let Some(server) = service_data.flick_sync.server(&server_id).await else {
         return HttpResponse::NotFound().finish();
     };
 
@@ -623,7 +623,7 @@ pub(super) async fn library_collections(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&flick_sync, &status).await)
+        Some(Sidebar::build(&service_data.flick_sync, &status).await)
     };
 
     let browse_url = format!("/library/{}/{}", server.id(), library.id());
@@ -649,14 +649,14 @@ pub(super) async fn library_collections(
 
 #[get("/library/{server}/{library_id}/collection/{collection_id}")]
 pub(super) async fn collection_contents(
-    ThinData(flick_sync): ThinData<FlickSync>,
+    ThinData(service_data): ThinData<ServiceData>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String, String)>,
 ) -> HttpResponse {
     let (server_id, _, collection_id) = path.into_inner();
 
-    let Some(server) = flick_sync.server(&server_id).await else {
+    let Some(server) = service_data.flick_sync.server(&server_id).await else {
         return HttpResponse::NotFound().finish();
     };
 
@@ -667,7 +667,7 @@ pub(super) async fn collection_contents(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&flick_sync, &status).await)
+        Some(Sidebar::build(&service_data.flick_sync, &status).await)
     };
 
     let mut thumbs = Vec::new();
@@ -712,14 +712,14 @@ pub(super) async fn collection_contents(
 
 #[get("/library/{server}/{library_id}/show/{collection_id}")]
 pub(super) async fn show_contents(
-    ThinData(flick_sync): ThinData<FlickSync>,
+    ThinData(service_data): ThinData<ServiceData>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String, String)>,
 ) -> HttpResponse {
     let (server_id, _, show_id) = path.into_inner();
 
-    let Some(server) = flick_sync.server(&server_id).await else {
+    let Some(server) = service_data.flick_sync.server(&server_id).await else {
         return HttpResponse::NotFound().finish();
     };
 
@@ -730,7 +730,7 @@ pub(super) async fn show_contents(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&flick_sync, &status).await)
+        Some(Sidebar::build(&service_data.flick_sync, &status).await)
     };
 
     let mut thumbs = Vec::new();
@@ -749,14 +749,14 @@ pub(super) async fn show_contents(
 
 #[get("/library/{server}/{library_id}/season/{collection_id}")]
 pub(super) async fn season_contents(
-    ThinData(flick_sync): ThinData<FlickSync>,
+    ThinData(service_data): ThinData<ServiceData>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String, String)>,
 ) -> HttpResponse {
     let (server_id, _, season_id) = path.into_inner();
 
-    let Some(server) = flick_sync.server(&server_id).await else {
+    let Some(server) = service_data.flick_sync.server(&server_id).await else {
         return HttpResponse::NotFound().finish();
     };
 
@@ -767,7 +767,7 @@ pub(super) async fn season_contents(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&flick_sync, &status).await)
+        Some(Sidebar::build(&service_data.flick_sync, &status).await)
     };
 
     let mut thumbs = Vec::new();
@@ -792,14 +792,14 @@ pub(super) async fn season_contents(
 
 #[get("/playlist/{server}/{id}")]
 pub(super) async fn playlist_contents(
-    ThinData(flick_sync): ThinData<FlickSync>,
+    ThinData(service_data): ThinData<ServiceData>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String)>,
 ) -> HttpResponse {
     let (server_id, playlist_id) = path.into_inner();
 
-    let Some(server) = flick_sync.server(&server_id).await else {
+    let Some(server) = service_data.flick_sync.server(&server_id).await else {
         return HttpResponse::NotFound().finish();
     };
 
@@ -810,7 +810,7 @@ pub(super) async fn playlist_contents(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&flick_sync, &status).await)
+        Some(Sidebar::build(&service_data.flick_sync, &status).await)
     };
 
     #[derive(Template)]
@@ -844,13 +844,13 @@ pub struct PlaybackPosition {
 
 #[post("/playback/{server}/{library_id}/video/{video_id}")]
 pub(super) async fn update_playback_position(
-    ThinData(flick_sync): ThinData<FlickSync>,
+    ThinData(service_data): ThinData<ServiceData>,
     path: Path<(String, String, String)>,
     query: Query<PlaybackPosition>,
 ) -> HttpResponse {
     let (server_id, _, video_id) = path.into_inner();
 
-    let Some(server) = flick_sync.server(&server_id).await else {
+    let Some(server) = service_data.flick_sync.server(&server_id).await else {
         return HttpResponse::NotFound().finish();
     };
 
@@ -866,7 +866,7 @@ pub(super) async fn update_playback_position(
 
 #[get("/library/{server}/{library_id}/video/{video_id}")]
 pub(super) async fn video_page(
-    ThinData(flick_sync): ThinData<FlickSync>,
+    ThinData(service_data): ThinData<ServiceData>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     req: HttpRequest,
@@ -874,7 +874,7 @@ pub(super) async fn video_page(
 ) -> HttpResponse {
     let (server_id, _, video_id) = path.into_inner();
 
-    let Some(server) = flick_sync.server(&server_id).await else {
+    let Some(server) = service_data.flick_sync.server(&server_id).await else {
         return HttpResponse::NotFound().finish();
     };
 
@@ -885,12 +885,16 @@ pub(super) async fn video_page(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&flick_sync, &status).await)
+        Some(Sidebar::build(&service_data.flick_sync, &status).await)
     };
 
     let url_base = if let Some(conn_info) = req.conn_data::<ConnectionInfo>() {
         if conn_info.local_addr.port() == 443 {
-            format!("http://{}/", conn_info.local_addr.ip())
+            format!(
+                "http://{}:{}/",
+                conn_info.local_addr.ip(),
+                service_data.http_port
+            )
         } else {
             format!("http://{}/", conn_info.local_addr)
         }
@@ -967,18 +971,18 @@ pub(super) async fn events(ThinData(event_sender): ThinData<Sender<Event>>) -> H
 
 #[get("/")]
 pub(super) async fn index_page(
-    ThinData(flick_sync): ThinData<FlickSync>,
+    ThinData(service_data): ThinData<ServiceData>,
     status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
 ) -> HttpResponse {
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&flick_sync, &status).await)
+        Some(Sidebar::build(&service_data.flick_sync, &status).await)
     };
 
     let mut thumbs: Vec<Thumbnail> = Vec::new();
-    for video in flick_sync.on_deck().await {
+    for video in service_data.flick_sync.on_deck().await {
         thumbs.push(Thumbnail::from_video(video).await);
     }
 

@@ -290,6 +290,12 @@ fn on_connect(connection: &dyn Any, data: &mut Extensions) {
     }
 }
 
+#[derive(Clone)]
+struct ServiceData {
+    flick_sync: FlickSync,
+    http_port: u16,
+}
+
 impl Runnable for Serve {
     async fn run(self, flick_sync: FlickSync, _console: Console) -> Result {
         let port = self.port.unwrap_or(80);
@@ -307,10 +313,14 @@ impl Runnable for Serve {
         ));
 
         let status = Data::from(status);
+        let service_data = ServiceData {
+            flick_sync,
+            http_port: port,
+        };
 
         let mut http_server = HttpServer::new(move || {
             App::new()
-                .app_data(ThinData(flick_sync.clone()))
+                .app_data(ThinData(service_data.clone()))
                 .app_data(ThinData(event_sender.clone()))
                 .app_data(status.clone())
                 .service(service_factory.clone())
