@@ -4,6 +4,16 @@
 
 {% block content %}
   <div id="video-container">
-    <video-player playlist="{{ parts|json }}" currentTime="{{ playback_position }}"></video-player>
+    <video-player
+      playlist="{{ parts|json }}"
+      currentTime="{{ playback_position }}"
+      title="{{ title }}"
+      airDate="{{ air_date }}"
+      image="{{ image }}"
+      show="{{ show|json }}"
+      season="{{ season|json }}"
+      episode="{{ episode|json }}"
+    >
+    </video-player>
   </div>
 {% endblock %}

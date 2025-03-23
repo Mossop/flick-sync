@@ -22,6 +22,7 @@ export class VideoPlayer extends LitElement {
         width: 100%;
         aspect-ratio: 1;
         position: relative;
+        overflow: hidden;
       }
 
       img {

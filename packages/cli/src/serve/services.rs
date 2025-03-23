@@ -933,11 +933,16 @@ pub(super) async fn video_page(
 
     #[derive(Template)]
     #[template(path = "video.html")]
-    struct Video {
+    struct VideoTemplate {
         sidebar: Option<Sidebar>,
         title: String,
         parts: Vec<VideoPart>,
         playback_position: f64,
+        air_date: String,
+        image: String,
+        show: Option<String>,
+        season: Option<usize>,
+        episode: Option<usize>,
     }
 
     let playback_state = video.playback_state().await;
@@ -946,11 +951,29 @@ pub(super) async fn video_page(
         PlaybackState::InProgress { position } => position as f64 / 1000.0,
     };
 
-    let template = Video {
+    let (show, season, episode) = if let Video::Episode(ref ep) = video {
+        let season = ep.season().await;
+        let show = season.show().await;
+
+        (
+            Some(show.title().await),
+            Some(season.index().await),
+            Some(ep.index().await),
+        )
+    } else {
+        (None, None, None)
+    };
+
+    let template = VideoTemplate {
         sidebar,
         title: video.title().await,
         parts,
         playback_position,
+        image: format!("{url_base}thumbnail/{server_id}/video/{}", video.id()),
+        air_date: video.air_date().await.to_string(),
+        show,
+        season,
+        episode,
     };
 
     render(template)

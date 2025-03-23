@@ -30,6 +30,10 @@ export class VideoPlayer extends LitElement {
     css`
       :host {
         position: relative;
+
+        &.casting .overlay {
+          opacity: 1;
+        }
       }
 
       video {
@@ -143,6 +147,12 @@ export class VideoPlayer extends LitElement {
     isFullscreen: { state: true },
     isCastAvailable: { state: true },
     isCasting: { state: true },
+    airDate: { type: String },
+    image: { type: String },
+    title: { type: String },
+    show: { type: Object },
+    season: { type: Object },
+    episode: { type: Object },
   };
 
   constructor() {
@@ -387,6 +397,34 @@ export class VideoPlayer extends LitElement {
     }
   }
 
+  castMediaInfo(media) {
+    let url = new URL(media.url, document.documentURI);
+
+    let mediaInfo = new chrome.cast.media.MediaInfo(
+      url.toString(),
+      media.mimeType
+    );
+
+    let metadata;
+
+    if (this.show) {
+      metadata = new chrome.cast.media.TvShowMediaMetadata();
+      metadata.originalAirdate = this.airDate;
+      metadata.episode = this.episode;
+      metadata.season = this.season;
+      metadata.seriesTitle = this.show;
+    } else {
+      metadata = new chrome.cast.media.MovieMediaMetadata();
+      metadata.releaseDate = this.airDate;
+    }
+
+    metadata.images = [new chrome.cast.Image(this.image)];
+    metadata.title = this.title;
+    mediaInfo.metadata = metadata;
+
+    return mediaInfo;
+  }
+
   async seek(targetTime) {
     if (targetTime < 0 || targetTime >= this.totalTime) {
       return;
@@ -411,11 +449,7 @@ export class VideoPlayer extends LitElement {
       } else {
         this.mediaIndex = mediaIndex;
 
-        let url = new URL(this.playlist[mediaIndex].url, document.documentURI);
-        let mediaInfo = new chrome.cast.media.MediaInfo(
-          url.toString(),
-          this.playlist[mediaIndex].mimeType
-        );
+        let mediaInfo = this.castMediaInfo(this.playlist[mediaIndex]);
         let loadRequest = new chrome.cast.media.LoadRequest(mediaInfo);
         loadRequest.currentTime = targetTime;
         await this.castSession.loadMedia(loadRequest);

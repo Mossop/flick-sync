@@ -1356,6 +1356,10 @@ impl Episode {
         self.with_state(|vs| vs.episode_state().index).await
     }
 
+    pub async fn air_date(&self) -> Date {
+        self.with_state(|vs| vs.air_date).await
+    }
+
     pub async fn playback_state(&self) -> PlaybackState {
         self.with_state(|vs| vs.playback_state.clone()).await
     }
@@ -1728,6 +1732,13 @@ impl Video {
         match self {
             Self::Movie(v) => v.playback_state().await,
             Self::Episode(v) => v.playback_state().await,
+        }
+    }
+
+    pub async fn air_date(&self) -> Date {
+        match self {
+            Self::Movie(v) => v.air_date().await,
+            Self::Episode(v) => v.air_date().await,
         }
     }
 
