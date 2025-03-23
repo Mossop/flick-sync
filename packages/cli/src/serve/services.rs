@@ -394,6 +394,7 @@ struct Thumbnail {
     url: String,
     image: String,
     name: String,
+    position: Option<f64>,
 }
 
 impl PartialEq for Thumbnail {
@@ -431,6 +432,7 @@ impl Thumbnail {
             ),
             image: format!("/thumbnail/{}/show/{}", server.id(), show.id()),
             name: season.title().await,
+            position: None,
         }
     }
 
@@ -447,12 +449,21 @@ impl Thumbnail {
             ),
             image: format!("/thumbnail/{}/show/{}", server.id(), show.id()),
             name: show.title().await,
+            position: None,
         }
     }
 
     async fn from_video(video: Video) -> Self {
         let server = video.server();
         let library = video.library().await;
+        let position = match video.playback_state().await {
+            PlaybackState::Unplayed => 0.0,
+            PlaybackState::InProgress { position } => {
+                let duration = video.duration().await.as_millis() as f64;
+                (100.0 * position as f64) / duration
+            }
+            PlaybackState::Played => 100.0,
+        };
 
         Self {
             url: format!(
@@ -463,6 +474,7 @@ impl Thumbnail {
             ),
             image: format!("/thumbnail/{}/video/{}", server.id(), video.id()),
             name: video.title().await,
+            position: Some(position),
         }
     }
 
@@ -479,6 +491,7 @@ impl Thumbnail {
             ),
             image: format!("/thumbnail/{}/collection/{}", server.id(), collection.id()),
             name: collection.title().await,
+            position: None,
         }
     }
 }

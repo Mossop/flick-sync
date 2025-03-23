@@ -6,7 +6,8 @@
     {
       "imports": {
         "lit": "/resources/scripts/lit-all.min.js",
-        "@shoelace/": "/resources/shoelace/"
+        "@shoelace/": "/resources/shoelace/",
+        "reset": "/resources/reset.js"
       }
     }
   </script>
@@ -20,6 +21,7 @@
   <title id="title" hx-swap-oob="true">{% block title %}{% endblock %}</title>
   <link rel="shortcut icon" href="/resources/logo.svg" type="image/svg">
   <script type="module" src="/resources/video.js"></script>
+  <script type="module" src="/resources/thumbnail.js"></script>
   <script src="/resources/script.js"></script>
   <script src="//www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
 </head>

@@ -1,10 +1,5 @@
 <div class="grid" hx-boost="true">
 {% for item in items %}
-  <a class="grid-item" href="{{ item.url }}">
-    <div class="thumbnail">
-      <img src="{{ item.image }}">
-    </div>
-    <p>{{ item.name }}</p>
-  </a>
+  <grid-thumbnail url="{{ item.url }}" image="{{ item.image }}" name="{{ item.name }}" position="{{ item.position|json }}"></grid-thumbnail>
 {% endfor %}
 </div>
