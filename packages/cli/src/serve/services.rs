@@ -951,17 +951,23 @@ pub(super) async fn video_page(
         PlaybackState::InProgress { position } => position as f64 / 1000.0,
     };
 
-    let (show, season, episode) = if let Video::Episode(ref ep) = video {
+    let (image, show, season, episode) = if let Video::Episode(ref ep) = video {
         let season = ep.season().await;
         let show = season.show().await;
 
         (
+            format!("{url_base}thumbnail/{server_id}/show/{}", show.id()),
             Some(show.title().await),
             Some(season.index().await),
             Some(ep.index().await),
         )
     } else {
-        (None, None, None)
+        (
+            format!("{url_base}thumbnail/{server_id}/video/{}", video.id()),
+            None,
+            None,
+            None,
+        )
     };
 
     let template = VideoTemplate {
@@ -969,7 +975,7 @@ pub(super) async fn video_page(
         title: video.title().await,
         parts,
         playback_position,
-        image: format!("{url_base}thumbnail/{server_id}/video/{}", video.id()),
+        image,
         air_date: video.air_date().await.to_string(),
         show,
         season,
