@@ -13,7 +13,7 @@ use actix_web::{
     body::{BoxBody, SizedStream},
     dev::{AppService, HttpServiceFactory, ServiceRequest, ServiceResponse},
     get,
-    http::header::{self, HeaderMap, HeaderName, HeaderValue},
+    http::header::{self, CacheDirective, HeaderMap, HeaderName, HeaderValue},
     middleware::{Next, from_fn},
     web::{self, Data, Path, Payload, ReqData},
 };
@@ -29,6 +29,8 @@ use crate::{
     upnp,
     xml::Xml,
 };
+
+const CACHE_AGE: u32 = 10 * 60;
 
 fn is_safe(addr: SocketAddr) -> bool {
     match addr {
@@ -218,7 +220,11 @@ pub(crate) async fn icon<H: DlnaRequestHandler>(
         Ok(stream_result) => {
             let mut builder = HttpResponse::Ok();
 
-            builder.append_header(header::ContentType(stream_result.mime_type));
+            builder
+                .append_header(header::ContentType(stream_result.mime_type))
+                .append_header(header::CacheControl(vec![CacheDirective::MaxAge(
+                    CACHE_AGE,
+                )]));
 
             if let Some(length) = stream_result.resource_size {
                 builder.append_header(header::ContentLength(length as usize));
@@ -312,7 +318,11 @@ pub(crate) async fn resource_get<H: DlnaRequestHandler>(
                 (HttpResponse::Ok(), stream_result.resource_size)
             };
 
-            builder.append_header(header::ContentType(stream_result.mime_type));
+            builder
+                .append_header(header::ContentType(stream_result.mime_type))
+                .append_header(header::CacheControl(vec![CacheDirective::MaxAge(
+                    CACHE_AGE,
+                )]));
 
             if let Some(length) = length {
                 builder.append_header(header::ContentLength(length as usize));

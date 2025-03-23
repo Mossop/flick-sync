@@ -8,9 +8,9 @@ use std::{
 
 use actix_web::{
     FromRequest, HttpRequest, HttpResponse,
-    body::SizedStream,
+    body::{MessageBody, SizedStream},
     get,
-    http::header,
+    http::header::{self, CacheDirective},
     post,
     web::{Data, Path, Query, ThinData},
 };
@@ -35,6 +35,8 @@ use crate::{
     },
     shared::{StreamLimiter, uniform_title},
 };
+
+const CACHE_AGE: u32 = 10 * 60;
 
 struct HxTarget(Option<String>);
 
@@ -215,7 +217,11 @@ pub(super) async fn thumbnail(
 
     let mut response = HttpResponse::Ok();
 
-    response.append_header(header::ContentType(mime::IMAGE_JPEG));
+    response
+        .append_header(header::ContentType(mime::IMAGE_JPEG))
+        .append_header(header::CacheControl(vec![CacheDirective::MaxAge(
+            CACHE_AGE,
+        )]));
 
     if let Ok(size) = size {
         response.append_header(header::ContentLength(size as usize));
@@ -266,7 +272,7 @@ pub(super) async fn video_stream(
     };
     let mut reader = BufReader::new(reader);
 
-    if let Some(header::Range::Bytes(spec)) = req
+    let (range, body) = if let Some(header::Range::Bytes(spec)) = req
         .headers()
         .get(header::RANGE)
         .and_then(|hv| hv.to_str().ok())
@@ -279,59 +285,73 @@ pub(super) async fn video_stream(
                         return HttpResponse::NotFound().finish();
                     }
 
-                    HttpResponse::PartialContent()
-                        .append_header(header::ContentRange(header::ContentRangeSpec::Bytes {
+                    (
+                        Some(header::ContentRange(header::ContentRangeSpec::Bytes {
                             range: Some((start, size - 1)),
                             instance_length: Some(size),
-                        }))
-                        .append_header(header::ContentType(mime_type))
-                        .append_header((header::ACCEPT_RANGES, "bytes"))
-                        .body(SizedStream::new(size - start, ReaderStream::new(reader)))
+                        })),
+                        SizedStream::new(size - start, ReaderStream::new(reader)).boxed(),
+                    )
                 }
                 header::ByteRangeSpec::Last(end) => {
                     if reader.seek(SeekFrom::End(-(end as i64))).await.is_err() {
                         return HttpResponse::NotFound().finish();
                     }
 
-                    HttpResponse::PartialContent()
-                        .append_header(header::ContentRange(header::ContentRangeSpec::Bytes {
+                    (
+                        Some(header::ContentRange(header::ContentRangeSpec::Bytes {
                             range: Some((size - end, end)),
                             instance_length: Some(size),
-                        }))
-                        .append_header(header::ContentType(mime_type))
-                        .append_header((header::ACCEPT_RANGES, "bytes"))
-                        .body(SizedStream::new(end, ReaderStream::new(reader)))
+                        })),
+                        SizedStream::new(end, ReaderStream::new(reader)).boxed(),
+                    )
                 }
                 header::ByteRangeSpec::FromTo(start, end) => {
                     if reader.seek(SeekFrom::Start(start)).await.is_err() {
                         return HttpResponse::NotFound().finish();
                     }
 
-                    HttpResponse::PartialContent()
-                        .append_header(header::ContentRange(header::ContentRangeSpec::Bytes {
+                    (
+                        Some(header::ContentRange(header::ContentRangeSpec::Bytes {
                             range: Some((start, end)),
                             instance_length: Some(size),
-                        }))
-                        .append_header(header::ContentType(mime_type))
-                        .append_header((header::ACCEPT_RANGES, "bytes"))
-                        .body(SizedStream::new(
+                        })),
+                        SizedStream::new(
                             end - start + 1,
                             StreamLimiter::new(ReaderStream::new(reader), start, end + 1),
-                        ))
+                        )
+                        .boxed(),
+                    )
                 }
             }
         } else {
-            HttpResponse::Ok()
-                .append_header(header::ContentType(mime_type))
-                .append_header((header::ACCEPT_RANGES, "bytes"))
-                .body(SizedStream::new(size, ReaderStream::new(reader)))
+            (
+                None,
+                SizedStream::new(size, ReaderStream::new(reader)).boxed(),
+            )
         }
     } else {
+        (
+            None,
+            SizedStream::new(size, ReaderStream::new(reader)).boxed(),
+        )
+    };
+
+    let mut response = if let Some(range) = range {
+        let mut response = HttpResponse::PartialContent();
+        response.append_header(range);
+        response
+    } else {
         HttpResponse::Ok()
-            .append_header(header::ContentType(mime_type))
-            .append_header((header::ACCEPT_RANGES, "bytes"))
-            .body(SizedStream::new(size, ReaderStream::new(reader)))
-    }
+    };
+
+    response
+        .append_header(header::ContentType(mime_type))
+        .append_header((header::ACCEPT_RANGES, "bytes"))
+        .append_header(header::CacheControl(vec![CacheDirective::MaxAge(
+            CACHE_AGE,
+        )]))
+        .body(body)
 }
 
 #[derive(Debug)]
