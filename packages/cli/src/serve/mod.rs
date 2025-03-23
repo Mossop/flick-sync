@@ -366,7 +366,7 @@ impl Runnable for Serve {
         }
 
         background_task.abort();
-        http_handle.stop(true).await;
+        http_handle.stop(false).await;
         dlna_server.shutdown().await;
 
         Ok(())
