@@ -3,7 +3,6 @@ use std::{
     future::{Ready, ready},
     io::SeekFrom,
     str::FromStr,
-    sync::Mutex,
 };
 
 use actix_web::{
@@ -12,17 +11,14 @@ use actix_web::{
     get,
     http::header::{self, CacheDirective},
     post,
-    web::{Data, Path, Query, ThinData},
+    web::{Path, Query, ThinData},
 };
 use bytes::Bytes;
-use flick_sync::{Collection, FlickSync, Library, LibraryType, PlaybackState, Season, Show, Video};
+use flick_sync::{Collection, Library, LibraryType, PlaybackState, Season, Show, Video};
 use futures::TryStreamExt;
 use rinja::Template;
 use serde::{Deserialize, Serialize};
-use tokio::{
-    io::{AsyncSeekExt, BufReader},
-    sync::broadcast::Sender,
-};
+use tokio::io::{AsyncSeekExt, BufReader};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
 use tracing::error;
@@ -30,7 +26,7 @@ use tracing::error;
 use crate::{
     EmbeddedFileStream, Resources,
     serve::{
-        ConnectionInfo, Event, ServiceData, SyncStatus,
+        ConnectionInfo, ServiceData,
         events::{ProgressBarTemplate, SyncLogTemplate, SyncProgressBar},
     },
     shared::{StreamLimiter, uniform_title},
@@ -91,16 +87,15 @@ fn render<T: Template>(template: T) -> HttpResponse {
     }
 }
 
-#[get("/sync")]
-pub(super) async fn sync_list(
+#[get("/status")]
+pub(super) async fn status_page(
     ThinData(service_data): ThinData<ServiceData>,
-    status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
 ) -> HttpResponse {
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&service_data.flick_sync, &status).await)
+        Some(Sidebar::build(&service_data).await)
     };
 
     #[derive(Template)]
@@ -118,7 +113,7 @@ pub(super) async fn sync_list(
     };
 
     let (log, progress) = {
-        let status = status.lock().unwrap();
+        let status = service_data.status.lock().unwrap();
         (
             status.log.clone(),
             status
@@ -377,13 +372,13 @@ struct Sidebar {
 }
 
 impl Sidebar {
-    async fn build(flick_sync: &FlickSync, status: &Mutex<SyncStatus>) -> Self {
-        let is_syncing = status.lock().unwrap().is_syncing;
+    async fn build(service_data: &ServiceData) -> Self {
+        let is_syncing = service_data.status.lock().unwrap().is_syncing;
 
         let mut libraries = Vec::new();
         let mut playlists = Vec::new();
 
-        for server in flick_sync.servers().await {
+        for server in service_data.flick_sync.servers().await {
             for library in server.libraries().await {
                 libraries.push(SidebarLibrary {
                     id: library.id().to_owned(),
@@ -538,7 +533,6 @@ struct ListTemplate {
 #[get("/library/{server}/{id}")]
 pub(super) async fn library_contents(
     ThinData(service_data): ThinData<ServiceData>,
-    status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String)>,
 ) -> HttpResponse {
@@ -555,7 +549,7 @@ pub(super) async fn library_contents(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&service_data.flick_sync, &status).await)
+        Some(Sidebar::build(&service_data).await)
     };
 
     let browse_url = format!("/library/{}/{}", server.id(), library.id());
@@ -606,7 +600,6 @@ pub(super) async fn library_contents(
 #[get("/library/{server}/{id}/collections")]
 pub(super) async fn library_collections(
     ThinData(service_data): ThinData<ServiceData>,
-    status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String)>,
 ) -> HttpResponse {
@@ -623,7 +616,7 @@ pub(super) async fn library_collections(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&service_data.flick_sync, &status).await)
+        Some(Sidebar::build(&service_data).await)
     };
 
     let browse_url = format!("/library/{}/{}", server.id(), library.id());
@@ -650,7 +643,6 @@ pub(super) async fn library_collections(
 #[get("/library/{server}/{library_id}/collection/{collection_id}")]
 pub(super) async fn collection_contents(
     ThinData(service_data): ThinData<ServiceData>,
-    status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String, String)>,
 ) -> HttpResponse {
@@ -667,7 +659,7 @@ pub(super) async fn collection_contents(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&service_data.flick_sync, &status).await)
+        Some(Sidebar::build(&service_data).await)
     };
 
     let mut thumbs = Vec::new();
@@ -713,7 +705,6 @@ pub(super) async fn collection_contents(
 #[get("/library/{server}/{library_id}/show/{collection_id}")]
 pub(super) async fn show_contents(
     ThinData(service_data): ThinData<ServiceData>,
-    status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String, String)>,
 ) -> HttpResponse {
@@ -730,7 +721,7 @@ pub(super) async fn show_contents(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&service_data.flick_sync, &status).await)
+        Some(Sidebar::build(&service_data).await)
     };
 
     let mut thumbs = Vec::new();
@@ -750,7 +741,6 @@ pub(super) async fn show_contents(
 #[get("/library/{server}/{library_id}/season/{collection_id}")]
 pub(super) async fn season_contents(
     ThinData(service_data): ThinData<ServiceData>,
-    status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String, String)>,
 ) -> HttpResponse {
@@ -767,7 +757,7 @@ pub(super) async fn season_contents(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&service_data.flick_sync, &status).await)
+        Some(Sidebar::build(&service_data).await)
     };
 
     let mut thumbs = Vec::new();
@@ -793,7 +783,6 @@ pub(super) async fn season_contents(
 #[get("/playlist/{server}/{id}")]
 pub(super) async fn playlist_contents(
     ThinData(service_data): ThinData<ServiceData>,
-    status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     path: Path<(String, String)>,
 ) -> HttpResponse {
@@ -810,7 +799,7 @@ pub(super) async fn playlist_contents(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&service_data.flick_sync, &status).await)
+        Some(Sidebar::build(&service_data).await)
     };
 
     #[derive(Template)]
@@ -867,7 +856,6 @@ pub(super) async fn update_playback_position(
 #[get("/library/{server}/{library_id}/video/{video_id}")]
 pub(super) async fn video_page(
     ThinData(service_data): ThinData<ServiceData>,
-    status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
     req: HttpRequest,
     path: Path<(String, String, String)>,
@@ -885,7 +873,7 @@ pub(super) async fn video_page(
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&service_data.flick_sync, &status).await)
+        Some(Sidebar::build(&service_data).await)
     };
 
     let url_base = if let Some(conn_info) = req.conn_data::<ConnectionInfo>() {
@@ -986,8 +974,8 @@ pub(super) async fn video_page(
 }
 
 #[get("/events")]
-pub(super) async fn events(ThinData(event_sender): ThinData<Sender<Event>>) -> HttpResponse {
-    let receiver = event_sender.subscribe();
+pub(super) async fn events(ThinData(service_data): ThinData<ServiceData>) -> HttpResponse {
+    let receiver = service_data.event_sender.subscribe();
 
     let event_stream = BroadcastStream::new(receiver)
         .try_filter_map(async |event| Ok(event.to_string().await))
@@ -1001,13 +989,12 @@ pub(super) async fn events(ThinData(event_sender): ThinData<Sender<Event>>) -> H
 #[get("/")]
 pub(super) async fn index_page(
     ThinData(service_data): ThinData<ServiceData>,
-    status: Data<Mutex<SyncStatus>>,
     HxTarget(target): HxTarget,
 ) -> HttpResponse {
     let sidebar = if target.is_some() {
         None
     } else {
-        Some(Sidebar::build(&service_data.flick_sync, &status).await)
+        Some(Sidebar::build(&service_data).await)
     };
 
     let mut thumbs: Vec<Thumbnail> = Vec::new();

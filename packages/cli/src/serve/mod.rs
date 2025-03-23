@@ -8,11 +8,7 @@ use std::{
 
 use actix_tls::accept::rustls_0_23::TlsStream;
 use actix_web::{
-    App, HttpServer,
-    dev::Extensions,
-    middleware::from_fn,
-    rt::net::TcpStream,
-    web::{Data, ThinData},
+    App, HttpServer, dev::Extensions, middleware::from_fn, rt::net::TcpStream, web::ThinData,
 };
 use clap::Args;
 use flick_sync::{DownloadProgress, FlickSync, Progress, Server, VideoPart};
@@ -294,6 +290,8 @@ fn on_connect(connection: &dyn Any, data: &mut Extensions) {
 struct ServiceData {
     flick_sync: FlickSync,
     http_port: u16,
+    status: Arc<Mutex<SyncStatus>>,
+    event_sender: broadcast::Sender<Event>,
 }
 
 impl Runnable for Serve {
@@ -312,17 +310,16 @@ impl Runnable for Serve {
             event_sender.clone(),
         ));
 
-        let status = Data::from(status);
         let service_data = ServiceData {
             flick_sync,
             http_port: port,
+            status,
+            event_sender,
         };
 
         let mut http_server = HttpServer::new(move || {
             App::new()
                 .app_data(ThinData(service_data.clone()))
-                .app_data(ThinData(event_sender.clone()))
-                .app_data(status.clone())
                 .service(service_factory.clone())
                 .wrap(from_fn(middleware::middleware))
                 .service(services::events)
@@ -337,7 +334,7 @@ impl Runnable for Serve {
                 .service(services::update_playback_position)
                 .service(services::video_page)
                 .service(services::library_contents)
-                .service(services::sync_list)
+                .service(services::status_page)
                 .service(services::index_page)
         })
         .on_connect(on_connect)
