@@ -262,6 +262,11 @@ export class VideoPlayer extends LitElement {
 
     if (this.videoElement) {
       this.videoElement.currentTime = this.currentTime - this.previousTime;
+      if (this.isPlaying) {
+        this.videoElement.play();
+      } else {
+        this.videoElement.pause();
+      }
     }
   }
 
@@ -452,6 +457,7 @@ export class VideoPlayer extends LitElement {
         let mediaInfo = this.castMediaInfo(this.playlist[mediaIndex]);
         let loadRequest = new chrome.cast.media.LoadRequest(mediaInfo);
         loadRequest.currentTime = targetTime;
+        loadRequest.autoplay = this.isPlaying;
         await this.castSession.loadMedia(loadRequest);
       }
     } else if (mediaIndex == this.mediaIndex) {
