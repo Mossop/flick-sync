@@ -377,7 +377,7 @@ impl Runnable for Serve {
 
         let mut sighup = SignalStream::new(signal(SignalKind::hangup()).unwrap()).fuse();
         let mut sigint = SignalStream::new(signal(SignalKind::interrupt()).unwrap()).fuse();
-        let mut sigterm = SignalStream::new(signal(SignalKind::interrupt()).unwrap()).fuse();
+        let mut sigterm = SignalStream::new(signal(SignalKind::terminate()).unwrap()).fuse();
 
         loop {
             select! {
