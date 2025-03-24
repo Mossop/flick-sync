@@ -170,7 +170,7 @@ impl FlickSync {
 
         Ok(Self {
             inner: Arc::new(Inner {
-                download_permits: Arc::new(Semaphore::new(config.max_downloads.unwrap_or(2))),
+                download_permits: Arc::new(Semaphore::new(config.max_downloads.unwrap_or(1))),
                 config: RwLock::new(config),
                 state: RwLock::new(state),
                 path: path.to_owned(),

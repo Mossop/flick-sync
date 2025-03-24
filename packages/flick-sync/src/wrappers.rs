@@ -717,7 +717,8 @@ impl VideoPart {
             return Ok(TranscodeResult::Skipped);
         };
 
-        let _permit = self.server.transcode_requests.acquire().await.unwrap();
+        #[expect(unused)]
+        let permit = self.server.transcode_requests.acquire().await.unwrap();
 
         let item = plex_server.item_by_id(&self.id).await?;
 
@@ -1119,7 +1120,10 @@ impl VideoPart {
                             self.server.transcode_permits.clone().acquire_owned().await
                         else {
                             progress
-                                .download_failed(&self, anyhow!("Failed to lock item for writing"))
+                                .download_failed(
+                                    &self,
+                                    anyhow!("Failed queueing for transcode permission"),
+                                )
                                 .await;
                             return false;
                         };
@@ -1146,7 +1150,10 @@ impl VideoPart {
                             .await
                         else {
                             progress
-                                .download_failed(&self, anyhow!("Failed to lock item for writing"))
+                                .download_failed(
+                                    &self,
+                                    anyhow!("Failed queueing for download permission"),
+                                )
                                 .await;
                             return false;
                         };
@@ -1175,7 +1182,10 @@ impl VideoPart {
                             self.server.transcode_permits.clone().acquire_owned().await
                         else {
                             progress
-                                .download_failed(&self, anyhow!("Failed to lock item for writing"))
+                                .download_failed(
+                                    &self,
+                                    anyhow!("queueing for transcode permission"),
+                                )
                                 .await;
                             return false;
                         };
@@ -1197,7 +1207,21 @@ impl VideoPart {
                     progress.finished();
                 }
                 DownloadState::TranscodeDownloading { session_id, path } => {
-                    transcode_permit = None;
+                    if transcode_permit.is_none() {
+                        let Ok(permit) =
+                            self.server.transcode_permits.clone().acquire_owned().await
+                        else {
+                            progress
+                                .download_failed(
+                                    &self,
+                                    anyhow!("Failed queueing for transcode permission"),
+                                )
+                                .await;
+                            return false;
+                        };
+
+                        transcode_permit.replace(permit);
+                    }
 
                     if download_permit.is_none() {
                         let Ok(permit) = self
@@ -1209,7 +1233,7 @@ impl VideoPart {
                             .await
                         else {
                             progress
-                                .download_failed(&self, anyhow!("Failed to lock item for writing"))
+                                .download_failed(&self, anyhow!("queueing for download permission"))
                                 .await;
                             return false;
                         };

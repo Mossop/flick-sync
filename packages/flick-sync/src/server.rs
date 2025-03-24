@@ -239,7 +239,7 @@ impl Server {
             inner: inner.clone(),
             connection: Arc::new(Mutex::new(None)),
             transcode_requests: Arc::new(Semaphore::new(1)),
-            transcode_permits: Arc::new(Semaphore::new(config.max_transcodes.unwrap_or(3))),
+            transcode_permits: Arc::new(Semaphore::new(config.max_transcodes.unwrap_or(1))),
         }
     }
 
