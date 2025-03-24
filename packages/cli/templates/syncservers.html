@@ -9,22 +9,26 @@
       </div>
     </div>
     <table class="sync-table">
-        <tr>
-          <th class="title">Title</th>
-          <th class="completion"></th>
-          <th class="duration">Duration</th>
-          <th class="size">Size</th>
-          <th class="buttons"></th>
-        </tr>
-      {% for sync in server.syncs %}
-        <tr id="{{ sync.id }}">
-          <td class="title">{{ sync.name }}</td>
-          <td class="completion">{{ sync.percent|fmt("{:.0}") }}%</td>
-          <td class="duration">{{ sync.duration }}</td>
-          <td class="size"><sl-format-bytes value="{{ sync.size }}"></sl-format-bytes></td>
-          <td class="buttons"><sl-icon-button hx-delete="/sync/{{ server.id }}/{{ sync.id }}" name="trash3" label="Delete"></sl-icon-button></td>
-        </tr>
-      {% endfor %}
+        <thead>
+          <tr>
+            <th class="title">Title</th>
+            <th class="completion"></th>
+            <th class="duration">Duration</th>
+            <th class="size">Size</th>
+            <th class="buttons"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for sync in server.syncs %}
+            <tr id="{{ sync.id }}">
+              <td class="title">{{ sync.name }}</td>
+              <td class="completion">{{ sync.percent|fmt("{:.0}") }}%</td>
+              <td class="duration">{{ sync.duration }}</td>
+              <td class="size"><sl-format-bytes value="{{ sync.size }}"></sl-format-bytes></td>
+              <td class="buttons"><sl-icon-button hx-delete="/sync/{{ server.id }}/{{ sync.id }}" name="trash3" label="Delete"></sl-icon-button></td>
+            </tr>
+          {% endfor %}
+        </tbody>
     </table>
 
     <form hx-post="/sync/{{ server.id }}">

@@ -212,7 +212,14 @@ body.sidebar sl-split-panel {
 
   .sync-table {
     width: 100%;
-    table-layout: fixed;
+    display: grid;
+    grid-template-columns: 1fr max-content max-content max-content max-content;
+    gap: var(--sl-spacing-2x-small) var(--sl-spacing-4x-small);
+    align-items: center;
+
+    thead, tbody, tr {
+      display: contents;
+    }
 
     th {
       font-weight: bold;
