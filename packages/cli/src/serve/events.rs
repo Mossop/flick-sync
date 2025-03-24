@@ -1,4 +1,4 @@
-use flick_sync::{FlickSync, Server, VideoPart, VideoStats};
+use flick_sync::{FlickSync, VideoPart, VideoStats};
 use rinja::Template;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tracing::warn;
@@ -159,9 +159,9 @@ impl Event {
 
 #[derive(Clone)]
 pub(crate) enum SyncLogMessage {
-    SyncStarted(Server),
-    SyncFailed((Server, String)),
-    SyncFinished((Server, bool)),
+    SyncStarted(String),
+    SyncFailed((String, String)),
+    SyncFinished((String, bool)),
     DownloadStarted(VideoPart),
     DownloadComplete(VideoPart),
     DownloadFailed((VideoPart, String)),
@@ -201,27 +201,26 @@ impl SyncLogItem {
             SyncLogMessage::SyncStarted(server) => SyncLogTemplate {
                 timestamp,
                 message_type: "info",
-                message: format!("Syncing started for {}.", server.name().await),
+                message: format!("Syncing started for {server}."),
             },
             SyncLogMessage::SyncFailed((server, message)) => SyncLogTemplate {
                 timestamp,
                 message_type: "error",
-                message: format!("Syncing failed for {}: {message}", server.name().await),
+                message: format!("Syncing failed for {server}: {message}"),
             },
             SyncLogMessage::SyncFinished((server, complete)) => {
                 if *complete {
                     SyncLogTemplate {
                         timestamp,
                         message_type: "success",
-                        message: format!("Syncing finished for {}.", server.name().await),
+                        message: format!("Syncing finished for {server}."),
                     }
                 } else {
                     SyncLogTemplate {
                         timestamp,
                         message_type: "success",
                         message: format!(
-                            "Syncing finished for {}, some items were not fully synced.",
-                            server.name().await
+                            "Syncing finished for {server}, some items were not fully synced.",
                         ),
                     }
                 }

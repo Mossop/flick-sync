@@ -136,12 +136,10 @@ struct SyncTask {
 
 impl SyncTask {
     fn new(status: Arc<Mutex<SyncStatus>>, event_sender: broadcast::Sender<Event>) -> Self {
-        let this = Self {
+        Self {
             event_sender,
             status,
-        };
-        this.send_event(Event::SyncStart);
-        this
+        }
     }
 
     fn add_progress(&self, progress: &SyncProgress) {
@@ -194,16 +192,22 @@ impl SyncTask {
         let _ = self.event_sender.send(event);
     }
 
-    fn sync_started(&self, server: Server) {
-        self.log(SyncLogMessage::SyncStarted(server));
+    async fn sync_started(&self, server: Server) {
+        self.log(SyncLogMessage::SyncStarted(server.name().await));
     }
 
-    fn sync_failed(&self, server: Server, error: anyhow::Error) {
-        self.log(SyncLogMessage::SyncFailed((server, error.to_string())));
+    async fn sync_failed(&self, server: Server, error: anyhow::Error) {
+        self.log(SyncLogMessage::SyncFailed((
+            server.name().await,
+            error.to_string(),
+        )));
     }
 
-    fn sync_finished(&self, server: Server, complete: bool) {
-        self.log(SyncLogMessage::SyncFinished((server, complete)));
+    async fn sync_finished(&self, server: Server, complete: bool) {
+        self.log(SyncLogMessage::SyncFinished((
+            server.name().await,
+            complete,
+        )));
     }
 }
 
@@ -234,18 +238,21 @@ async fn background_task(
     event_sender: broadcast::Sender<Event>,
     wakeup: Arc<Notify>,
 ) {
+    time::sleep(Duration::from_secs(30)).await;
+
     loop {
         status.lock().unwrap().is_syncing = true;
+        let _ = event_sender.send(Event::SyncStart);
         let task = SyncTask::new(status.clone(), event_sender.clone());
 
         flick_sync.prune_root().await;
 
         for server in flick_sync.servers().await {
-            task.sync_started(server.clone());
+            task.sync_started(server.clone()).await;
 
             if let Err(e) = server.update_state().await {
                 warn!(server=server.id(), error=?e, "Failed to update server");
-                task.sync_failed(server, e);
+                task.sync_failed(server, e).await;
                 continue;
             }
 
@@ -258,15 +265,15 @@ async fn background_task(
             match server.download(task.clone()).await {
                 Ok(complete) => {
                     server.write_playlists().await;
-                    task.sync_finished(server, complete);
+                    task.sync_finished(server, complete).await;
                 }
-                Err(e) => task.sync_failed(server, e),
+                Err(e) => task.sync_failed(server, e).await,
             }
         }
 
         status.lock().unwrap().is_syncing = false;
-        task.send_event(Event::SyncEnd);
         task.send_event(Event::SyncChange);
+        let _ = event_sender.send(Event::SyncEnd);
 
         select! {
             _ = time::sleep(Duration::from_secs(30 * 60)).fuse() => {},

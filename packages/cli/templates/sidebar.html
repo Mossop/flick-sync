@@ -23,7 +23,7 @@
         <sl-icon name="list-check"></sl-icon> Sync List
       </a>
       <a class="sidebar-item link-item" href="/status">
-        <div id="sync-throbber" hx-target="#sync-throbber" sse-swap="sync-status">
+        <div id="sync-throbber" hx-target="#sync-throbber" sse-swap="sync-status" hx-swap="innerHTML">
           {% if sidebar.is_syncing %}
             <sl-icon id="spinner" class="spinning" name="arrow-repeat"></sl-icon> Syncing
           {% else %}

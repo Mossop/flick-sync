@@ -247,7 +247,15 @@ impl Server {
         #[expect(unused)]
         let guard = self.try_lock_write().await?;
 
+        let mut servers = self.inner.servers.lock().await;
+        let mut config = self.inner.config.write().await;
         let mut state = self.inner.state.write().await;
+
+        config.servers.remove(&self.id);
+        self.inner.persist_config(&config).await?;
+
+        servers.remove(&self.id);
+
         state.servers.remove(&self.id);
         self.inner.persist_state(&state).await?;
 
@@ -508,8 +516,11 @@ impl Server {
     pub async fn connect(&self) -> Result<plex_api::Server> {
         let mut connection = self.connection.lock().await;
 
-        if let Some(ref api) = *connection {
-            return Ok(api.clone().refresh().await?);
+        if let Some(api) = connection.take() {
+            if let Ok(api) = api.refresh().await {
+                *connection = Some(api.clone());
+                return Ok(api);
+            }
         }
 
         let config = self.inner.config.read().await;
