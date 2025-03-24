@@ -1,39 +1,51 @@
 use std::{
-    cmp::{self, Ordering},
-    io::{self, SeekFrom},
+    cmp::Ordering,
+    io::{self, Cursor},
     pin::Pin,
     str::FromStr,
     task::{Context, Poll},
-    time::Duration,
 };
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use dlna_server::{
-    Container, DlnaContext, DlnaRequestHandler, DlnaServer, DlnaServiceFactory, Icon, Item, Object,
-    Range, Resource, StreamResponse, UpnpError,
+    Container, DlnaRequestHandler, DlnaServer, DlnaServiceFactory, Icon, Item, Object, Resource,
+    StreamResponse, UpnpError,
 };
 use flick_sync::{
-    Collection, FlickSync, Library, LockedFile, LockedFileAsyncRead, MovieCollection, MovieLibrary,
-    Playlist, Season, Server, Show, ShowCollection, ShowLibrary, Timeout, Video, VideoPart,
+    Collection, FlickSync, Library, LockedFile, MovieCollection, MovieLibrary, Playlist, Season,
+    Server, Show, ShowCollection, ShowLibrary, Timeout, Video, VideoPart,
 };
-use futures::{Stream, TryStreamExt};
 use image::ImageReader;
 use lazy_static::lazy_static;
 use mime::Mime;
 use pin_project::pin_project;
 use regex::Regex;
-use tokio::io::{AsyncSeekExt, BufReader};
-use tokio_util::io::ReaderStream;
-use tracing::{instrument, warn};
+use tokio::io::{AsyncRead, AsyncSeek, ReadBuf};
+use tracing::instrument;
 
-use crate::{
-    EmbeddedFileStream, Resources,
-    shared::{StreamLimiter, uniform_title},
-};
+use crate::{Resources, shared::uniform_title};
 
 lazy_static! {
     static ref RE_VIDEO_PART: Regex = Regex::new("^video/(.+)/VP:(.+)/(\\d+)$").unwrap();
+}
+
+#[pin_project(project = EitherReaderProj)]
+enum EitherReader<A, B> {
+    A(#[pin] A),
+    B(#[pin] B),
+}
+
+impl<A: AsyncRead, B: AsyncRead> AsyncRead for EitherReader<A, B> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        match self.project() {
+            EitherReaderProj::A(reader) => reader.poll_read(cx, buf),
+            EitherReaderProj::B(reader) => reader.poll_read(cx, buf),
+        }
+    }
 }
 
 async fn video_part_from_id(flick_sync: &FlickSync, id: &str) -> Option<VideoPart> {
@@ -50,54 +62,6 @@ async fn video_part_from_id(flick_sync: &FlickSync, id: &str) -> Option<VideoPar
     let parts = video.parts().await;
 
     Some(parts.get(video_part)?.clone())
-}
-
-async fn stream_file<F, S>(file: LockedFile, wrapper: F) -> Result<StreamResponse<S>, UpnpError>
-where
-    F: AsyncFnOnce(BufReader<LockedFileAsyncRead>) -> (Option<Range>, S),
-    S: Stream<Item = Result<Bytes, io::Error>>,
-{
-    let Ok(mime_type) = file.mime_type().await else {
-        return Err(UpnpError::unknown_object());
-    };
-
-    let Ok(size) = file.len().await else {
-        return Err(UpnpError::unknown_object());
-    };
-
-    let Ok(async_reader) = file.async_read().await else {
-        return Err(UpnpError::unknown_object());
-    };
-
-    let (range, stream) = wrapper(BufReader::new(async_reader)).await;
-
-    Ok(StreamResponse {
-        mime_type,
-        range,
-        resource_size: Some(size),
-        stream,
-    })
-}
-
-#[pin_project(project = EitherProj)]
-enum EitherStream<A, B> {
-    A(#[pin] A),
-    B(#[pin] B),
-}
-
-impl<A, B, C> Stream for EitherStream<A, B>
-where
-    A: Stream<Item = C>,
-    B: Stream<Item = C>,
-{
-    type Item = C;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.project() {
-            EitherProj::A(s) => s.poll_next(cx),
-            EitherProj::B(s) => s.poll_next(cx),
-        }
-    }
 }
 
 // Object ID forms and hierarchy:
@@ -932,8 +896,7 @@ impl DlnaRequestHandler for DlnaHandler {
     async fn stream_icon(
         &self,
         icon_id: &str,
-    ) -> Result<StreamResponse<impl Stream<Item = Result<Bytes, io::Error>> + 'static>, UpnpError>
-    {
+    ) -> Result<StreamResponse<impl AsyncRead + 'static>, UpnpError> {
         if let Some(object_id) = icon_id.strip_prefix("thumbnail/") {
             let Some((server, item_type, item_id)) = self.extract_id(object_id).await else {
                 return Err(UpnpError::unknown_object());
@@ -954,10 +917,23 @@ impl DlnaRequestHandler for DlnaHandler {
                 return Err(UpnpError::unknown_object());
             };
 
-            stream_file(thumbnail, async move |reader| {
-                (None, EitherStream::B(ReaderStream::new(reader)))
+            let Ok(mime_type) = thumbnail.mime_type().await else {
+                return Err(UpnpError::unknown_object());
+            };
+
+            let Ok(size) = thumbnail.len().await else {
+                return Err(UpnpError::unknown_object());
+            };
+
+            let Ok(async_reader) = thumbnail.async_read().await else {
+                return Err(UpnpError::unknown_object());
+            };
+
+            Ok(StreamResponse {
+                mime_type,
+                resource_size: Some(size),
+                reader: EitherReader::A(async_reader),
             })
-            .await
         } else if let Some(resource) = icon_id.strip_prefix("resource/") {
             let Some(icon_file) = Resources::get(&format!("upnp/{resource}")) else {
                 return Err(UpnpError::unknown_object());
@@ -965,9 +941,8 @@ impl DlnaRequestHandler for DlnaHandler {
 
             Ok(StreamResponse {
                 mime_type: mime::IMAGE_PNG,
-                range: None,
                 resource_size: Some(icon_file.data.len() as u64),
-                stream: EitherStream::A(EmbeddedFileStream::new(icon_file)),
+                reader: EitherReader::B(Cursor::new(icon_file.data)),
             })
         } else {
             return Err(UpnpError::unknown_object());
@@ -1000,15 +975,11 @@ impl DlnaRequestHandler for DlnaHandler {
         })
     }
 
-    #[instrument(skip(self, _context))]
+    #[instrument(skip(self))]
     async fn stream_resource(
         &self,
         resource_id: &str,
-        seek: Option<u64>,
-        length: Option<u64>,
-        _context: DlnaContext,
-    ) -> Result<StreamResponse<impl Stream<Item = Result<Bytes, io::Error>> + 'static>, UpnpError>
-    {
+    ) -> Result<impl AsyncRead + AsyncSeek + Unpin + 'static, UpnpError> {
         let Some(part) = video_part_from_id(&self.flick_sync, resource_id).await else {
             return Err(UpnpError::unknown_object());
         };
@@ -1017,64 +988,11 @@ impl DlnaRequestHandler for DlnaHandler {
             return Err(UpnpError::unknown_object());
         };
 
-        let Ok(size) = file.len().await else {
+        let Ok(reader) = file.async_read().await else {
             return Err(UpnpError::unknown_object());
         };
 
-        stream_file(file, async move |mut reader| {
-            let (range, position, limit) = if let Some(seek) = seek {
-                let mut length = length.unwrap_or_else(|| size - seek);
-                length = cmp::min(length, size - seek);
-
-                if seek > 0 {
-                    match reader.seek(SeekFrom::Start(seek)).await {
-                        Ok(start) => (Some(Range { start, length }), start, length),
-                        Err(e) => {
-                            warn!(error=%e, "Failed to seek source file");
-                            (None, 0, size)
-                        }
-                    }
-                } else {
-                    (Some(Range { start: 0, length }), 0, length)
-                }
-            } else if let Some(mut length) = length {
-                length = cmp::min(length, size);
-                (Some(Range { start: 0, length }), 0, length)
-            } else {
-                (None, 0, size)
-            };
-
-            let video = part.video().await;
-            let duration = part.duration().await.as_millis() as u64;
-            let mut preceeding = Duration::from_millis(0);
-            if part.index() > 0 {
-                for previous in video.parts().await.into_iter().take(part.index()) {
-                    preceeding += previous.duration().await;
-                }
-            }
-
-            let preceeding = preceeding.as_millis() as u64;
-            let mut current_position = position;
-
-            let stream = StreamLimiter::new(ReaderStream::new(reader), position, limit + position)
-                .and_then(move |bytes| {
-                    let video = video.clone();
-                    async move {
-                        current_position += bytes.len() as u64;
-
-                        let _ = video
-                            .set_playback_position(
-                                preceeding + (duration * current_position) / size,
-                            )
-                            .await;
-
-                        Ok(bytes)
-                    }
-                });
-
-            (range, stream)
-        })
-        .await
+        Ok(reader)
     }
 }
 

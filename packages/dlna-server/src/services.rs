@@ -1,36 +1,193 @@
 use std::{
+    cmp,
     convert::Infallible,
+    io::{self, SeekFrom},
     net::SocketAddr,
+    pin::Pin,
     str::FromStr,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
+    task::{Context, Poll},
 };
 
 use actix_web::{
-    Error, FromRequest, HttpMessage, HttpRequest, HttpResponse, Responder, Scope,
+    Error, FromRequest, HttpMessage, HttpRequest, HttpResponse, HttpResponseBuilder, Responder,
+    Scope,
     body::{BoxBody, SizedStream},
     dev::{AppService, HttpServiceFactory, ServiceRequest, ServiceResponse},
     get,
-    http::header::{self, CacheDirective, HeaderMap, HeaderName, HeaderValue},
+    http::{
+        StatusCode,
+        header::{
+            self, ByteRangeSpec, CacheDirective, HeaderMap, HeaderName, HeaderValue,
+            TryIntoHeaderValue,
+        },
+    },
     middleware::{Next, from_fn},
     web::{self, Data, Path, Payload, ReqData},
 };
 use mime::Mime;
+use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use serde_with::{StringWithSeparator, formats::CommaSeparator, serde_as};
+use tokio::io::{AsyncRead, AsyncSeek, AsyncSeekExt, ReadBuf};
+use tokio_util::io::ReaderStream;
 use tracing::{Instrument, Level, Span, field, instrument, span, trace, warn};
 use uuid::Uuid;
 
 use crate::{
-    DlnaContext, DlnaRequestHandler, UpnpError, ns,
+    DlnaRequestHandler, UpnpError, ns,
     soap::{ArgDirection, RequestContext, SoapAction, SoapArgument, SoapResult},
     upnp,
     xml::Xml,
 };
 
 const CACHE_AGE: u32 = 10 * 60;
+const BUFFER_CAPACITY: usize = 8 * 1024;
+
+#[pin_project]
+struct ByteRangeResponse<R> {
+    #[pin]
+    reader: R,
+    remaining: u64,
+}
+
+impl<R> AsyncRead for ByteRangeResponse<R>
+where
+    R: AsyncRead,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.project();
+
+        if *this.remaining == 0 {
+            return Poll::Ready(Ok(()));
+        }
+
+        let count = buf.filled().len();
+        let result = this.reader.poll_read(cx, buf);
+
+        if let Poll::Ready(Ok(())) = result {
+            let new_count = buf.filled().len();
+            let filled = (new_count - count) as u64;
+
+            if filled > 0 {
+                if *this.remaining < filled {
+                    buf.set_filled(*this.remaining as usize);
+                    *this.remaining = 0;
+                } else {
+                    *this.remaining -= filled;
+                }
+            }
+        }
+
+        result
+    }
+}
+
+impl<R> ByteRangeResponse<R>
+where
+    R: AsyncRead + AsyncSeek + Unpin + 'static,
+{
+    fn get_range(request: &HttpRequest) -> Option<ByteRangeSpec> {
+        // Only supports the specific case of a single byte range request.
+        let range_value = request.headers().get(header::RANGE)?;
+        let range_str = range_value.to_str().ok()?;
+        let range = header::Range::from_str(range_str).ok()?;
+
+        if let header::Range::Bytes(spec) = range {
+            if spec.len() == 1 {
+                spec.into_iter().next()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    fn build_response(status: StatusCode, headers: HeaderMap) -> HttpResponseBuilder {
+        let mut response = HttpResponse::build(status);
+        response.append_header((header::ACCEPT_RANGES, "bytes"));
+
+        for (key, value) in headers {
+            response.append_header((key, value));
+        }
+
+        response
+    }
+
+    fn build_stream(reader: R, length: u64) -> SizedStream<ReaderStream<ByteRangeResponse<R>>> {
+        SizedStream::new(
+            length,
+            ReaderStream::with_capacity(
+                Self {
+                    reader,
+                    remaining: length,
+                },
+                BUFFER_CAPACITY,
+            ),
+        )
+    }
+
+    async fn build(
+        request: &HttpRequest,
+        content_size: u64,
+        mut reader: R,
+        headers: HeaderMap,
+    ) -> HttpResponse {
+        let Some(range_spec) = Self::get_range(request) else {
+            return Self::build_response(StatusCode::OK, headers)
+                .body(Self::build_stream(reader, content_size));
+        };
+
+        let (start, length) = match range_spec {
+            ByteRangeSpec::FromTo(start, end) => {
+                if start >= content_size {
+                    return HttpResponse::RangeNotSatisfiable()
+                        .append_header(header::ContentRange(header::ContentRangeSpec::Bytes {
+                            range: None,
+                            instance_length: Some(content_size),
+                        }))
+                        .finish();
+                }
+
+                reader.seek(SeekFrom::Start(start)).await.unwrap();
+                let end = cmp::min(end, content_size - 1);
+                (start, end - start + 1)
+            }
+            ByteRangeSpec::From(start) => {
+                if start >= content_size {
+                    return HttpResponse::RangeNotSatisfiable()
+                        .append_header(header::ContentRange(header::ContentRangeSpec::Bytes {
+                            range: None,
+                            instance_length: Some(content_size),
+                        }))
+                        .finish();
+                }
+
+                reader.seek(SeekFrom::Start(start)).await.unwrap();
+                (start, content_size - start)
+            }
+            ByteRangeSpec::Last(length) => {
+                let length = cmp::min(length, content_size);
+                (content_size - length, length)
+            }
+        };
+
+        Self::build_response(StatusCode::PARTIAL_CONTENT, headers)
+            .append_header(header::ContentRange(header::ContentRangeSpec::Bytes {
+                range: Some((start, start + length - 1)),
+                instance_length: Some(content_size),
+            }))
+            .body(Self::build_stream(reader, length))
+    }
+}
 
 fn is_safe(addr: SocketAddr) -> bool {
     match addr {
@@ -228,9 +385,15 @@ pub(crate) async fn icon<H: DlnaRequestHandler>(
 
             if let Some(length) = stream_result.resource_size {
                 builder.append_header(header::ContentLength(length as usize));
-                builder.body(SizedStream::new(length, stream_result.stream))
+                builder.body(SizedStream::new(
+                    length,
+                    ReaderStream::with_capacity(stream_result.reader, BUFFER_CAPACITY),
+                ))
             } else {
-                builder.streaming(stream_result.stream)
+                builder.streaming(ReaderStream::with_capacity(
+                    stream_result.reader,
+                    BUFFER_CAPACITY,
+                ))
             }
         }
         Err(err) => {
@@ -275,61 +438,42 @@ pub(crate) async fn resource_get<H: DlnaRequestHandler>(
     req: HttpRequest,
     id: Path<String>,
 ) -> HttpResponse {
-    let (seek, length) = if let Some(header::Range::Bytes(spec)) = req
-        .headers()
-        .get(header::RANGE)
-        .and_then(|hv| hv.to_str().ok())
-        .and_then(|hv| header::Range::from_str(hv).ok())
-    {
-        if spec.len() == 1 {
-            match spec[0] {
-                header::ByteRangeSpec::From(start) => (Some(start), None),
-                header::ByteRangeSpec::Last(end) => (None, Some(end + 1)),
-                header::ByteRangeSpec::FromTo(start, end) => (Some(start), Some(end - start + 1)),
+    let resource = match req_data.app_data.handler.get_resource(&id).await {
+        Ok(r) => r,
+        Err(err) => {
+            let status = err.status_code();
+            if status.is_client_error() {
+                return HttpResponse::NotFound().finish();
+            } else {
+                return HttpResponse::BadRequest().finish();
             }
-        } else {
-            (None, None)
         }
-    } else {
-        (None, None)
     };
 
-    let context = DlnaContext {
-        request_id: req_data.request_id,
-    };
-
-    match req_data
-        .app_data
-        .handler
-        .stream_resource(&id, seek, length, context)
-        .await
-    {
-        Ok(stream_result) => {
-            let (mut builder, length) = if let Some(range) = stream_result.range {
-                let mut builder = HttpResponse::PartialContent();
-
-                builder.append_header(header::ContentRange(header::ContentRangeSpec::Bytes {
-                    range: Some((range.start, range.length + range.start - 1)),
-                    instance_length: stream_result.resource_size,
-                }));
-
-                (builder, Some(range.length))
+    match req_data.app_data.handler.stream_resource(&id).await {
+        Ok(reader) => {
+            if let Some(size) = resource.size {
+                let mut headers = HeaderMap::new();
+                headers.append(
+                    header::CONTENT_TYPE,
+                    header::ContentType(resource.mime_type)
+                        .try_into_value()
+                        .unwrap(),
+                );
+                headers.append(
+                    header::CACHE_CONTROL,
+                    header::CacheControl(vec![CacheDirective::MaxAge(CACHE_AGE)])
+                        .try_into_value()
+                        .unwrap(),
+                );
+                ByteRangeResponse::build(&req, size, reader, headers).await
             } else {
-                (HttpResponse::Ok(), stream_result.resource_size)
-            };
-
-            builder
-                .append_header(header::ContentType(stream_result.mime_type))
-                .append_header(header::CacheControl(vec![CacheDirective::MaxAge(
-                    CACHE_AGE,
-                )]));
-
-            if let Some(length) = length {
-                builder.append_header(header::ContentLength(length as usize));
-
-                builder.body(SizedStream::new(length, stream_result.stream))
-            } else {
-                builder.streaming(stream_result.stream)
+                HttpResponse::Ok()
+                    .append_header(header::ContentType(resource.mime_type))
+                    .append_header(header::CacheControl(vec![CacheDirective::MaxAge(
+                        CACHE_AGE,
+                    )]))
+                    .streaming(ReaderStream::with_capacity(reader, BUFFER_CAPACITY))
             }
         }
         Err(err) => {

@@ -1,14 +1,13 @@
 #![deny(unreachable_pub)]
 //! A basic implementation of a DLNA media server
 
-use std::{io, net::Ipv4Addr};
+use std::net::Ipv4Addr;
 
 use actix_web::{App, HttpServer, dev::ServerHandle};
 use async_trait::async_trait;
-use bytes::Bytes;
-use futures::Stream;
 use mime::Mime;
 pub use services::DlnaServiceFactory;
+use tokio::io::{AsyncRead, AsyncSeek};
 pub use upnp::{Container, Icon, Item, Object, Resource, UpnpError};
 use uuid::Uuid;
 
@@ -58,21 +57,13 @@ pub struct Range {
 }
 
 /// A response to a request to stream some data.
-pub struct StreamResponse<S> {
+pub struct StreamResponse<R> {
     /// The content type of the data.
     pub mime_type: Mime,
-    /// If the content is not the full resource then this indicates the range included.
-    pub range: Option<Range>,
     /// If known the full size of the resource.
     pub resource_size: Option<u64>,
     /// The resource stream.
-    pub stream: S,
-}
-
-/// Some perhaps useful information about the DLNA client.
-pub struct DlnaContext {
-    /// A unique identifier for this request.
-    pub request_id: u64,
+    pub reader: R,
 }
 
 /// This handler is called when the DLNA server needs to respond to client requests.
@@ -90,19 +81,16 @@ where
     async fn stream_icon(
         &self,
         icon_id: &str,
-    ) -> Result<StreamResponse<impl Stream<Item = Result<Bytes, io::Error>> + 'static>, UpnpError>;
+    ) -> Result<StreamResponse<impl AsyncRead + 'static>, UpnpError>;
 
-    /// Gets the information for a resource, used for HEAD requests.
+    /// Gets the metadata for a resource.
     async fn get_resource(&self, resource_id: &str) -> Result<Resource, UpnpError>;
 
     /// Requests a stream for a resource.
     async fn stream_resource(
         &self,
         resource_id: &str,
-        seek: Option<u64>,
-        length: Option<u64>,
-        context: DlnaContext,
-    ) -> Result<StreamResponse<impl Stream<Item = Result<Bytes, io::Error>> + 'static>, UpnpError>;
+    ) -> Result<impl AsyncRead + AsyncSeek + Unpin + 'static, UpnpError>;
 }
 
 /// A handle to the DLNA server allowing for shutting the server down.

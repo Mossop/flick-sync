@@ -1,15 +1,13 @@
 use std::{
     cmp::Ordering,
     future::{Ready, ready},
-    io::SeekFrom,
-    str::FromStr,
 };
 
 use actix_web::{
     FromRequest, HttpRequest, HttpResponse,
-    body::{MessageBody, SizedStream},
+    body::SizedStream,
     delete, get,
-    http::header::{self, CacheDirective},
+    http::header::{self, CacheDirective, HeaderMap, TryIntoHeaderValue},
     post,
     web::{Form, Path, Query, ThinData},
 };
@@ -20,7 +18,7 @@ use flick_sync::{
 use futures::TryStreamExt;
 use rinja::Template;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncSeekExt, BufReader};
+use tokio::io::BufReader;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
 use tracing::error;
@@ -32,7 +30,7 @@ use crate::{
         ConnectionInfo, Event, ServiceData,
         events::{ProgressBarTemplate, ServerTemplate, SyncLogTemplate, SyncProgressBar},
     },
-    shared::{StreamLimiter, uniform_title},
+    shared::{ByteRangeResponse, uniform_title},
 };
 
 const CACHE_AGE: u32 = 10 * 60;
@@ -268,88 +266,20 @@ pub(super) async fn video_stream(
     let Ok(reader) = file.async_read().await else {
         return HttpResponse::NotFound().finish();
     };
-    let mut reader = BufReader::new(reader);
 
-    let (range, body) = if let Some(header::Range::Bytes(spec)) = req
-        .headers()
-        .get(header::RANGE)
-        .and_then(|hv| hv.to_str().ok())
-        .and_then(|hv| header::Range::from_str(hv).ok())
-    {
-        if spec.len() == 1 {
-            match spec[0] {
-                header::ByteRangeSpec::From(start) => {
-                    if reader.seek(SeekFrom::Start(start)).await.is_err() {
-                        return HttpResponse::NotFound().finish();
-                    }
+    let mut headers = HeaderMap::new();
+    headers.append(
+        header::CONTENT_TYPE,
+        header::ContentType(mime_type).try_into_value().unwrap(),
+    );
+    headers.append(
+        header::CACHE_CONTROL,
+        header::CacheControl(vec![CacheDirective::MaxAge(CACHE_AGE)])
+            .try_into_value()
+            .unwrap(),
+    );
 
-                    (
-                        Some(header::ContentRange(header::ContentRangeSpec::Bytes {
-                            range: Some((start, size - 1)),
-                            instance_length: Some(size),
-                        })),
-                        SizedStream::new(size - start, ReaderStream::new(reader)).boxed(),
-                    )
-                }
-                header::ByteRangeSpec::Last(end) => {
-                    if reader.seek(SeekFrom::End(-(end as i64))).await.is_err() {
-                        return HttpResponse::NotFound().finish();
-                    }
-
-                    (
-                        Some(header::ContentRange(header::ContentRangeSpec::Bytes {
-                            range: Some((size - end, end)),
-                            instance_length: Some(size),
-                        })),
-                        SizedStream::new(end, ReaderStream::new(reader)).boxed(),
-                    )
-                }
-                header::ByteRangeSpec::FromTo(start, end) => {
-                    if reader.seek(SeekFrom::Start(start)).await.is_err() {
-                        return HttpResponse::NotFound().finish();
-                    }
-
-                    (
-                        Some(header::ContentRange(header::ContentRangeSpec::Bytes {
-                            range: Some((start, end)),
-                            instance_length: Some(size),
-                        })),
-                        SizedStream::new(
-                            end - start + 1,
-                            StreamLimiter::new(ReaderStream::new(reader), start, end + 1),
-                        )
-                        .boxed(),
-                    )
-                }
-            }
-        } else {
-            (
-                None,
-                SizedStream::new(size, ReaderStream::new(reader)).boxed(),
-            )
-        }
-    } else {
-        (
-            None,
-            SizedStream::new(size, ReaderStream::new(reader)).boxed(),
-        )
-    };
-
-    let mut response = if let Some(range) = range {
-        let mut response = HttpResponse::PartialContent();
-        response.append_header(range);
-        response
-    } else {
-        HttpResponse::Ok()
-    };
-
-    response
-        .append_header(header::ContentType(mime_type))
-        .append_header((header::ACCEPT_RANGES, "bytes"))
-        .append_header(header::CacheControl(vec![CacheDirective::MaxAge(
-            CACHE_AGE,
-        )]))
-        .body(body)
+    ByteRangeResponse::build(&req, size, reader, headers).await
 }
 
 #[derive(Debug)]
