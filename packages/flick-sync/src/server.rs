@@ -52,7 +52,7 @@ pub enum ItemType {
     Unknown,
 }
 
-pub trait Progress: Unpin + Sized {
+pub trait Progress: Unpin + Sized + Send + Sync {
     fn progress(&mut self, position: u64);
 
     fn length(&mut self, length: u64);
@@ -66,12 +66,12 @@ pub trait DownloadProgress: Clone {
     fn transcode_started(
         &self,
         video_part: &wrappers::VideoPart,
-    ) -> impl Future<Output = impl Progress>;
+    ) -> impl Future<Output = impl Progress + 'static>;
 
     fn download_started(
         &self,
         video_part: &wrappers::VideoPart,
-    ) -> impl Future<Output = impl Progress>;
+    ) -> impl Future<Output = impl Progress + 'static>;
 
     fn download_failed(
         &self,
@@ -239,7 +239,7 @@ impl Server {
             inner: inner.clone(),
             connection: Arc::new(Mutex::new(None)),
             transcode_requests: Arc::new(Semaphore::new(1)),
-            transcode_permits: Arc::new(Semaphore::new(config.max_transcodes.unwrap_or(1))),
+            transcode_permits: Arc::new(Semaphore::new(config.max_transcodes.unwrap_or(2))),
         }
     }
 
@@ -861,20 +861,28 @@ impl Server {
                         jobs.push(part.download(
                             plex_server.clone(),
                             progress.clone(),
-                            self.transcode_permits.clone().try_acquire_owned().ok(),
                             None,
+                            self.transcode_permits.clone().try_acquire_owned().ok(),
+                            self.inner.download_permits.clone().try_acquire_owned().ok(),
                         ));
                     }
-                    TransferState::TranscodeDownloading | TransferState::Downloading => {
+                    TransferState::Downloading => {
                         jobs.push(part.download(
                             plex_server.clone(),
                             progress.clone(),
+                            None,
                             None,
                             self.inner.download_permits.clone().try_acquire_owned().ok(),
                         ));
                     }
                     TransferState::Waiting => {
-                        jobs.push(part.download(plex_server.clone(), progress.clone(), None, None));
+                        jobs.push(part.download(
+                            plex_server.clone(),
+                            progress.clone(),
+                            None,
+                            None,
+                            None,
+                        ));
                     }
                     TransferState::Downloaded => {}
                 }

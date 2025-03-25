@@ -21,6 +21,10 @@ impl Bar {
     pub fn set_length(&self, length: u64) {
         self.bar.set_length(length);
     }
+
+    pub fn length(&self) -> Option<u64> {
+        self.bar.length()
+    }
 }
 
 impl Drop for Bar {

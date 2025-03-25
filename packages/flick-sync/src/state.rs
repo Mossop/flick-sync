@@ -381,9 +381,7 @@ pub(crate) enum DownloadState {
     #[serde(rename_all = "camelCase")]
     Downloading { path: PathBuf },
     #[serde(rename_all = "camelCase")]
-    Transcoding { session_id: String },
-    #[serde(rename_all = "camelCase")]
-    TranscodeDownloading { session_id: String, path: PathBuf },
+    Transcoding { session_id: String, path: PathBuf },
     #[serde(rename_all = "camelCase")]
     Downloaded { path: PathBuf },
     #[serde(rename_all = "camelCase")]
@@ -396,7 +394,6 @@ impl DownloadState {
             Self::None => None,
             Self::Transcoding { .. } => None,
             Self::Downloading { path } => Some(path.clone()),
-            Self::TranscodeDownloading { path, .. } => Some(path.clone()),
             Self::Downloaded { path } => Some(path.clone()),
             Self::Transcoded { path } => Some(path.clone()),
         }
@@ -469,13 +466,11 @@ impl DownloadState {
                 };
 
                 match status {
-                    TranscodeStatus::Complete => {
+                    TranscodeStatus::Transcoding { .. } | TranscodeStatus::Complete => {
                         let path = video_part.file_path(&session.container().to_string()).await;
-                        if matches!(self, DownloadState::Transcoding { .. }) {
-                            *self = DownloadState::TranscodeDownloading {
-                                session_id: session_id.to_owned(),
-                                path: path.clone(),
-                            }
+                        *self = DownloadState::Transcoding {
+                            session_id: session_id.to_owned(),
+                            path: path.clone(),
                         }
                     }
                     TranscodeStatus::Error => {
@@ -483,11 +478,6 @@ impl DownloadState {
                         let _ = session.cancel().await;
 
                         *self = DownloadState::None;
-                    }
-                    TranscodeStatus::Transcoding { .. } => {
-                        *self = DownloadState::Transcoding {
-                            session_id: session_id.to_owned(),
-                        };
                     }
                 }
             }
@@ -514,8 +504,7 @@ impl DownloadState {
             DownloadState::Downloading { .. } => {
                 return;
             }
-            DownloadState::Transcoding { session_id }
-            | DownloadState::TranscodeDownloading { session_id, .. } => {
+            DownloadState::Transcoding { session_id, .. } => {
                 self.verify_transcode_status(plex_server, video_part, &session_id)
                     .await;
             }
@@ -587,16 +576,7 @@ impl DownloadState {
         let path = match self {
             DownloadState::None => return,
             DownloadState::Downloading { path } => path,
-            DownloadState::Transcoding { session_id } => {
-                if let Ok(session) = plex_server.transcode_session(session_id).await {
-                    if let Err(e) = session.cancel().await {
-                        warn!(error=?e, "Failed to cancel stale transcode session");
-                    }
-                }
-
-                return;
-            }
-            DownloadState::TranscodeDownloading { session_id, path } => {
+            DownloadState::Transcoding { session_id, path } => {
                 if let Ok(session) = plex_server.transcode_session(session_id).await {
                     if let Err(e) = session.cancel().await {
                         warn!(error=?e, "Failed to cancel stale transcode session");
@@ -624,10 +604,7 @@ impl fmt::Debug for DownloadState {
         match self {
             Self::None => write!(f, "None"),
             Self::Downloading { .. } => write!(f, "Downloading"),
-            Self::Transcoding { session_id } => write!(f, "Transcoding({session_id})"),
-            Self::TranscodeDownloading { session_id, .. } => {
-                write!(f, "TranscodeDownloading({session_id})")
-            }
+            Self::Transcoding { session_id, .. } => write!(f, "Transcoding({session_id})"),
             Self::Downloaded { .. } => write!(f, "Downloaded"),
             Self::Transcoded { .. } => write!(f, "Transcoded"),
         }

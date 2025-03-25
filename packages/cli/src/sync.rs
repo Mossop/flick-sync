@@ -63,7 +63,6 @@ impl Runnable for BuildMetadata {
 
 struct ProgressBar {
     bar: Bar,
-    total: Option<u64>,
 }
 
 impl Progress for ProgressBar {
@@ -72,12 +71,11 @@ impl Progress for ProgressBar {
     }
 
     fn length(&mut self, length: u64) {
-        self.total = Some(length);
         self.bar.set_length(length);
     }
 
     fn finished(self) {
-        if let Some(length) = self.total {
+        if let Some(length) = self.bar.length() {
             self.bar.set_position(length);
         }
     }
@@ -89,7 +87,7 @@ struct ConsoleProgress {
 }
 
 impl DownloadProgress for ConsoleProgress {
-    async fn transcode_started(&self, video_part: &VideoPart) -> impl Progress {
+    async fn transcode_started(&self, video_part: &VideoPart) -> impl Progress + 'static {
         let title = video_part.video().await.title().await;
 
         let bar = self
@@ -97,20 +95,17 @@ impl DownloadProgress for ConsoleProgress {
             .add_progress_bar(&format!("🔄 {title}"), ProgressType::Percent);
         bar.set_length(100);
 
-        ProgressBar {
-            bar,
-            total: Some(100),
-        }
+        ProgressBar { bar }
     }
 
-    async fn download_started(&self, video_part: &VideoPart) -> impl Progress {
+    async fn download_started(&self, video_part: &VideoPart) -> impl Progress + 'static {
         let title = video_part.video().await.title().await;
 
         let bar = self
             .console
             .add_progress_bar(&format!("💾 {title}"), ProgressType::Bytes);
 
-        ProgressBar { bar, total: None }
+        ProgressBar { bar }
     }
 }
 

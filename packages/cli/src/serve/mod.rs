@@ -55,6 +55,7 @@ struct SyncStatus {
     progress: HashMap<String, SyncProgressBar>,
 }
 
+#[derive(Clone)]
 struct SyncProgress {
     is_download: bool,
     video_part: VideoPart,
@@ -79,6 +80,12 @@ impl SyncProgress {
     }
 }
 
+impl Drop for SyncProgress {
+    fn drop(&mut self) {
+        self.task.remove_progress(self);
+    }
+}
+
 impl Progress for SyncProgress {
     fn progress(&mut self, position: u64) {
         if let Some(length) = self.length {
@@ -89,14 +96,13 @@ impl Progress for SyncProgress {
                 self.position = position;
                 self.task.update_progress(self);
             }
-        } else {
+        } else if position.abs_diff(self.position) > 1024 * 1024 {
             self.position = position;
         }
     }
 
     fn length(&mut self, length: u64) {
-        self.length = Some(length);
-        self.task.update_progress(self);
+        self.task.update_length(self, length);
     }
 
     fn finished(self) {
@@ -104,10 +110,10 @@ impl Progress for SyncProgress {
 
         if self.is_download {
             self.task
-                .log(SyncLogMessage::DownloadComplete(self.video_part));
+                .log(SyncLogMessage::DownloadComplete(self.video_part.clone()));
         } else {
             self.task
-                .log(SyncLogMessage::TranscodeComplete(self.video_part));
+                .log(SyncLogMessage::TranscodeComplete(self.video_part.clone()));
         }
     }
 
@@ -116,12 +122,12 @@ impl Progress for SyncProgress {
 
         if self.is_download {
             self.task.log(SyncLogMessage::DownloadFailed((
-                self.video_part,
+                self.video_part.clone(),
                 error.to_string(),
             )));
         } else {
             self.task.log(SyncLogMessage::TranscodeFailed((
-                self.video_part,
+                self.video_part.clone(),
                 error.to_string(),
             )));
         }
@@ -142,11 +148,19 @@ impl SyncTask {
         }
     }
 
+    fn progress_key(progress: &SyncProgress) -> String {
+        format!(
+            "{}:{}",
+            progress.video_part.id(),
+            if progress.is_download { "D" } else { "T" }
+        )
+    }
+
     fn add_progress(&self, progress: &SyncProgress) {
         let mut status = self.status.lock().unwrap();
 
         status.progress.insert(
-            progress.video_part.id().to_owned(),
+            Self::progress_key(progress),
             SyncProgressBar {
                 is_download: progress.is_download,
                 video_part: progress.video_part.clone(),
@@ -158,12 +172,20 @@ impl SyncTask {
         self.send_event(Event::Progress(status.progress.values().cloned().collect()));
     }
 
+    fn update_length(&self, progress: &SyncProgress, length: u64) {
+        let mut status = self.status.lock().unwrap();
+
+        if let Some(bar) = status.progress.get_mut(&Self::progress_key(progress)) {
+            bar.length = Some(length);
+            self.send_event(Event::Progress(status.progress.values().cloned().collect()));
+        }
+    }
+
     fn update_progress(&self, progress: &SyncProgress) {
         let mut status = self.status.lock().unwrap();
 
-        if let Some(bar) = status.progress.get_mut(progress.video_part.id()) {
+        if let Some(bar) = status.progress.get_mut(&Self::progress_key(progress)) {
             bar.position = progress.position;
-            bar.length = progress.length;
             self.send_event(Event::Progress(status.progress.values().cloned().collect()));
         }
     }
@@ -171,7 +193,11 @@ impl SyncTask {
     fn remove_progress(&self, progress: &SyncProgress) {
         let mut status = self.status.lock().unwrap();
 
-        if status.progress.remove(progress.video_part.id()).is_some() {
+        if status
+            .progress
+            .remove(&Self::progress_key(progress))
+            .is_some()
+        {
             self.send_event(Event::Progress(status.progress.values().cloned().collect()));
         }
     }
@@ -212,13 +238,13 @@ impl SyncTask {
 }
 
 impl DownloadProgress for SyncTask {
-    async fn transcode_started(&self, video_part: &VideoPart) -> impl Progress {
+    async fn transcode_started(&self, video_part: &VideoPart) -> impl Progress + 'static {
         self.log(SyncLogMessage::TranscodeStarted(video_part.clone()));
 
         SyncProgress::new(self.clone(), video_part.clone(), false)
     }
 
-    async fn download_started(&self, video_part: &VideoPart) -> impl Progress {
+    async fn download_started(&self, video_part: &VideoPart) -> impl Progress + 'static {
         self.log(SyncLogMessage::DownloadStarted(video_part.clone()));
 
         SyncProgress::new(self.clone(), video_part.clone(), true)
@@ -238,7 +264,10 @@ async fn background_task(
     event_sender: broadcast::Sender<Event>,
     wakeup: Arc<Notify>,
 ) {
-    time::sleep(Duration::from_secs(30)).await;
+    select! {
+        _ = time::sleep(Duration::from_secs(30)).fuse() => {},
+        _ = wakeup.notified().fuse() => {},
+    }
 
     loop {
         status.lock().unwrap().is_syncing = true;
