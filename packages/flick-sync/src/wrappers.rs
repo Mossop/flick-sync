@@ -11,7 +11,11 @@ use std::{
 };
 
 use anyhow::{anyhow, bail};
-use futures::io::AsyncWrite;
+use futures::{
+    FutureExt,
+    io::{AsyncWrite, sink},
+    select,
+};
 use pathdiff::diff_paths;
 use pin_project::pin_project;
 use plex_api::{
@@ -24,7 +28,6 @@ use time::{Date, OffsetDateTime};
 use tokio::{
     fs::{File, OpenOptions, create_dir_all, metadata, remove_file},
     io::{AsyncWriteExt, BufWriter},
-    spawn,
     sync::{OwnedSemaphorePermit, Semaphore},
     time::sleep,
 };
@@ -837,70 +840,74 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(self, plex_server, progress, download_progress), fields(video=self.id, part=self.index))]
-    async fn monitor_transcode_progress<P: Progress, D: Progress>(
+    #[instrument(level = "trace", skip(self, plex_server, progress, request_permit), fields(video=self.id, part=self.index))]
+    async fn monitor_transcode_progress<P: Progress>(
         &self,
-        plex_server: PlexServer,
-        session_id: String,
-        mut progress: P,
-        mut download_progress: D,
-    ) {
-        let session = match plex_server.transcode_session(&session_id).await {
+        plex_server: &PlexServer,
+        session_id: &str,
+        request_permit: &mut Option<OwnedSemaphorePermit>,
+        progress: &mut P,
+    ) -> Result {
+        let session = match plex_server.transcode_session(session_id).await {
             Ok(session) => session,
             Err(plex_api::Error::ItemNotFound) => {
                 warn!("Server dropped transcode session");
-                progress.failed(anyhow!("Transcode session was cancelled on the server"));
-                return;
+                self.update_state(|vps| vps.download = DownloadState::None)
+                    .await?;
+                bail!("Transcode session was cancelled on the server");
             }
             Err(e) => {
                 error!(error=?e, "Error getting transcode status");
-                progress.failed(e.into());
-                return;
+                return Err(e.into());
             }
         };
 
-        loop {
-            match session.status().await {
-                Ok(TranscodeStatus::Complete) => {
-                    if let Ok(stats) = session.stats().await {
-                        download_progress.length(stats.size as u64);
-                    }
+        // We must maintain a download connection to avoid the server deciding to cancel the
+        // ongoing transcode.
+        let mut download_future = Box::pin(session.download(sink()).fuse());
 
-                    progress.finished();
-                    return;
+        loop {
+            let delay = match session.status().await {
+                Ok(TranscodeStatus::Complete) => {
+                    debug!("Transcode complete");
+                    return Ok(());
                 }
                 Ok(TranscodeStatus::Error) => {
+                    drop(download_future);
                     let _ = session.cancel().await;
-                    progress.failed(anyhow!("Transcode session failed"));
-                    return;
+                    self.update_state(|vps| vps.download = DownloadState::None)
+                        .await?;
+                    bail!("Transcode session failed");
                 }
                 Ok(TranscodeStatus::Transcoding {
                     remaining,
                     progress: p,
                 }) => {
                     progress.progress(p as u64);
-                    let delay = if let Some(remaining) = remaining {
+                    if let Some(remaining) = remaining {
                         remaining.clamp(1, 5)
                     } else {
                         5
-                    };
-
-                    if let Ok(stats) = session.stats().await {
-                        if stats.size > 0 {
-                            download_progress.length(((100 * stats.size) as f32 / p) as u64);
-                        }
                     }
-
-                    sleep(Duration::from_secs(delay.into())).await;
                 }
                 Err(plex_api::Error::ItemNotFound) => {
-                    return;
+                    warn!("Server dropped transcode session");
+                    self.update_state(|vps| vps.download = DownloadState::None)
+                        .await?;
+                    bail!("Transcode session was cancelled on the server");
                 }
                 Err(e) => {
                     error!(error=?e, "Error getting transcode status");
-                    return;
+                    return Err(e.into());
                 }
+            };
+
+            select! {
+                _ = sleep(Duration::from_secs(delay.into())).fuse() => {},
+                _ = download_future => {},
             }
+
+            request_permit.take();
         }
     }
 
@@ -1019,14 +1026,13 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(self, plex_server, guard, path, access_permit, progress), fields(video=self.id, part=self.index))]
+    #[instrument(level = "trace", skip(self, plex_server, guard, path, progress), fields(video=self.id, part=self.index))]
     async fn download_transcode<P: Progress>(
         &self,
         plex_server: &PlexServer,
         guard: &OpWriteGuard,
         session_id: &str,
         path: &Path,
-        access_permit: &mut Option<OwnedSemaphorePermit>,
         progress: &mut P,
     ) -> Result {
         let session = match plex_server.transcode_session(session_id).await {
@@ -1044,13 +1050,21 @@ impl VideoPart {
             }
         };
 
-        let status = session.status().await?;
+        match session.stats().await {
+            Ok(stats) => {
+                progress.length(stats.size as u64);
+            }
+            Err(plex_api::Error::ItemNotFound) => {
+                warn!("Server dropped transcode session");
+                self.update_state(|state| state.download = DownloadState::None)
+                    .await?;
 
-        if matches!(status, TranscodeStatus::Error) {
-            self.update_state(|state| state.download = DownloadState::None)
-                .await?;
-
-            bail!("Transcode failed on the server");
+                bail!("Transcode session was cancelled on the server");
+            }
+            Err(e) => {
+                error!(error=?e, "Error getting transcode status");
+                return Err(e.into());
+            }
         }
 
         let target = self.server.inner.path.join(path);
@@ -1070,7 +1084,7 @@ impl VideoPart {
             offset: 0,
             writer: AsyncWriteAdapter::new(file),
             progress,
-            access_permit,
+            access_permit: &mut None,
         };
         info!(path=?path, "Downloading transcoded video");
 
@@ -1176,52 +1190,45 @@ impl VideoPart {
                     acquire(&mut download_permit, &self.server.inner.download_permits).await;
                     acquire(&mut transcode_request, &self.server.transcode_requests).await;
 
-                    let mut download_progress = progress.download_started(&self).await;
+                    let mut transcode_progress = progress.transcode_started(&self).await;
 
-                    let handle = {
-                        let this = self.clone();
-                        let plex_server = plex_server.clone();
-                        let session_id = session_id.to_owned();
-                        let transcode_progress = progress.transcode_started(&self).await;
-                        let download_progress = download_progress.clone();
-                        spawn(async move {
-                            this.monitor_transcode_progress(
-                                plex_server,
-                                session_id,
-                                transcode_progress,
-                                download_progress,
-                            )
-                            .await
-                        })
-                    };
-
-                    loop {
-                        if let Err(e) = self
-                            .download_transcode(
-                                &plex_server,
-                                &guard,
-                                &session_id,
-                                &path,
-                                &mut transcode_request,
-                                &mut download_progress,
-                            )
-                            .await
-                        {
-                            if !matches!(
-                                self.download_state().await,
-                                DownloadState::Transcoding { .. },
-                            ) {
-                                download_progress.failed(e);
-                                handle.abort();
-                                return false;
-                            }
-                        } else {
-                            download_progress.finished();
-                            break;
+                    match self
+                        .monitor_transcode_progress(
+                            &plex_server,
+                            &session_id,
+                            &mut transcode_request,
+                            &mut transcode_progress,
+                        )
+                        .await
+                    {
+                        Ok(()) => transcode_progress.finished(),
+                        Err(e) => {
+                            transcode_progress.failed(e);
+                            return false;
                         }
                     }
 
-                    handle.abort();
+                    let mut download_progress = progress.download_started(&self).await;
+
+                    match self
+                        .download_transcode(
+                            &plex_server,
+                            &guard,
+                            &session_id,
+                            &path,
+                            &mut download_progress,
+                        )
+                        .await
+                    {
+                        Ok(()) => {
+                            download_progress.finished();
+                            return true;
+                        }
+                        Err(e) => {
+                            download_progress.failed(e);
+                            return false;
+                        }
+                    }
                 }
                 DownloadState::Downloaded { .. } | DownloadState::Transcoded { .. } => return true,
             }
