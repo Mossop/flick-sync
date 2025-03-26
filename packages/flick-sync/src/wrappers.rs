@@ -639,7 +639,11 @@ impl VideoPart {
     }
 
     #[instrument(level = "trace", skip(self, plex_server), fields(video=self.id, part=self.index))]
-    pub(crate) async fn verify_download(&self, plex_server: &PlexServer) -> Result {
+    pub(crate) async fn verify_download(
+        &self,
+        plex_server: &PlexServer,
+        allow_video_deletion: bool,
+    ) -> Result {
         let Ok(guard) = self.try_lock_write().await else {
             return Ok(());
         };
@@ -647,7 +651,13 @@ impl VideoPart {
         let mut download_state = self.download_state().await;
 
         download_state
-            .verify(&guard, plex_server, self, &self.server.inner.path)
+            .verify(
+                &guard,
+                plex_server,
+                self,
+                &self.server.inner.path,
+                allow_video_deletion,
+            )
             .await;
 
         self.update_state(|state| state.download = download_state)
@@ -904,7 +914,7 @@ impl VideoPart {
 
         if matches!(download_state, DownloadState::Transcoding { .. }) {
             download_state
-                .verify(guard, plex_server, self, &self.server.inner.path)
+                .verify(guard, plex_server, self, &self.server.inner.path, false)
                 .await;
 
             self.update_state(|state| state.download = download_state.clone())
@@ -1119,7 +1129,7 @@ impl VideoPart {
 
         let mut download_state = self.download_state().await;
         download_state
-            .verify(&guard, &plex_server, &self, &self.server.inner.path)
+            .verify(&guard, &plex_server, &self, &self.server.inner.path, false)
             .await;
 
         if let Err(e) = self
@@ -1238,13 +1248,18 @@ impl VideoPart {
             }
         }
     }
+
+    pub(crate) async fn remote_size(&self) -> u64 {
+        self.with_state(|vps| vps.size).await
+    }
 }
 
 #[derive(Clone, Copy, Default)]
 pub struct VideoStats {
-    pub downloaded_parts: u32,
-    pub total_parts: u32,
+    pub local_parts: u32,
+    pub remote_parts: u32,
     pub local_bytes: u64,
+    pub remote_bytes: u64,
     pub local_duration: Duration,
     pub remote_duration: Duration,
 }
@@ -1254,9 +1269,10 @@ impl Add for VideoStats {
 
     fn add(self, rhs: VideoStats) -> VideoStats {
         Self {
-            downloaded_parts: self.downloaded_parts + rhs.downloaded_parts,
-            total_parts: self.total_parts + rhs.total_parts,
+            local_parts: self.local_parts + rhs.local_parts,
+            remote_parts: self.remote_parts + rhs.remote_parts,
             local_bytes: self.local_bytes + rhs.local_bytes,
+            remote_bytes: self.remote_bytes + rhs.remote_bytes,
             local_duration: self.local_duration + rhs.local_duration,
             remote_duration: self.remote_duration + rhs.remote_duration,
         }
@@ -1265,9 +1281,10 @@ impl Add for VideoStats {
 
 impl AddAssign for VideoStats {
     fn add_assign(&mut self, rhs: VideoStats) {
-        self.downloaded_parts += rhs.downloaded_parts;
-        self.total_parts += rhs.total_parts;
+        self.local_parts += rhs.local_parts;
+        self.remote_parts += rhs.remote_parts;
         self.local_bytes += rhs.local_bytes;
+        self.remote_bytes += rhs.remote_bytes;
         self.local_duration += rhs.local_duration;
         self.remote_duration += rhs.remote_duration;
     }
@@ -1278,23 +1295,28 @@ impl VideoStats {
         let mut stats = VideoStats::default();
 
         for part in parts.into_iter() {
-            stats.total_parts += 1;
+            stats.remote_parts += 1;
 
             let part_duration = part.duration().await;
             stats.remote_duration += part_duration;
             let state = part.download_state().await;
 
+            let mut remote_bytes = part.remote_size().await;
+
             if !state.needs_download() {
                 stats.local_duration += part_duration;
-                stats.downloaded_parts += 1;
+                stats.local_parts += 1;
             }
 
             if let Some(path) = state.path() {
                 let path = part.server.inner.path.join(path);
                 if let Ok(file_stats) = metadata(path).await {
                     stats.local_bytes += file_stats.len();
+                    remote_bytes = file_stats.len();
                 }
             }
+
+            stats.remote_bytes += remote_bytes;
         }
 
         stats

@@ -36,9 +36,9 @@ impl Runnable for Stats {
             console.println(format!("Server {}:", server.id()));
             console.println(format!(
                 "  Downloaded videos: {} / {} ({})",
-                stats.downloaded_parts,
-                stats.total_parts,
-                percent(stats.downloaded_parts, stats.total_parts)
+                stats.local_parts,
+                stats.remote_parts,
+                percent(stats.local_parts, stats.remote_parts)
             ));
             console.println(format!(
                 "  Downloaded data: {}",
@@ -60,9 +60,9 @@ impl Runnable for Stats {
             console.println("");
             console.println(format!(
                 "Total downloaded videos: {} / {} ({})",
-                total.downloaded_parts,
-                total.total_parts,
-                percent(total.downloaded_parts, total.total_parts)
+                total.local_parts,
+                total.remote_parts,
+                percent(total.local_parts, total.remote_parts)
             ));
             console.println(format!(
                 "Total downloaded data: {}",

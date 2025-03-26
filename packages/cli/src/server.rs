@@ -344,7 +344,7 @@ impl Runnable for Remove {
         };
 
         if server.remove_sync(&self.id).await? {
-            if let Err(e) = server.update_state().await {
+            if let Err(e) = server.update_state(false).await {
                 error!(server=server.id(), error=?e, "Failed to update server");
                 return Ok(());
             }
@@ -370,7 +370,7 @@ impl Runnable for Rebuild {
                 continue;
             }
 
-            if let Err(e) = server.update_state().await {
+            if let Err(e) = server.update_state(false).await {
                 error!(server=server.id(), error=?e, "Failed to update server");
                 continue;
             }

@@ -639,7 +639,7 @@ impl Server {
     }
 
     /// Updates the state for the synced items
-    pub async fn update_state(&self) -> Result {
+    pub async fn update_state(&self, allow_video_deletion: bool) -> Result {
         info!("Updating item metadata");
         let plex_server = self.connect().await?;
 
@@ -666,6 +666,7 @@ impl Server {
                 seen_items: Default::default(),
                 seen_libraries: Default::default(),
                 transcode_profiles: Default::default(),
+                allow_video_deletion,
             };
 
             for item in server_config.syncs.values() {
@@ -686,7 +687,7 @@ impl Server {
 
         self.update_thumbnails(false).await;
         self.update_metadata(false).await;
-        self.verify_downloads().await;
+        self.verify_downloads(allow_video_deletion).await;
         self.write_playlists().await;
 
         Ok(())
@@ -818,7 +819,7 @@ impl Server {
 
     /// Verifies the presence of downloads for synced items.
     #[instrument(level = "trace", skip(self), fields(server = self.id))]
-    async fn verify_downloads(&self) {
+    async fn verify_downloads(&self, allow_video_deletion: bool) {
         let plex_server = match self.connect().await {
             Ok(ps) => ps,
             Err(e) => {
@@ -831,7 +832,10 @@ impl Server {
 
         for video in self.videos().await {
             for part in video.parts().await {
-                if let Err(e) = part.verify_download(&plex_server).await {
+                if let Err(e) = part
+                    .verify_download(&plex_server, allow_video_deletion)
+                    .await
+                {
                     warn!(error=?e);
                 }
             }
@@ -991,6 +995,7 @@ struct StateSync<'a> {
     seen_items: HashSet<String>,
     seen_libraries: HashSet<String>,
     transcode_profiles: HashMap<String, HashSet<String>>,
+    allow_video_deletion: bool,
 }
 
 macro_rules! return_if_seen {
@@ -1026,7 +1031,13 @@ impl StateSync<'_> {
                 .or_insert_with(|| VideoState::from(video));
 
             video_state
-                .update(self.server, video, &self.plex_server, self.root)
+                .update(
+                    self.server,
+                    video,
+                    &self.plex_server,
+                    self.root,
+                    self.allow_video_deletion,
+                )
                 .await;
         }
 

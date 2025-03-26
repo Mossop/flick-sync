@@ -1,6 +1,9 @@
 use std::{
     io,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use console::Term;
@@ -8,10 +11,10 @@ use dialoguer::{Input, Password, Select};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tracing_subscriber::fmt::MakeWriter;
 
-#[derive(Clone)]
 pub struct Bar {
     bar: ProgressBar,
     console: Console,
+    ref_count: Arc<AtomicUsize>,
 }
 
 impl Bar {
@@ -28,15 +31,29 @@ impl Bar {
     }
 }
 
+impl Clone for Bar {
+    fn clone(&self) -> Self {
+        self.ref_count.fetch_add(1, Ordering::SeqCst);
+
+        Self {
+            bar: self.bar.clone(),
+            console: self.console.clone(),
+            ref_count: self.ref_count.clone(),
+        }
+    }
+}
+
 impl Drop for Bar {
     fn drop(&mut self) {
-        self.bar.finish_and_clear();
+        if self.ref_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.bar.finish_and_clear();
 
-        self.console.progress_bars.remove(&self.bar);
-        let mut state = self.console.state.lock().unwrap();
-        state.progress_bar_count -= 1;
+            self.console.progress_bars.remove(&self.bar);
+            let mut state = self.console.state.lock().unwrap();
+            state.progress_bar_count -= 1;
 
-        self.console.update_draw_target(&state);
+            self.console.update_draw_target(&state);
+        }
     }
 }
 
@@ -161,6 +178,7 @@ impl Console {
         Bar {
             bar: self.progress_bars.add(inner_bar),
             console: self.clone(),
+            ref_count: Arc::new(AtomicUsize::new(1)),
         }
     }
 

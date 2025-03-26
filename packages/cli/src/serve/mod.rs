@@ -2,7 +2,10 @@ use std::{
     any::Any,
     collections::{HashMap, VecDeque},
     net::{Ipv4Addr, SocketAddr},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -57,13 +60,13 @@ struct SyncStatus {
     progress: HashMap<String, SyncProgressBar>,
 }
 
-#[derive(Clone)]
 struct SyncProgress {
     is_download: bool,
     video_part: VideoPart,
     task: SyncTask,
     position: u64,
     length: Option<u64>,
+    ref_count: Arc<AtomicUsize>,
 }
 
 impl SyncProgress {
@@ -74,6 +77,7 @@ impl SyncProgress {
             is_download,
             position: 0,
             length: if is_download { None } else { Some(100) },
+            ref_count: Arc::new(AtomicUsize::new(1)),
         };
 
         this.task.add_progress(&this);
@@ -82,9 +86,26 @@ impl SyncProgress {
     }
 }
 
+impl Clone for SyncProgress {
+    fn clone(&self) -> Self {
+        self.ref_count.fetch_add(1, Ordering::SeqCst);
+
+        Self {
+            is_download: self.is_download,
+            video_part: self.video_part.clone(),
+            task: self.task.clone(),
+            position: self.position,
+            length: self.length,
+            ref_count: self.ref_count.clone(),
+        }
+    }
+}
+
 impl Drop for SyncProgress {
     fn drop(&mut self) {
-        self.task.remove_progress(self);
+        if self.ref_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.task.remove_progress(self);
+        }
     }
 }
 
@@ -296,7 +317,7 @@ async fn background_task(
         for server in flick_sync.servers().await {
             task.sync_started(server.clone()).await;
 
-            if let Err(e) = server.update_state().await {
+            if let Err(e) = server.update_state(full_sync).await {
                 warn!(server=server.id(), error=?e, "Failed to update server");
                 task.sync_failed(server, e).await;
                 continue;

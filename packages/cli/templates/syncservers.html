@@ -4,6 +4,7 @@
       <div>{{ server.name }}</div>
       <div class="info">
         <div>{{ server.duration }}</div>
+        <div>{{ server.percent|fmt("{:.0}") }}%</div>
         <sl-format-bytes value="{{ server.size }}"></sl-format-bytes>
         <sl-icon-button hx-delete="/sync/{{ server.id }}" name="trash3" label="Delete"></sl-icon-button>
       </div>
@@ -12,8 +13,8 @@
         <thead>
           <tr>
             <th class="title">Title</th>
-            <th class="completion"></th>
             <th class="duration">Duration</th>
+            <th class="completion"></th>
             <th class="size">Size</th>
             <th class="buttons"></th>
           </tr>
@@ -22,8 +23,8 @@
           {% for sync in server.syncs %}
             <tr id="{{ sync.id }}">
               <td class="title">{{ sync.name }}</td>
-              <td class="completion">{{ sync.percent|fmt("{:.0}") }}%</td>
               <td class="duration">{{ sync.duration }}</td>
+              <td class="completion">{{ sync.percent|fmt("{:.0}") }}%</td>
               <td class="size"><sl-format-bytes value="{{ sync.size }}"></sl-format-bytes></td>
               <td class="buttons"><sl-icon-button hx-delete="/sync/{{ server.id }}/{{ sync.id }}" name="trash3" label="Delete"></sl-icon-button></td>
             </tr>
@@ -32,7 +33,7 @@
     </table>
 
     <form hx-post="/sync/{{ server.id }}">
-      <sl-input name="url" type="url" placeholder="Enter the web address for the item to add"></sl-input>
+      <sl-input id="address-input" name="url" type="url" placeholder="Enter the web address for the item to add"></sl-input>
       <sl-button type="submit" circle><sl-icon name="plus-lg"></sl-icon></sl-button>
     </form>
   </sl-card>

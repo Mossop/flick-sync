@@ -18,6 +18,7 @@ pub(super) struct ServerTemplate {
     pub(super) name: String,
     pub(super) duration: String,
     pub(super) size: u64,
+    pub(super) percent: f64,
     pub(super) syncs: Vec<SyncTemplate>,
 }
 
@@ -56,10 +57,10 @@ impl ServerTemplate {
                     name: sync.title,
                     duration: format_duration(stats.local_duration.as_secs()),
                     size: stats.local_bytes,
-                    percent: if stats.total_parts == 0 {
+                    percent: if stats.remote_parts == 0 {
                         0.0
                     } else {
-                        (100.0 * stats.downloaded_parts as f64) / stats.total_parts as f64
+                        (100.0 * stats.local_bytes as f64) / stats.remote_bytes as f64
                     },
                 });
             }
@@ -70,6 +71,7 @@ impl ServerTemplate {
                 id: server.id().to_owned(),
                 name: server.name().await,
                 size: stats.local_bytes,
+                percent: (stats.local_bytes as f64 * 100.0) / (stats.remote_bytes as f64),
                 duration: format_duration(stats.local_duration.as_secs()),
                 syncs,
             });

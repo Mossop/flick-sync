@@ -131,7 +131,7 @@ pub(super) async fn status_page(
         )
     };
 
-    for item in log {
+    for item in log.iter().rev() {
         template.log.push(item.template().await);
     }
 

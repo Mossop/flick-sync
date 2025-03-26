@@ -23,7 +23,7 @@ impl Runnable for Prune {
         let servers = select_servers(&flick_sync, &self.ids).await?;
 
         for server in servers {
-            if let Err(e) = server.update_state().await {
+            if let Err(e) = server.update_state(true).await {
                 error!(server=server.id(), error=?e, "Failed to update server");
                 continue;
             }
@@ -126,7 +126,7 @@ impl Runnable for Sync {
         let progress = ConsoleProgress { console };
 
         for server in &servers {
-            if let Err(e) = server.update_state().await {
+            if let Err(e) = server.update_state(true).await {
                 error!(server=server.id(), error=?e, "Failed to update server");
                 continue;
             }

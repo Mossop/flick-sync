@@ -3,9 +3,12 @@ use std::{
     fmt,
     io::ErrorKind,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use anyhow::bail;
+use file_format::FileFormat;
+use mime::Mime;
 use plex_api::{
     Server as PlexServer,
     library::{Collection, FromMetadata, MediaItem, MetadataItem, Part, Playlist, Season, Show},
@@ -491,13 +494,14 @@ impl DownloadState {
         }
     }
 
-    #[instrument(level = "trace", skip(root, guard, plex_server))]
+    #[instrument(level = "trace", skip(self, root, guard, plex_server, video_part), fields(video = video_part.id()))]
     pub(crate) async fn verify(
         &mut self,
         #[expect(unused)] guard: &OpWriteGuard,
         plex_server: &PlexServer,
         video_part: &VideoPart,
         root: &Path,
+        allow_delete: bool,
     ) {
         match self.clone() {
             DownloadState::None => return,
@@ -543,6 +547,21 @@ impl DownloadState {
                     *self = DownloadState::None;
 
                     return;
+                }
+            }
+        }
+
+        if allow_delete {
+            match FileFormat::from_file(&file) {
+                Ok(format) => {
+                    let mime_type = Mime::from_str(format.media_type()).unwrap();
+                    if mime_type.type_() != mime::VIDEO {
+                        warn!(%mime_type, ?path, "Video appears to be corrupt");
+                        *self = DownloadState::None;
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, ?path, "Failed to get video format");
                 }
             }
         }
@@ -753,6 +772,7 @@ impl VideoState {
         item: &M,
         plex_server: &PlexServer,
         root: &Path,
+        allow_delete: bool,
     ) {
         let metadata = item.metadata();
         self.title = item.title().to_owned();
@@ -821,33 +841,35 @@ impl VideoState {
         let media = &item.media()[0];
         let parts = media.parts();
 
-        if let Ok(guard) = server.try_lock_write_key(&self.id).await {
-            if parts.len() != self.parts.len() {
-                info!("Number of video parts changed, deleting existing downloads.");
-                for part in self.parts.iter_mut() {
-                    part.download.delete(&guard, plex_server, root).await;
-                }
+        if allow_delete {
+            if let Ok(guard) = server.try_lock_write_key(&self.id).await {
+                if parts.len() != self.parts.len() {
+                    info!("Number of video parts changed, deleting existing downloads.");
+                    for part in self.parts.iter_mut() {
+                        part.download.delete(&guard, plex_server, root).await;
+                    }
 
-                self.parts = parts.iter().map(VideoPartState::from).collect()
-            } else {
-                for (part_state, part) in self.parts.iter_mut().zip(parts.iter()) {
-                    let metadata = part.metadata();
+                    self.parts = parts.iter().map(VideoPartState::from).collect()
+                } else {
+                    for (part_state, part) in self.parts.iter_mut().zip(parts.iter()) {
+                        let metadata = part.metadata();
 
-                    if part_state != part {
-                        info!(
-                            old_id = part_state.id,
-                            new_id = metadata.id,
-                            old_key = part_state.key,
-                            new_key = metadata.key,
-                            old_size = part_state.size,
-                            new_size = metadata.size,
-                            old_duration = part_state.duration,
-                            new_duration = metadata.duration,
-                            part = part_state.id,
-                            "Part changed, deleting existing download."
-                        );
-                        part_state.download.delete(&guard, plex_server, root).await;
-                        *part_state = part.into();
+                        if part_state != part {
+                            info!(
+                                old_id = part_state.id,
+                                new_id = metadata.id,
+                                old_key = part_state.key,
+                                new_key = metadata.key,
+                                old_size = part_state.size,
+                                new_size = metadata.size,
+                                old_duration = part_state.duration,
+                                new_duration = metadata.duration,
+                                part = part_state.id,
+                                "Part changed, deleting existing download."
+                            );
+                            part_state.download.delete(&guard, plex_server, root).await;
+                            *part_state = part.into();
+                        }
                     }
                 }
             }

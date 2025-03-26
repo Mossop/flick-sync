@@ -16,7 +16,7 @@
       {% endif %}
     </sl-progress-bar>
   {% else %}
-    <sl-progress-bar indeterminate>
+    <sl-progress-bar id="{{ id }}" indeterminate>
       {% if is_download %}
         <sl-format-bytes value="{{ position }}"></sl-format-bytes>
       {% else %}
