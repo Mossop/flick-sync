@@ -827,12 +827,13 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(self, plex_server, progress), fields(video=self.id, part=self.index))]
-    async fn monitor_transcode_progress<P: Progress>(
+    #[instrument(level = "trace", skip(self, plex_server, progress, download_progress), fields(video=self.id, part=self.index))]
+    async fn monitor_transcode_progress<P: Progress, D: Progress>(
         &self,
         plex_server: PlexServer,
         session_id: String,
         mut progress: P,
+        mut download_progress: D,
     ) {
         let session = match plex_server.transcode_session(&session_id).await {
             Ok(session) => session,
@@ -851,6 +852,10 @@ impl VideoPart {
         loop {
             match session.status().await {
                 Ok(TranscodeStatus::Complete) => {
+                    if let Ok(stats) = session.stats().await {
+                        download_progress.length(stats.size as u64);
+                    }
+
                     progress.finished();
                     return;
                 }
@@ -1155,23 +1160,26 @@ impl VideoPart {
                     acquire(&mut download_permit, &self.server.inner.download_permits).await;
                     acquire(&mut transcode_request, &self.server.transcode_requests).await;
 
+                    let mut download_progress = progress.download_started(&self).await;
+
                     let handle = {
                         let this = self.clone();
                         let plex_server = plex_server.clone();
                         let session_id = session_id.to_owned();
                         let transcode_progress = progress.transcode_started(&self).await;
+                        let download_progress = download_progress.clone();
                         spawn(async move {
                             this.monitor_transcode_progress(
                                 plex_server,
                                 session_id,
                                 transcode_progress,
+                                download_progress,
                             )
                             .await
                         })
                     };
 
                     loop {
-                        let mut progress = progress.download_started(&self).await;
                         if let Err(e) = self
                             .download_transcode(
                                 &plex_server,
@@ -1179,21 +1187,20 @@ impl VideoPart {
                                 &session_id,
                                 &path,
                                 &mut transcode_request,
-                                &mut progress,
+                                &mut download_progress,
                             )
                             .await
                         {
-                            progress.failed(e);
-
                             if !matches!(
                                 self.download_state().await,
                                 DownloadState::Transcoding { .. },
                             ) {
+                                download_progress.failed(e);
                                 handle.abort();
                                 return false;
                             }
                         } else {
-                            progress.finished();
+                            download_progress.finished();
                             break;
                         }
                     }
@@ -1716,6 +1723,8 @@ impl Video {
     }
 
     pub async fn set_playback_position(&self, position: u64) -> Result {
+        trace!(video = self.id(), position, "Updating playback position");
+
         let new_state = if position <= 60000 {
             PlaybackState::Unplayed
         } else {

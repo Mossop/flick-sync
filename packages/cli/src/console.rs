@@ -8,6 +8,7 @@ use dialoguer::{Input, Password, Select};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tracing_subscriber::fmt::MakeWriter;
 
+#[derive(Clone)]
 pub struct Bar {
     bar: ProgressBar,
     console: Console,

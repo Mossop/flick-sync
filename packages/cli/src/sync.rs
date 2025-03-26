@@ -61,6 +61,7 @@ impl Runnable for BuildMetadata {
     }
 }
 
+#[derive(Clone)]
 struct ProgressBar {
     bar: Bar,
 }
@@ -87,7 +88,7 @@ struct ConsoleProgress {
 }
 
 impl DownloadProgress for ConsoleProgress {
-    async fn transcode_started(&self, video_part: &VideoPart) -> impl Progress + 'static {
+    async fn transcode_started(&self, video_part: &VideoPart) -> impl Progress + Clone + 'static {
         let title = video_part.video().await.title().await;
 
         let bar = self
@@ -98,7 +99,7 @@ impl DownloadProgress for ConsoleProgress {
         ProgressBar { bar }
     }
 
-    async fn download_started(&self, video_part: &VideoPart) -> impl Progress + 'static {
+    async fn download_started(&self, video_part: &VideoPart) -> impl Progress + Clone + 'static {
         let title = video_part.video().await.title().await;
 
         let bar = self

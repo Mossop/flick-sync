@@ -156,6 +156,19 @@ impl SyncTask {
         )
     }
 
+    fn update_bars<'a, I: Iterator<Item = &'a SyncProgressBar>>(&self, bars: I) {
+        self.send_event(Event::Progress(
+            bars.filter_map(|b| {
+                if b.length.is_some() {
+                    Some(b.clone())
+                } else {
+                    None
+                }
+            })
+            .collect(),
+        ));
+    }
+
     fn add_progress(&self, progress: &SyncProgress) {
         let mut status = self.status.lock().unwrap();
 
@@ -169,7 +182,7 @@ impl SyncTask {
             },
         );
 
-        self.send_event(Event::Progress(status.progress.values().cloned().collect()));
+        self.update_bars(status.progress.values());
     }
 
     fn update_length(&self, progress: &SyncProgress, length: u64) {
@@ -177,7 +190,7 @@ impl SyncTask {
 
         if let Some(bar) = status.progress.get_mut(&Self::progress_key(progress)) {
             bar.length = Some(length);
-            self.send_event(Event::Progress(status.progress.values().cloned().collect()));
+            self.update_bars(status.progress.values());
         }
     }
 
@@ -186,7 +199,7 @@ impl SyncTask {
 
         if let Some(bar) = status.progress.get_mut(&Self::progress_key(progress)) {
             bar.position = progress.position;
-            self.send_event(Event::Progress(status.progress.values().cloned().collect()));
+            self.update_bars(status.progress.values());
         }
     }
 
@@ -198,7 +211,7 @@ impl SyncTask {
             .remove(&Self::progress_key(progress))
             .is_some()
         {
-            self.send_event(Event::Progress(status.progress.values().cloned().collect()));
+            self.update_bars(status.progress.values());
         }
     }
 
@@ -238,13 +251,13 @@ impl SyncTask {
 }
 
 impl DownloadProgress for SyncTask {
-    async fn transcode_started(&self, video_part: &VideoPart) -> impl Progress + 'static {
+    async fn transcode_started(&self, video_part: &VideoPart) -> impl Progress + Clone + 'static {
         self.log(SyncLogMessage::TranscodeStarted(video_part.clone()));
 
         SyncProgress::new(self.clone(), video_part.clone(), false)
     }
 
-    async fn download_started(&self, video_part: &VideoPart) -> impl Progress + 'static {
+    async fn download_started(&self, video_part: &VideoPart) -> impl Progress + Clone + 'static {
         self.log(SyncLogMessage::DownloadStarted(video_part.clone()));
 
         SyncProgress::new(self.clone(), video_part.clone(), true)

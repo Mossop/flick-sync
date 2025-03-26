@@ -66,12 +66,12 @@ pub trait DownloadProgress: Clone {
     fn transcode_started(
         &self,
         video_part: &wrappers::VideoPart,
-    ) -> impl Future<Output = impl Progress + 'static>;
+    ) -> impl Future<Output = impl Progress + Clone + 'static>;
 
     fn download_started(
         &self,
         video_part: &wrappers::VideoPart,
-    ) -> impl Future<Output = impl Progress + 'static>;
+    ) -> impl Future<Output = impl Progress + Clone + 'static>;
 
     fn download_failed(
         &self,

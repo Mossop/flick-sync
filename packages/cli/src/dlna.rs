@@ -4,6 +4,7 @@ use std::{
     pin::Pin,
     str::FromStr,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -20,7 +21,10 @@ use lazy_static::lazy_static;
 use mime::Mime;
 use pin_project::pin_project;
 use regex::Regex;
-use tokio::io::{AsyncRead, AsyncSeek, ReadBuf};
+use tokio::{
+    io::{AsyncRead, AsyncSeek, ReadBuf},
+    spawn,
+};
 use tracing::instrument;
 
 use crate::{Resources, shared::uniform_title};
@@ -45,6 +49,70 @@ impl<A: AsyncRead, B: AsyncRead> AsyncRead for EitherReader<A, B> {
             EitherReaderProj::A(reader) => reader.poll_read(cx, buf),
             EitherReaderProj::B(reader) => reader.poll_read(cx, buf),
         }
+    }
+}
+
+#[pin_project]
+struct ProgressReader<R> {
+    #[pin]
+    inner: R,
+    position: u64,
+    video: Video,
+    offset: u64,
+    secs_per_byte: f64,
+    last_report: u64,
+}
+
+impl<R> ProgressReader<R> {
+    fn new(inner: R, video: Video, offset: u64, secs_per_byte: f64) -> Self {
+        Self {
+            inner,
+            position: 0,
+            video,
+            offset,
+            secs_per_byte,
+            last_report: 0,
+        }
+    }
+}
+
+impl<R: AsyncRead> AsyncRead for ProgressReader<R> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let remaining = buf.remaining();
+
+        let this = self.project();
+        let result = this.inner.poll_read(cx, buf);
+
+        if matches!(result, Poll::Ready(Ok(()))) {
+            let read = remaining - buf.remaining();
+            *this.position += read as u64;
+
+            let new_position = (*this.position as f64 * *this.secs_per_byte) as u64 + *this.offset;
+
+            if new_position.abs_diff(*this.last_report) > 10000 {
+                *this.last_report = new_position;
+                let video = this.video.clone();
+                spawn(async move {
+                    let _ = video.set_playback_position(new_position).await;
+                });
+            }
+        }
+
+        result
+    }
+}
+
+impl<R: AsyncSeek> AsyncSeek for ProgressReader<R> {
+    fn start_seek(self: Pin<&mut Self>, position: io::SeekFrom) -> io::Result<()> {
+        self.project().inner.start_seek(position)
+    }
+
+    fn poll_complete(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
+        self.project().inner.poll_complete(cx)
     }
 }
 
@@ -988,11 +1056,34 @@ impl DlnaRequestHandler for DlnaHandler {
             return Err(UpnpError::unknown_object());
         };
 
+        let Ok(size) = file.len().await else {
+            return Err(UpnpError::unknown_object());
+        };
+
         let Ok(reader) = file.async_read().await else {
             return Err(UpnpError::unknown_object());
         };
 
-        Ok(reader)
+        let video = part.video().await;
+        let mut initial_duration = Duration::from_millis(0);
+        if part.index() > 0 {
+            let parts = video.parts().await;
+            for previous in &parts[0..part.index()] {
+                initial_duration += previous.duration().await;
+            }
+        }
+
+        let part_duration = part.duration().await;
+        let secs_per_byte = part_duration.as_millis() as f64 / size as f64;
+
+        let progress_reader = ProgressReader::new(
+            reader,
+            video,
+            initial_duration.as_millis() as u64,
+            secs_per_byte,
+        );
+
+        Ok(progress_reader)
     }
 }
 
