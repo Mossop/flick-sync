@@ -214,7 +214,7 @@ body.sidebar sl-split-panel {
     width: 100%;
     display: grid;
     grid-template-columns: 1fr max-content max-content max-content max-content;
-    gap: var(--sl-spacing-2x-small) var(--sl-spacing-4x-small);
+    gap: var(--sl-spacing-2x-small) var(--sl-spacing-small);
     align-items: center;
 
     thead, tbody, tr {
@@ -231,21 +231,18 @@ body.sidebar sl-split-panel {
 
     .completion {
       text-align: right;
-      width: 3em;
     }
 
     .duration {
       text-align: right;
-      width: 7em;
     }
 
     .size {
       text-align: right;
-      width: 5em;
     }
 
     .buttons {
-      width: 2em;
+      text-align: center;
     }
   }
 

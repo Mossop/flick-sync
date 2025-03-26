@@ -120,7 +120,13 @@ pub(super) async fn status_page(
             status
                 .progress
                 .values()
-                .cloned()
+                .filter_map(|p| {
+                    if p.length.is_some() {
+                        Some(p.clone())
+                    } else {
+                        None
+                    }
+                })
                 .collect::<Vec<SyncProgressBar>>(),
         )
     };

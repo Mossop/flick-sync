@@ -875,6 +875,12 @@ impl VideoPart {
                         5
                     };
 
+                    if let Ok(stats) = session.stats().await {
+                        if stats.size > 0 {
+                            download_progress.length(((100 * stats.size) as f32 / p) as u64);
+                        }
+                    }
+
                     sleep(Duration::from_secs(delay.into())).await;
                 }
                 Err(plex_api::Error::ItemNotFound) => {

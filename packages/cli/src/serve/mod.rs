@@ -10,7 +10,7 @@ use actix_tls::accept::rustls_0_23::TlsStream;
 use actix_web::{
     App, HttpServer, dev::Extensions, middleware::from_fn, rt::net::TcpStream, web::ThinData,
 };
-use clap::Args;
+use clap::{Args, builder::FalseyValueParser};
 use flick_sync::{DownloadProgress, FlickSync, Progress, Server, VideoPart};
 use futures::{FutureExt, StreamExt, select};
 use rustls::{
@@ -46,6 +46,8 @@ pub struct Serve {
     certificate: Option<String>,
     #[clap(short = 'k', long, env = "FLICK_SYNC_PRIVATE_KEY")]
     private_key: Option<String>,
+    #[clap(short, long, env = "FLICK_SYNC_DISABLE_SYNCING", value_parser = FalseyValueParser::new())]
+    disable_syncing: bool,
 }
 
 #[derive(Default)]
@@ -98,6 +100,7 @@ impl Progress for SyncProgress {
             }
         } else if position.abs_diff(self.position) > 1024 * 1024 {
             self.position = position;
+            self.task.update_progress(self);
         }
     }
 
@@ -276,6 +279,7 @@ async fn background_task(
     status: Arc<Mutex<SyncStatus>>,
     event_sender: broadcast::Sender<Event>,
     wakeup: Arc<Notify>,
+    full_sync: bool,
 ) {
     select! {
         _ = time::sleep(Duration::from_secs(30)).fuse() => {},
@@ -304,12 +308,14 @@ async fn background_task(
                 warn!(server=server.id(), error=?e, "Failed to prune server directory");
             }
 
-            match server.download(task.clone()).await {
-                Ok(complete) => {
-                    server.write_playlists().await;
-                    task.sync_finished(server, complete).await;
+            if full_sync {
+                match server.download(task.clone()).await {
+                    Ok(complete) => {
+                        server.write_playlists().await;
+                        task.sync_finished(server, complete).await;
+                    }
+                    Err(e) => task.sync_failed(server, e).await,
                 }
-                Err(e) => task.sync_failed(server, e).await,
             }
         }
 
@@ -367,6 +373,7 @@ impl Runnable for Serve {
             status.clone(),
             event_sender.clone(),
             sync_trigger.clone(),
+            !self.disable_syncing,
         ));
 
         let service_data = ServiceData {

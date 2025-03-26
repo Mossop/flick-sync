@@ -27,7 +27,7 @@ use crate::{
     sync::{OpReadGuard, OpWriteGuard},
 };
 
-const SCHEMA_VERSION: u64 = 3;
+const SCHEMA_VERSION: u64 = 4;
 
 async fn remove_file(path: &Path) {
     if let Err(e) = fs::remove_file(path).await {
@@ -1051,6 +1051,32 @@ impl State {
 
         Ok(())
     }
+
+    fn migrate_v3(data: &mut JsonObject) -> Result {
+        for state in data
+            .prop("servers")
+            .values()
+            .prop("videos")
+            .values()
+            .prop("parts")
+            .values()
+            .prop("download")
+            .as_object()
+        {
+            if let Some(Value::String(ref updated)) = state.get("state").cloned() {
+                if updated.as_str() == "transcodeDownloading" {
+                    state.insert(
+                        "state".to_string(),
+                        Value::String("transcoding".to_string()),
+                    );
+                } else if updated.as_str() == "transcoding" {
+                    state.insert("state".to_string(), Value::String("none".to_string()));
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for State {
@@ -1091,6 +1117,10 @@ impl MigratableStore for State {
 
         if version < 3 {
             Self::migrate_v2(data)?;
+        }
+
+        if version < 4 {
+            Self::migrate_v3(data)?;
         }
 
         data.insert("schema".to_string(), SCHEMA_VERSION.into());
