@@ -489,8 +489,10 @@ where
         let result = this.writer.poll_write(cx, buf);
 
         if let Poll::Ready(Ok(count)) = result {
-            this.access_permit.take();
             *this.offset += count as u64;
+            if *this.offset > 8096 {
+                this.access_permit.take();
+            }
             this.progress.progress(*this.offset);
         }
 
@@ -870,7 +872,7 @@ impl VideoPart {
             let delay = match session.status().await {
                 Ok(TranscodeStatus::Complete) => {
                     debug!("Transcode complete");
-                    return Ok(());
+                    break;
                 }
                 Ok(TranscodeStatus::Error) => {
                     drop(download_future);
@@ -883,6 +885,11 @@ impl VideoPart {
                     remaining,
                     progress: p,
                 }) => {
+                    if p > 1.0 {
+                        // Let another transcode start now.
+                        request_permit.take();
+                    }
+
                     progress.progress(p as u64);
                     if let Some(remaining) = remaining {
                         remaining.clamp(1, 5)
@@ -906,9 +913,21 @@ impl VideoPart {
                 _ = sleep(Duration::from_secs(delay.into())).fuse() => {},
                 _ = download_future => {},
             }
-
-            request_permit.take();
         }
+
+        // Re-acquire the transcode request permit while we wait for the proper download to start.
+        if request_permit.is_none() {
+            *request_permit = Some(
+                self.server
+                    .transcode_requests
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .unwrap(),
+            );
+        }
+
+        Ok(())
     }
 
     #[instrument(level = "trace", skip(self, plex_server, guard), fields(video=self.id, part=self.index))]
@@ -1033,6 +1052,7 @@ impl VideoPart {
         guard: &OpWriteGuard,
         session_id: &str,
         path: &Path,
+        request_permit: &mut Option<OwnedSemaphorePermit>,
         progress: &mut P,
     ) -> Result {
         let session = match plex_server.transcode_session(session_id).await {
@@ -1084,7 +1104,7 @@ impl VideoPart {
             offset: 0,
             writer: AsyncWriteAdapter::new(file),
             progress,
-            access_permit: &mut None,
+            access_permit: request_permit,
         };
         info!(path=?path, "Downloading transcoded video");
 
@@ -1216,6 +1236,7 @@ impl VideoPart {
                             &guard,
                             &session_id,
                             &path,
+                            &mut transcode_request,
                             &mut download_progress,
                         )
                         .await
