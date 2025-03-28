@@ -30,7 +30,7 @@ use crate::{
         ConnectionInfo, Event, ServiceData,
         events::{ProgressBarTemplate, ServerTemplate, SyncLogTemplate, SyncProgressBar},
     },
-    shared::{ByteRangeResponse, uniform_title},
+    shared::{ByteRangeResponse, disk_info_for_path, uniform_title},
 };
 
 const CACHE_AGE: u32 = 10 * 60;
@@ -1071,16 +1071,24 @@ pub(super) async fn sync_list(
         Some(Sidebar::build(&service_data).await)
     };
 
+    let disk_info = disk_info_for_path(service_data.flick_sync.root());
+    let mut profiles = service_data.flick_sync.transcode_profiles().await;
+    profiles.sort();
+
     #[derive(Template)]
     #[template(path = "synclist.html")]
     struct SyncList {
         sidebar: Option<Sidebar>,
         servers: Vec<ServerTemplate>,
+        available_space: u64,
+        profiles: Vec<String>,
     }
 
     let template = SyncList {
         sidebar,
         servers: ServerTemplate::build(&service_data.flick_sync).await,
+        available_space: disk_info.available_space,
+        profiles,
     };
 
     render(template)

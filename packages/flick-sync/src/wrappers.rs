@@ -725,7 +725,7 @@ impl VideoPart {
         let options = if let Some(options) = self
             .server
             .inner
-            .transcode_options(profile.or(server_profile))
+            .transcode_options(&profile.unwrap_or(server_profile))
             .await
         {
             options

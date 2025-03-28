@@ -29,8 +29,8 @@ use tokio::{
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
-    Collection, DEFAULT_PROFILES, FileType, Inner, Library, OutputStyle, Result, ServerConnection,
-    TransferState, VideoStats,
+    Collection, DEFAULT_PROFILE, DEFAULT_PROFILES, FileType, Inner, Library, OutputStyle, Result,
+    ServerConnection, TransferState, VideoStats,
     config::{Config, ServerConfig, SyncItem, TranscodeProfile},
     state::{
         CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, SeasonState,
@@ -325,10 +325,13 @@ impl Server {
         results
     }
 
-    pub(crate) async fn transcode_profile(&self) -> Option<String> {
+    pub async fn transcode_profile(&self) -> String {
         let config = self.inner.config.read().await;
         let server_config = config.servers.get(&self.id).unwrap();
-        server_config.transcode_profile.clone()
+        server_config
+            .transcode_profile
+            .clone()
+            .unwrap_or_else(|| DEFAULT_PROFILE.to_string())
     }
 
     pub async fn connection(&self) -> ServerConnection {
@@ -675,11 +678,15 @@ impl Server {
                 }
             }
 
-            state_sync.update_profiles().await?;
+            if allow_video_deletion {
+                state_sync.update_profiles().await?;
+            }
 
             state_sync.fetch_collections().await?;
 
-            state_sync.prune_unseen().await?;
+            if allow_video_deletion {
+                state_sync.prune_unseen().await?;
+            }
 
             let state = self.inner.state.write().await;
             self.inner.persist_state(&state).await?;
@@ -976,7 +983,11 @@ impl Server {
 
         if expected_files.is_empty() {
             debug!("Deleting empty server directory {}", server_root.display());
-            remove_dir_all(&server_root).await?;
+            if let Err(e) = remove_dir_all(&server_root).await {
+                if e.kind() != ErrorKind::NotFound {
+                    warn!(error=%e, "Failed to remove empty server directory.");
+                }
+            }
             return Ok(());
         }
 
@@ -1041,12 +1052,7 @@ impl StateSync<'_> {
                 .await;
         }
 
-        let transcode_profile = sync
-            .transcode_profile
-            .clone()
-            .or_else(|| self.server_config.transcode_profile.clone());
-
-        if let Some(ref profile) = transcode_profile {
+        if let Some(ref profile) = sync.transcode_profile {
             let profiles = self.transcode_profiles.entry(key).or_default();
             profiles.insert(profile.clone());
         }
@@ -1190,11 +1196,14 @@ impl StateSync<'_> {
             if let Ok(guard) =
                 OpMutex::try_lock_write_key(format!("{}/{}", self.server.id, key)).await
             {
-                let selected_profile = self.select_profile(selected_profiles);
+                let selected_profile = self
+                    .select_profile(selected_profiles)
+                    .or_else(|| self.server_config.transcode_profile.clone())
+                    .unwrap_or_else(|| DEFAULT_PROFILE.to_string());
 
                 let mut server_state = self.server_state().await;
                 let video_state = server_state.videos.get_mut(key).unwrap();
-                if video_state.transcode_profile != selected_profile {
+                if video_state.transcode_profile.as_ref() != Some(&selected_profile) {
                     if video_state
                         .parts
                         .iter()
@@ -1209,7 +1218,7 @@ impl StateSync<'_> {
                         }
                     }
 
-                    video_state.transcode_profile = selected_profile;
+                    video_state.transcode_profile = Some(selected_profile);
                 }
             }
         }

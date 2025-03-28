@@ -56,3 +56,4 @@ rustls = { version = "0.23.25", default-features = false, features = [
   "std",
   "tls12",
 ] }
+sysinfo = "0.34.0"

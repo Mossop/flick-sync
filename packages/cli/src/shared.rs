@@ -1,6 +1,7 @@
 use std::{
     cmp,
     io::{self, SeekFrom},
+    path::{Path, PathBuf},
     pin::Pin,
     str::FromStr,
     task::{Context, Poll},
@@ -15,6 +16,7 @@ use actix_web::{
     },
 };
 use pin_project::pin_project;
+use sysinfo::Disks;
 use tokio::io::{AsyncRead, AsyncSeek, AsyncSeekExt, ReadBuf};
 use tokio_util::io::ReaderStream;
 
@@ -30,6 +32,37 @@ pub(crate) fn uniform_title(st: &str) -> String {
         .trim_start_matches("the ")
         .trim()
         .to_string()
+}
+
+pub(crate) struct DiskInfo {
+    pub(crate) total_space: u64,
+    pub(crate) available_space: u64,
+}
+
+pub(crate) fn disk_info_for_path(path: &Path) -> DiskInfo {
+    let mut disk_info = DiskInfo {
+        total_space: u64::MAX,
+        available_space: u64::MAX,
+    };
+
+    let mut best_path: Option<PathBuf> = None;
+
+    let disks = Disks::new_with_refreshed_list();
+    for disk in disks.list() {
+        if path.starts_with(disk.mount_point()) {
+            if let Some(ref best) = best_path {
+                if best.starts_with(disk.mount_point()) {
+                    continue;
+                }
+            }
+
+            best_path = Some(disk.mount_point().to_owned());
+            disk_info.total_space = disk.total_space();
+            disk_info.available_space = disk.available_space();
+        }
+    }
+
+    disk_info
 }
 
 #[pin_project]

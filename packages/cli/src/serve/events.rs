@@ -11,6 +11,7 @@ pub(super) struct SyncTemplate {
     pub(super) duration: String,
     pub(super) size: u64,
     pub(super) percent: f64,
+    pub(super) transcode_profile: Option<String>,
 }
 
 pub(super) struct ServerTemplate {
@@ -20,6 +21,7 @@ pub(super) struct ServerTemplate {
     pub(super) size: u64,
     pub(super) percent: f64,
     pub(super) syncs: Vec<SyncTemplate>,
+    pub(super) transcode_profile: String,
 }
 
 fn format_duration(mut total: u64) -> String {
@@ -62,6 +64,7 @@ impl ServerTemplate {
                     } else {
                         (100.0 * stats.local_bytes as f64) / stats.remote_bytes as f64
                     },
+                    transcode_profile: sync.transcode_profile,
                 });
             }
 
@@ -71,9 +74,14 @@ impl ServerTemplate {
                 id: server.id().to_owned(),
                 name: server.name().await,
                 size: stats.local_bytes,
-                percent: (stats.local_bytes as f64 * 100.0) / (stats.remote_bytes as f64),
+                percent: if stats.remote_bytes == 0 {
+                    100.0
+                } else {
+                    (stats.local_bytes as f64 * 100.0) / (stats.remote_bytes as f64)
+                },
                 duration: format_duration(stats.local_duration.as_secs()),
                 syncs,
+                transcode_profile: server.transcode_profile().await,
             });
         }
 
@@ -117,10 +125,15 @@ impl Event {
                 #[template(path = "syncservers.html")]
                 struct SyncList {
                     servers: Vec<ServerTemplate>,
+                    profiles: Vec<String>,
                 }
+
+                let mut profiles = flick_sync.transcode_profiles().await;
+                profiles.sort();
 
                 let template = SyncList {
                     servers: ServerTemplate::build(flick_sync).await,
+                    profiles,
                 };
 
                 template.render()

@@ -3,6 +3,14 @@
     <div class="header" slot="header">
       <div>{{ server.name }}</div>
       <div class="info">
+        <div class="profile-selector">
+          Default profile:
+          <sl-select disabled value="{{ server.transcode_profile }}" size="small">
+            {% for profile in profiles %}
+              <sl-option value="{{ profile }}">{{ profile }}</sl-option>
+            {% endfor %}
+          </sl-select>
+        </div>
         <div>{{ server.duration }}</div>
         <div>{{ server.percent|fmt("{:.0}") }}%</div>
         <sl-format-bytes value="{{ server.size }}"></sl-format-bytes>
@@ -13,6 +21,7 @@
         <thead>
           <tr>
             <th class="title">Title</th>
+            <th class="profile">Profile</th>
             <th class="duration">Duration</th>
             <th class="completion"></th>
             <th class="size">Size</th>
@@ -23,6 +32,13 @@
           {% for sync in server.syncs %}
             <tr id="{{ sync.id }}">
               <td class="title">{{ sync.name }}</td>
+              <td class="profile-selector">
+                <sl-select disabled value="{{ sync.transcode_profile.as_deref().unwrap_or("") }}" clearable size="small">
+                  {% for profile in profiles %}
+                    <sl-option value="{{ profile }}">{{ profile }}</sl-option>
+                  {% endfor %}
+                </sl-select>
+              </td>
               <td class="duration">{{ sync.duration }}</td>
               <td class="completion">{{ sync.percent|fmt("{:.0}") }}%</td>
               <td class="size"><sl-format-bytes value="{{ sync.size }}"></sl-format-bytes></td>
@@ -33,8 +49,15 @@
     </table>
 
     <form hx-post="/sync/{{ server.id }}">
-      <sl-input id="address-input" name="url" type="url" placeholder="Enter the web address for the item to add"></sl-input>
-      <sl-button type="submit" circle><sl-icon name="plus-lg"></sl-icon></sl-button>
+      <sl-input id="address-input" name="url" type="url" size="small" placeholder="Enter the web address for the item to add"></sl-input>
+      <div class="profile-selector">
+        <sl-select disabled clearable size="small">
+          {% for profile in profiles %}
+            <sl-option value="{{ profile }}">{{ profile }}</sl-option>
+          {% endfor %}
+        </sl-select>
+      </div>
+      <sl-button type="submit" size="small" circle><sl-icon name="plus-lg"></sl-icon></sl-button>
     </form>
   </sl-card>
 {% endfor %}

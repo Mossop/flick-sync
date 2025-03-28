@@ -3,6 +3,12 @@
 {% block title %}Sync List{% endblock %}
 
 {% block content %}
+<sl-card>
+  <div id="synclist-header">
+    Available disk space: <sl-format-bytes value="{{ available_space }}"></sl-format-bytes>
+  </div>
+</sl-card>
+
 <div id="server-cards" hx-target="this" sse-swap="sync-change" hx-swap="morph:innerHTML">
   {% include "syncservers.html" %}
 </div>

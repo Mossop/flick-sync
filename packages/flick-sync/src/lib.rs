@@ -50,6 +50,8 @@ pub type Result<T = ()> = anyhow::Result<T>;
 pub const STATE_FILE: &str = ".flicksync.state.json";
 pub const CONFIG_FILE: &str = "flicksync.json";
 
+pub(crate) const DEFAULT_PROFILE: &str = "720p";
+
 lazy_static! {
     static ref DEFAULT_PROFILES: HashMap<String, Option<TranscodeProfile>> = {
         let mut map = HashMap::new();
@@ -103,23 +105,19 @@ impl Inner {
         self.config.read().await.output_style
     }
 
-    async fn transcode_options(&self, profile: Option<String>) -> Option<VideoTranscodeOptions> {
-        if let Some(ref profile) = profile {
-            let config = self.config.read().await;
-            if let Some(profile) = config.profiles.get(profile) {
-                return Some(profile.options());
-            }
+    async fn transcode_options(&self, profile: &str) -> Option<VideoTranscodeOptions> {
+        let config = self.config.read().await;
+        if let Some(profile) = config.profiles.get(profile) {
+            return Some(profile.options());
+        }
 
-            match DEFAULT_PROFILES.get(profile) {
-                Some(Some(profile)) => Some(profile.options()),
-                Some(None) => None,
-                _ => {
-                    warn!("Unknown transcode profile {profile}, falling back to defaults.");
-                    Some(Default::default())
-                }
+        match DEFAULT_PROFILES.get(profile) {
+            Some(Some(profile)) => Some(profile.options()),
+            Some(None) => None,
+            _ => {
+                warn!("Unknown transcode profile {profile}, falling back to defaults.");
+                Some(Default::default())
             }
-        } else {
-            Some(Default::default())
         }
     }
 
@@ -181,6 +179,15 @@ impl FlickSync {
 
     pub fn root(&self) -> &Path {
         &self.inner.path
+    }
+
+    pub async fn transcode_profiles(&self) -> Vec<String> {
+        let config = self.inner.config.read().await;
+        DEFAULT_PROFILES
+            .keys()
+            .chain(config.profiles.keys())
+            .cloned()
+            .collect()
     }
 
     /// Adds a new server

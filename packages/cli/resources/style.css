@@ -188,6 +188,10 @@ body.sidebar sl-split-panel {
   }
 }
 
+#synclist-header {
+  text-align: end;
+}
+
 #server-cards {
   display: flex;
   flex-direction: column;
@@ -202,6 +206,13 @@ body.sidebar sl-split-panel {
     align-items: center;
     justify-content: space-between;
 
+    .profile-selector {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: var(--sl-spacing-small);
+    }
+
     .info {
       display: flex;
       flex-direction: row;
@@ -210,10 +221,14 @@ body.sidebar sl-split-panel {
     }
   }
 
+  .profile-selector sl-select {
+    width: 8em;
+  }
+
   .sync-table {
     width: 100%;
     display: grid;
-    grid-template-columns: 1fr max-content max-content max-content max-content;
+    grid-template-columns: 1fr max-content max-content max-content max-content max-content;
     gap: var(--sl-spacing-2x-small) var(--sl-spacing-small);
     align-items: center;
 
