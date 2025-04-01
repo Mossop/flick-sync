@@ -2,6 +2,7 @@ use std::{
     fmt,
     io::{ErrorKind, IoSlice},
     ops::{Add, AddAssign},
+    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     pin::Pin,
     result,
@@ -681,8 +682,9 @@ impl VideoPart {
             .await
     }
 
-    pub async fn rebuild_download(&self) -> Result {
+    pub async fn recover_download(&self) -> Result {
         let title = self.with_video_state(|vs| vs.title.clone()).await;
+        let expected_size = self.remote_size().await;
 
         for container in [
             ContainerFormat::Avi,
@@ -699,8 +701,14 @@ impl VideoPart {
                 if stats.is_file() {
                     info!(path=?path.display(), "Recovered download for {title}");
 
+                    let download_state = if stats.size() == expected_size {
+                        DownloadState::Downloaded { path }
+                    } else {
+                        DownloadState::Transcoded { path }
+                    };
+
                     return self
-                        .update_state(|state| state.download = DownloadState::Downloaded { path })
+                        .update_state(|state| state.download = download_state)
                         .await;
                 }
             }

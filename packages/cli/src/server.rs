@@ -360,9 +360,9 @@ impl Runnable for Remove {
 }
 
 #[derive(Args)]
-pub struct Rebuild {}
+pub struct Recover {}
 
-impl Runnable for Rebuild {
+impl Runnable for Recover {
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         for server in flick_sync.servers().await {
             if let Err(e) = reconnect_server(&server, &flick_sync, &console).await {
@@ -381,7 +381,7 @@ impl Runnable for Rebuild {
                         continue;
                     }
 
-                    if let Err(e) = part.rebuild_download().await {
+                    if let Err(e) = part.recover_download().await {
                         warn!(error=?e, "Failed to relocate video part");
                     }
                 }

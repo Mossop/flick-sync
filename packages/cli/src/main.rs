@@ -29,7 +29,7 @@ mod util;
 
 use console::Console;
 use serve::Serve;
-use server::{Add, Login, Rebuild, Remove};
+use server::{Add, Login, Recover, Remove};
 use sync::BuildMetadata;
 use util::{List, Stats};
 
@@ -85,8 +85,8 @@ pub enum Command {
     Stats,
     /// Lists sync items.
     List,
-    /// Attempts to rebuild a corrupt state file.
-    Rebuild,
+    /// Attempts to recover from a corrupt state file.
+    Recover,
     /// Rebuilds metadata files.
     BuildMetadata,
     /// Serves downloaded media over DLNA.
