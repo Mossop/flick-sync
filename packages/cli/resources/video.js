@@ -1,4 +1,4 @@
-import { LitElement, html, css, nothing, ref, keyed } from "lit";
+import { LitElement, html, css, nothing, ref, keyed, classMap } from "lit";
 import shoelaceStyles from "@shoelace/themes/dark.styles.js";
 import "@shoelace/components/icon-button/icon-button.js";
 
@@ -30,10 +30,6 @@ export class VideoPlayer extends LitElement {
     css`
       :host {
         position: relative;
-
-        &.casting .overlay {
-          opacity: 1;
-        }
       }
 
       video {
@@ -55,6 +51,10 @@ export class VideoPlayer extends LitElement {
           cubic-bezier(0.4, 0, 0.2, 1) 0ms;
 
         &.visible {
+          opacity: 1;
+        }
+
+        &.casting {
           opacity: 1;
         }
       }
@@ -556,9 +556,14 @@ export class VideoPlayer extends LitElement {
 
     let playedPercent = (100 * this.currentTime) / this.totalTime;
 
+    let classes = {
+      overlay: true,
+      casting: this.isCasting,
+    };
+
     return html`
       ${this.renderVideo()}
-      <div class="overlay" @mousemove="${this.showOverlay}">
+      <div class=${classMap(classes)} @mousemove="${this.showOverlay}">
         <div class="main" @click="${this.togglePlayback}">
           <sl-icon-button
             name="skip-backward"
