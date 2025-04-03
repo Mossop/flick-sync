@@ -1634,10 +1634,6 @@ impl Movie {
 
     pub async fn set_playback_state(&self, state: PlaybackState) -> Result {
         self.update_state(|vs| {
-            if vs.playback_state != PlaybackState::Played && state == PlaybackState::Played {
-                vs.last_viewed_at = Some(OffsetDateTime::now_utc());
-            }
-
             vs.playback_state = state;
         })
         .await
