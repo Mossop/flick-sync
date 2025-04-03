@@ -337,6 +337,8 @@ async fn background_task(
                     }
                     Err(e) => task.sync_failed(server, e).await,
                 }
+            } else {
+                task.sync_finished(server, false).await;
             }
         }
 
