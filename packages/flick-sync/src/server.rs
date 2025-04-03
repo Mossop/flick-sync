@@ -686,6 +686,8 @@ impl Server {
 
             if allow_video_deletion {
                 state_sync.prune_unseen().await?;
+            } else {
+                state_sync.update_unseen().await?;
             }
 
             let state = self.inner.state.write().await;
@@ -1366,6 +1368,57 @@ impl StateSync<'_> {
             .await
             .libraries
             .retain(|k, _v| self.seen_libraries.contains(k));
+
+        Ok(())
+    }
+
+    async fn update_unseen(&mut self) -> Result {
+        info!("Updating unseen items");
+
+        for video in self.server.videos().await {
+            if self.seen_items.contains(video.id()) {
+                continue;
+            }
+
+            let mut server_state = self.server_state().await;
+            let Some(video_state) = server_state.videos.get_mut(video.id()) else {
+                continue;
+            };
+
+            match self.plex_server.item_by_id(video.id()).await {
+                Ok(Item::Movie(movie)) => {
+                    video_state
+                        .update(
+                            self.server,
+                            &movie,
+                            &self.plex_server,
+                            self.root,
+                            self.allow_video_deletion,
+                        )
+                        .await;
+                }
+                Ok(Item::Episode(episode)) => {
+                    video_state
+                        .update(
+                            self.server,
+                            &episode,
+                            &self.plex_server,
+                            self.root,
+                            self.allow_video_deletion,
+                        )
+                        .await;
+                }
+                Ok(_) => {
+                    warn!(item = video.id(), "Unexpected remote item type for video");
+                }
+                Err(plex_api::Error::ItemNotFound) => {
+                    warn!(item = video.id(), "Sync item no longer appears to exist");
+                }
+                Err(e) => {
+                    error!(error = %e, item = video.id());
+                }
+            }
+        }
 
         Ok(())
     }
