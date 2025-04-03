@@ -149,7 +149,7 @@ export class VideoPlayer extends LitElement {
     isCasting: { state: true },
     airDate: { type: String },
     image: { type: String },
-    title: { type: String },
+    videoTitle: { type: String },
     show: { type: Object },
     season: { type: Object },
     episode: { type: Object },
@@ -424,7 +424,7 @@ export class VideoPlayer extends LitElement {
     }
 
     metadata.images = [new chrome.cast.Image(this.image)];
-    metadata.title = this.title;
+    metadata.title = this.videoTitle;
     mediaInfo.metadata = metadata;
 
     return mediaInfo;
