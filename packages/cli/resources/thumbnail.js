@@ -20,15 +20,14 @@ export class VideoPlayer extends LitElement {
 
       .thumbnail {
         width: 100%;
-        aspect-ratio: 1;
         position: relative;
         overflow: hidden;
       }
 
       img {
         display: block;
-        height: 100%;
         width: 100%;
+        max-height: 150px;
         object-fit: contain;
         object-position: center center;
       }
