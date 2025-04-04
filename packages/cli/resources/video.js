@@ -37,6 +37,7 @@ export class VideoPlayer extends LitElement {
         height: 100%;
         object-fit: contain;
         object-position: center center;
+        background-color: black;
       }
 
       .overlay {
@@ -56,6 +57,21 @@ export class VideoPlayer extends LitElement {
 
         &.casting {
           opacity: 1;
+        }
+
+        &.paused {
+          opacity: 1;
+        }
+      }
+
+      .info {
+        position: absolute;
+        top: var(--sl-spacing-large);
+        left: var(--sl-spacing-large);
+
+        img {
+          max-height: 150px;
+          max-width: 150px;
         }
       }
 
@@ -521,6 +537,18 @@ export class VideoPlayer extends LitElement {
     this.seek(this.currentTime + 30);
   }
 
+  renderOverlayInfo() {
+    if (this.isPlaying && !this.isCasting) {
+      return nothing;
+    }
+
+    return html`
+      <div class="info">
+        <img src="${this.image}" />
+      </div>
+    `;
+  }
+
   renderVideo() {
     if (this.isCasting) {
       return nothing;
@@ -559,11 +587,14 @@ export class VideoPlayer extends LitElement {
     let classes = {
       overlay: true,
       casting: this.isCasting,
+      playing: this.isPlaying,
+      paused: !this.isPlaying,
     };
 
     return html`
       ${this.renderVideo()}
       <div class=${classMap(classes)} @mousemove="${this.showOverlay}">
+        ${this.renderOverlayInfo()}
         <div class="main" @click="${this.togglePlayback}">
           <sl-icon-button
             name="skip-backward"

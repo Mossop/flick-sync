@@ -177,13 +177,12 @@ body.sidebar sl-split-panel {
   overflow: hidden;
 
   video-player {
-    max-height: calc(100% - 40px);
-    max-width: calc(100% - 40px);
+    height: calc(100% - 40px);
+    width: calc(100% - 40px);
     margin: auto;
 
     &.casting {
-      height: calc(100% - 40px);
-      width: calc(100% - 40px);
+      height: 50%;
     }
   }
 }
