@@ -184,18 +184,10 @@ export class VideoPlayer extends LitElement {
     this.videoElement = null;
     this.castSession = null;
 
-    if (window.castAvailable) {
-      this.initCast();
-    } else {
-      document.addEventListener("cast-available", () => this.initCast(), {
-        once: true,
-      });
-    }
-
     this.addEventListener("fullscreenchange", () => this.onFullscreenChanged());
   }
 
-  initCast() {
+  initCast = () => {
     this.isCastAvailable = true;
 
     let castContext = cast.framework.CastContext.getInstance();
@@ -206,7 +198,7 @@ export class VideoPlayer extends LitElement {
       cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
       this.castContextEventListener
     );
-  }
+  };
 
   castContextEventListener = (event) => {
     this.updateCastSession(event.session);
@@ -243,6 +235,8 @@ export class VideoPlayer extends LitElement {
       this.castController = null;
     }
 
+    this.castSession = session;
+
     if (session) {
       this.castPlayer = new cast.framework.RemotePlayer();
       this.castController = new cast.framework.RemotePlayerController(
@@ -255,6 +249,28 @@ export class VideoPlayer extends LitElement {
 
       this.isCasting = true;
       this.classList.add("casting");
+
+      let mediaInfo = session.getMediaSession()?.media;
+      let videoUrl = new URL(document.documentURI);
+
+      if (mediaInfo?.contentId == videoUrl.pathname) {
+        let previous = 0;
+        let mediaIndex = 0;
+
+        for (let media of this.playlist) {
+          let url = new URL(media.url, document.documentURI);
+          if (mediaInfo.contentUrl == url.toString()) {
+            this.mediaIndex = mediaIndex;
+            this.previousTime = previousTime;
+            this.castControllerEventListener();
+
+            return;
+          }
+
+          previous += media.duration;
+          mediaIndex++;
+        }
+      }
     } else {
       this.castPlayer = null;
       this.castController = null;
@@ -262,8 +278,6 @@ export class VideoPlayer extends LitElement {
       this.isCasting = false;
       this.classList.remove("casting");
     }
-
-    this.castSession = session;
 
     this.mediaIndex = -1;
     this.seek(this.currentTime);
@@ -289,13 +303,18 @@ export class VideoPlayer extends LitElement {
   connectedCallback() {
     super.connectedCallback();
 
-    if (this.isCasting) {
-      this.mediaIndex = -1;
-      this.seek(this.currentTime);
+    if (window.castAvailable) {
+      this.initCast();
+    } else {
+      document.addEventListener("cast-available", this.initCast, {
+        once: true,
+      });
     }
   }
 
   disconnectedCallback() {
+    document.removeEventListener("cast-available", this.initCast);
+
     if (this.isCastAvailable) {
       cast.framework.CastContext.getInstance().removeEventListener(
         cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
@@ -419,12 +438,16 @@ export class VideoPlayer extends LitElement {
   }
 
   castMediaInfo(media) {
-    let url = new URL(media.url, document.documentURI);
+    let videoUrl = new URL(document.documentURI);
+    let contentUrl = new URL(media.url, document.documentURI);
 
     let mediaInfo = new chrome.cast.media.MediaInfo(
-      url.toString(),
+      videoUrl.pathname,
       media.mimeType
     );
+
+    mediaInfo.contentUrl = contentUrl.toString();
+    mediaInfo.duration = media.duration / 1000;
 
     let metadata;
 
