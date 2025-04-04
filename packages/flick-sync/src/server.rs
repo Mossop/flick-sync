@@ -672,6 +672,8 @@ impl Server {
                 allow_video_deletion,
             };
 
+            state_sync.update_videos().await;
+
             for item in server_config.syncs.values() {
                 if let Err(e) = state_sync.add_item_by_key(item, &item.id).await {
                     warn!(item=item.id, error=?e, "Failed to update item. Skipping.");
@@ -686,8 +688,6 @@ impl Server {
 
             if allow_video_deletion {
                 state_sync.prune_unseen().await?;
-            } else {
-                state_sync.update_unseen().await?;
             }
 
             let state = self.inner.state.write().await;
@@ -1032,30 +1032,21 @@ impl StateSync<'_> {
             return;
         }
 
-        let key = video.rating_key().to_owned();
+        let key = video.rating_key();
 
-        if !self.seen_items.contains(&key) {
-            self.seen_items.insert(key.clone());
+        if !self.seen_items.contains(key) {
+            self.seen_items.insert(key.to_owned());
 
             let mut server_state = self.server_state().await;
-            let video_state = server_state
-                .videos
-                .entry(key.clone())
-                .or_insert_with(|| VideoState::from(video));
-
-            video_state
-                .update(
-                    self.server,
-                    video,
-                    &self.plex_server,
-                    self.root,
-                    self.allow_video_deletion,
-                )
-                .await;
+            if !server_state.videos.contains_key(key) {
+                server_state
+                    .videos
+                    .insert(key.to_owned(), VideoState::from(video));
+            }
         }
 
         if let Some(ref profile) = sync.transcode_profile {
-            let profiles = self.transcode_profiles.entry(key).or_default();
+            let profiles = self.transcode_profiles.entry(key.to_owned()).or_default();
             profiles.insert(profile.clone());
         }
     }
@@ -1372,14 +1363,10 @@ impl StateSync<'_> {
         Ok(())
     }
 
-    async fn update_unseen(&mut self) -> Result {
-        info!("Updating unseen items");
+    async fn update_videos(&mut self) {
+        info!("Updating videos");
 
         for video in self.server.videos().await {
-            if self.seen_items.contains(video.id()) {
-                continue;
-            }
-
             let mut server_state = self.server_state().await;
             let Some(video_state) = server_state.videos.get_mut(video.id()) else {
                 continue;
@@ -1419,8 +1406,6 @@ impl StateSync<'_> {
                 }
             }
         }
-
-        Ok(())
     }
 
     async fn add_item_by_key(&mut self, sync: &SyncItem, key: &str) -> Result {
