@@ -414,7 +414,7 @@ impl Runnable for Serve {
                 .wrap(from_fn(middleware::middleware))
                 .service(services::events)
                 .service(services::resources)
-                .service(services::thumbnail)
+                .service(services::thumbnail_image)
                 .service(services::playlist_contents)
                 .service(services::library_collections)
                 .service(services::collection_contents)

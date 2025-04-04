@@ -12,9 +12,7 @@ use actix_web::{
     web::{Form, Path, Query, ThinData},
 };
 use bytes::Bytes;
-use flick_sync::{
-    Collection, Library, LibraryType, PlaybackState, Season, Show, Video, plex_api::library::Item,
-};
+use flick_sync::{Collection, Library, LibraryType, PlaybackState, Video, plex_api::library::Item};
 use futures::TryStreamExt;
 use rinja::Template;
 use serde::{Deserialize, Serialize};
@@ -28,9 +26,11 @@ use crate::{
     EmbeddedFileStream, Resources,
     serve::{
         ConnectionInfo, Event, ServiceData,
-        events::{ProgressBarTemplate, ServerTemplate, SyncLogTemplate, SyncProgressBar},
+        events::{
+            ProgressBarTemplate, ServerTemplate, SyncLogTemplate, SyncProgressBar, Thumbnail,
+        },
     },
-    shared::{ByteRangeResponse, disk_info_for_path, uniform_title},
+    shared::{ByteRangeResponse, disk_info_for_path},
 };
 
 const CACHE_AGE: u32 = 10 * 60;
@@ -165,7 +165,7 @@ pub(super) async fn resources(path: Path<String>) -> HttpResponse {
 }
 
 #[get("/thumbnail/{server}/{type}/{id}")]
-pub(super) async fn thumbnail(
+pub(super) async fn thumbnail_image(
     ThinData(service_data): ThinData<ServiceData>,
     path: Path<(String, String, String)>,
 ) -> HttpResponse {
@@ -340,112 +340,6 @@ impl Sidebar {
             is_syncing,
             libraries,
             playlists,
-        }
-    }
-}
-
-struct Thumbnail {
-    url: String,
-    image: String,
-    name: String,
-    position: Option<f64>,
-}
-
-impl PartialEq for Thumbnail {
-    fn eq(&self, other: &Self) -> bool {
-        uniform_title(&self.name) == uniform_title(&other.name)
-    }
-}
-
-impl Eq for Thumbnail {}
-
-impl Ord for Thumbnail {
-    fn cmp(&self, other: &Self) -> Ordering {
-        uniform_title(&self.name).cmp(&uniform_title(&other.name))
-    }
-}
-
-impl PartialOrd for Thumbnail {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Thumbnail {
-    async fn from_season(season: Season) -> Self {
-        let server = season.server();
-        let show = season.show().await;
-        let library = show.library().await;
-
-        Self {
-            url: format!(
-                "/library/{}/{}/season/{}",
-                server.id(),
-                library.id(),
-                season.id()
-            ),
-            image: format!("/thumbnail/{}/show/{}", server.id(), show.id()),
-            name: season.title().await,
-            position: None,
-        }
-    }
-
-    async fn from_show(show: Show) -> Self {
-        let server = show.server();
-        let library = show.library().await;
-
-        Self {
-            url: format!(
-                "/library/{}/{}/show/{}",
-                server.id(),
-                library.id(),
-                show.id()
-            ),
-            image: format!("/thumbnail/{}/show/{}", server.id(), show.id()),
-            name: show.title().await,
-            position: None,
-        }
-    }
-
-    async fn from_video(video: Video) -> Self {
-        let server = video.server();
-        let library = video.library().await;
-        let position = match video.playback_state().await {
-            PlaybackState::Unplayed => 0.0,
-            PlaybackState::InProgress { position } => {
-                let duration = video.duration().await.as_millis() as f64;
-                (100.0 * position as f64) / duration
-            }
-            PlaybackState::Played => 100.0,
-        };
-
-        Self {
-            url: format!(
-                "/library/{}/{}/video/{}",
-                server.id(),
-                library.id(),
-                video.id()
-            ),
-            image: format!("/thumbnail/{}/video/{}", server.id(), video.id()),
-            name: video.title().await,
-            position: Some(position),
-        }
-    }
-
-    async fn from_collection(collection: Collection) -> Self {
-        let server = collection.server();
-        let library = collection.library().await;
-
-        Self {
-            url: format!(
-                "/library/{}/{}/collection/{}",
-                server.id(),
-                library.id(),
-                collection.id()
-            ),
-            image: format!("/thumbnail/{}/collection/{}", server.id(), collection.id()),
-            name: collection.title().await,
-            position: None,
         }
     }
 }
@@ -788,6 +682,11 @@ pub(super) async fn update_playback_position(
 
     let position = (query.position * 1000.0).round() as u64;
     let _ = video.set_playback_position(position).await;
+
+    let thumbnail = Thumbnail::from_video(video).await;
+    let _ = service_data
+        .event_sender
+        .send(Event::ThumbnailUpdate(thumbnail));
 
     HttpResponse::Ok().finish()
 }

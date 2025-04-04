@@ -1,0 +1,11 @@
+<grid-thumbnail
+  id="{{ thumbnail.id }}"
+  hx-target="this"
+  sse-swap="thumbnail-{{ thumbnail.id }}"
+  hx-swap="outerHTML"
+  url="{{ thumbnail.url }}"
+  image="{{ thumbnail.image }}"
+  name="{{ thumbnail.name }}"
+  position="{{ thumbnail.position|json }}"
+  duration="{{ thumbnail.duration|json }}"
+></grid-thumbnail>

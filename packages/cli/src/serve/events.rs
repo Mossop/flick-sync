@@ -1,9 +1,133 @@
-use flick_sync::{FlickSync, VideoPart, VideoStats};
+use std::cmp::Ordering;
+
+use flick_sync::{
+    Collection, FlickSync, PlaybackState, Season, Show, Video, VideoPart, VideoStats,
+};
 use rinja::Template;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tracing::warn;
 
 use crate::shared::uniform_title;
+
+#[derive(Template)]
+#[template(path = "thumbnail.html")]
+struct ThumbnailTemplate<'a> {
+    thumbnail: &'a Thumbnail,
+}
+
+#[derive(Clone)]
+pub(crate) struct Thumbnail {
+    pub(crate) id: String,
+    pub(crate) url: String,
+    pub(crate) image: String,
+    pub(crate) name: String,
+    pub(crate) position: Option<u128>,
+    pub(crate) duration: Option<u128>,
+}
+
+impl PartialEq for Thumbnail {
+    fn eq(&self, other: &Self) -> bool {
+        uniform_title(&self.name) == uniform_title(&other.name)
+    }
+}
+
+impl Eq for Thumbnail {}
+
+impl Ord for Thumbnail {
+    fn cmp(&self, other: &Self) -> Ordering {
+        uniform_title(&self.name).cmp(&uniform_title(&other.name))
+    }
+}
+
+impl PartialOrd for Thumbnail {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Thumbnail {
+    pub(crate) async fn from_season(season: Season) -> Self {
+        let server = season.server();
+        let show = season.show().await;
+        let library = show.library().await;
+
+        Self {
+            id: season.id().to_owned(),
+            url: format!(
+                "/library/{}/{}/season/{}",
+                server.id(),
+                library.id(),
+                season.id()
+            ),
+            image: format!("/thumbnail/{}/show/{}", server.id(), show.id()),
+            name: season.title().await,
+            position: None,
+            duration: None,
+        }
+    }
+
+    pub(crate) async fn from_show(show: Show) -> Self {
+        let server = show.server();
+        let library = show.library().await;
+
+        Self {
+            id: show.id().to_owned(),
+            url: format!(
+                "/library/{}/{}/show/{}",
+                server.id(),
+                library.id(),
+                show.id()
+            ),
+            image: format!("/thumbnail/{}/show/{}", server.id(), show.id()),
+            name: show.title().await,
+            position: None,
+            duration: None,
+        }
+    }
+
+    pub(crate) async fn from_video(video: Video) -> Self {
+        let server = video.server();
+        let library = video.library().await;
+        let position = match video.playback_state().await {
+            PlaybackState::Unplayed => 0,
+            PlaybackState::InProgress { position } => position as u128,
+            PlaybackState::Played => video.duration().await.as_millis(),
+        };
+
+        Self {
+            id: video.id().to_owned(),
+            url: format!(
+                "/library/{}/{}/video/{}",
+                server.id(),
+                library.id(),
+                video.id()
+            ),
+            image: format!("/thumbnail/{}/video/{}", server.id(), video.id()),
+            name: video.title().await,
+            position: Some(position),
+            duration: Some(video.duration().await.as_millis()),
+        }
+    }
+
+    pub(crate) async fn from_collection(collection: Collection) -> Self {
+        let server = collection.server();
+        let library = collection.library().await;
+
+        Self {
+            id: collection.id().to_owned(),
+            url: format!(
+                "/library/{}/{}/collection/{}",
+                server.id(),
+                library.id(),
+                collection.id()
+            ),
+            image: format!("/thumbnail/{}/collection/{}", server.id(), collection.id()),
+            name: collection.title().await,
+            position: None,
+            duration: None,
+        }
+    }
+}
 
 pub(super) struct SyncTemplate {
     pub(super) id: String,
@@ -98,15 +222,17 @@ pub(super) enum Event {
     SyncEnd,
     Log(SyncLogItem),
     Progress(Vec<SyncProgressBar>),
+    ThumbnailUpdate(Thumbnail),
 }
 
 impl Event {
-    fn event_name(&self) -> &'static str {
+    fn event_name(&self) -> String {
         match self {
-            Self::SyncStart | Self::SyncEnd => "sync-status",
-            Self::Log(_) => "sync-log",
-            Self::SyncChange => "sync-change",
-            Self::Progress(_) => "sync-progress",
+            Self::SyncStart | Self::SyncEnd => "sync-status".to_owned(),
+            Self::Log(_) => "sync-log".to_owned(),
+            Self::SyncChange => "sync-change".to_owned(),
+            Self::Progress(_) => "sync-progress".to_owned(),
+            Self::ThumbnailUpdate(thumb) => format!("thumbnail-{}", thumb.id),
         }
     }
 
@@ -146,6 +272,10 @@ impl Event {
                 }
 
                 Ok(lines.join("\n"))
+            }
+            Self::ThumbnailUpdate(thumb) => {
+                let template = ThumbnailTemplate { thumbnail: thumb };
+                template.render()
             }
         }
     }

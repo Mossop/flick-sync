@@ -1,4 +1,4 @@
-import { LitElement, html, css, styleMap, nothing } from "lit";
+import { LitElement, html, css, styleMap, nothing, classMap } from "lit";
 
 import reset from "reset";
 
@@ -47,11 +47,19 @@ export class VideoPlayer extends LitElement {
         justify-content: end;
       }
 
-      .unplayed {
+      .playstate {
         margin: var(--sl-spacing-x-small);
         height: 16px;
         width: 16px;
         border-radius: 50%;
+        background-color: var(--sl-color-neutral-600);
+
+        &:hover {
+          background-color: var(--sl-color-primary-700);
+        }
+      }
+
+      .unplayed {
         background-color: var(--sl-color-primary-600);
       }
 
@@ -78,6 +86,7 @@ export class VideoPlayer extends LitElement {
     image: { type: String },
     url: { type: String },
     position: { type: Object },
+    duration: { type: Object },
     overlayPosition: { state: true },
   };
 
@@ -85,6 +94,14 @@ export class VideoPlayer extends LitElement {
     super();
 
     this.overlayPosition = null;
+  }
+
+  get percentPlayed() {
+    if (this.position === null || this.duration === null) {
+      return null;
+    }
+
+    return (100 * this.position) / this.duration;
   }
 
   onImageLoad(event) {
@@ -104,6 +121,48 @@ export class VideoPlayer extends LitElement {
     }
   }
 
+  togglePlayState(event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    let percent = this.percentPlayed;
+    let newTime;
+    if (percent == 100) {
+      newTime = 0;
+    } else if (percent == 0 || percent > 20) {
+      newTime = this.duration;
+    } else {
+      newTime = 0;
+    }
+
+    let updateUrl = new URL(
+      this.url.replace("/library/", "/playback/"),
+      document.documentURI
+    );
+
+    fetch(`${updateUrl}?position=${newTime}`, {
+      method: "POST",
+    }).catch((e) => {
+      console.error(e);
+    });
+  }
+
+  renderPlayedDot() {
+    if (this.position === null) {
+      return nothing;
+    }
+
+    let classes = {
+      playstate: true,
+      unplayed: this.percentPlayed <= 0.5,
+    };
+
+    return html`<div
+      @click="${this.togglePlayState}"
+      class=${classMap(classes)}
+    ></div>`;
+  }
+
   render() {
     let overlayStyles = this.overlayPosition
       ? styleMap(this.overlayPosition)
@@ -114,16 +173,12 @@ export class VideoPlayer extends LitElement {
         <div class="thumbnail">
           <img src="${this.image}" @load="${this.onImageLoad}" />
           <div class="overlay" style=${overlayStyles}>
-            <div class="overlay-top">
-              ${this.position == 0.0
-                ? html`<div class="unplayed"></div>`
-                : nothing}
-            </div>
+            <div class="overlay-top">${this.renderPlayedDot()}</div>
             <div class="overlay-bottom">
-              ${this.position > 0.5 && this.position < 99.5
+              ${this.percentPlayed > 0.5 && this.percentPlayed < 99.5
                 ? html`<div
                     class="progress"
-                    style="width: ${this.position}%"
+                    style="width: ${this.percentPlayed}%"
                   ></div>`
                 : nothing}
             </div>
