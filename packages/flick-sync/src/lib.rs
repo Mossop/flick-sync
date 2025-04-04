@@ -1,9 +1,10 @@
 #![deny(unreachable_pub)]
 use std::{
     collections::{HashMap, HashSet},
-    io::ErrorKind,
+    io::{self, ErrorKind},
     ops::Deref,
     path::{Path, PathBuf},
+    result,
     sync::Arc,
 };
 
@@ -27,7 +28,7 @@ use serde_json::to_string_pretty;
 use state::{ServerState, State};
 use time::OffsetDateTime;
 use tokio::{
-    fs::{read_dir, remove_dir_all, remove_file, write},
+    fs::{read_dir, remove_dir_all, remove_file, rename, write},
     sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, Semaphore},
 };
 use tracing::{debug, error, info, warn};
@@ -92,6 +93,24 @@ lazy_static! {
     };
 }
 
+async fn safe_write(
+    path: impl AsRef<Path>,
+    data: impl AsRef<[u8]>,
+) -> result::Result<(), io::Error> {
+    let mut temp_file = path.as_ref().to_owned();
+    let Some(file_name) = temp_file.file_name() else {
+        return write(path, data).await;
+    };
+
+    let mut file_name = file_name.to_owned();
+    file_name.push(".temp");
+    temp_file.set_file_name(file_name);
+
+    write(&temp_file, data).await?;
+
+    rename(temp_file, path).await
+}
+
 struct Inner {
     config: RwLock<Config>,
     state: RwLock<State>,
@@ -123,14 +142,14 @@ impl Inner {
 
     async fn persist_config(&self, config: &RwLockWriteGuard<'_, Config>) -> Result {
         let str = to_string_pretty(&config.deref())?;
-        write(self.path.join(CONFIG_FILE), str).await?;
+        safe_write(self.path.join(CONFIG_FILE), str).await?;
 
         Ok(())
     }
 
     async fn persist_state(&self, state: &RwLockWriteGuard<'_, State>) -> Result {
         let str = to_string_pretty(&state.deref())?;
-        write(self.path.join(STATE_FILE), str).await?;
+        safe_write(self.path.join(STATE_FILE), str).await?;
 
         Ok(())
     }
