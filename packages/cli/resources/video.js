@@ -542,9 +542,11 @@ export class VideoPlayer extends LitElement {
       return nothing;
     }
 
+    let imageUrl = new URL(this.image);
+
     return html`
       <div class="info">
-        <img src="${this.image}" />
+        <img src="${imageUrl.pathname}" />
       </div>
     `;
   }
