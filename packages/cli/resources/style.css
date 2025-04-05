@@ -101,7 +101,8 @@ body.sidebar sl-split-panel {
   gap: var(--sl-spacing-x-small);
   padding-inline: var(--sl-spacing-x-small);
   padding-block: var(--sl-spacing-medium);
-  grid-template-columns: repeat(auto-fill, minmax(calc(150px + 1rem),1fr));
+  grid-template-columns: repeat(auto-fill, minmax(calc(150px + 1rem), 1fr));
+  grid-auto-rows: max-content;
 }
 
 @keyframes spin {

@@ -10,6 +10,7 @@ export class VideoPlayer extends LitElement {
       }
 
       a {
+        height: 100%;
         width: 100%;
         display: flex;
         flex-direction: column;
@@ -19,6 +20,8 @@ export class VideoPlayer extends LitElement {
       }
 
       .thumbnail {
+        flex: 1;
+        max-height: 150px;
         width: 100%;
         position: relative;
         overflow: hidden;
@@ -27,13 +30,14 @@ export class VideoPlayer extends LitElement {
       img {
         display: block;
         width: 100%;
-        max-height: 150px;
+        height: 100%;
         object-fit: contain;
         object-position: center center;
       }
 
       .overlay {
         position: absolute;
+        inset: 0;
         display: flex;
         flex-direction: column;
         align-items: stretch;
@@ -86,13 +90,10 @@ export class VideoPlayer extends LitElement {
     url: { type: String },
     position: { type: Object },
     duration: { type: Object },
-    overlayPosition: { state: true },
   };
 
   constructor() {
     super();
-
-    this.overlayPosition = null;
   }
 
   get percentPlayed() {
@@ -101,23 +102,6 @@ export class VideoPlayer extends LitElement {
     }
 
     return (100 * this.position) / this.duration;
-  }
-
-  onImageLoad(event) {
-    let { naturalHeight, naturalWidth } = event.target;
-    if (naturalHeight > naturalWidth) {
-      let offset = (50 * (naturalHeight - naturalWidth)) / naturalHeight;
-
-      this.overlayPosition = {
-        inset: `0 ${offset}%`,
-      };
-    } else {
-      let offset = (50 * (naturalWidth - naturalHeight)) / naturalWidth;
-
-      this.overlayPosition = {
-        inset: `${offset}% 0`,
-      };
-    }
   }
 
   togglePlayState(event) {
@@ -163,15 +147,11 @@ export class VideoPlayer extends LitElement {
   }
 
   render() {
-    let overlayStyles = this.overlayPosition
-      ? styleMap(this.overlayPosition)
-      : "display: none";
-
     return html`
       <a class="grid-item" href="${this.url}">
         <div class="thumbnail">
-          <img src="${this.image}" @load="${this.onImageLoad}" />
-          <div class="overlay" style=${overlayStyles}>
+          <img src="${this.image}" />
+          <div class="overlay">
             <div class="overlay-top">${this.renderPlayedDot()}</div>
             <div class="overlay-bottom">
               ${this.percentPlayed > 0.5 && this.percentPlayed < 99.5
