@@ -21,18 +21,20 @@ export class VideoPlayer extends LitElement {
 
       .thumbnail {
         flex: 1;
-        max-height: 150px;
         width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .image {
         position: relative;
-        overflow: hidden;
       }
 
       img {
         display: block;
-        width: 100%;
-        height: 100%;
-        object-fit: contain;
-        object-position: center center;
+        max-height: 150px;
+        max-width: 150px;
       }
 
       .overlay {
@@ -150,16 +152,18 @@ export class VideoPlayer extends LitElement {
     return html`
       <a class="grid-item" href="${this.url}">
         <div class="thumbnail">
-          <img src="${this.image}" />
-          <div class="overlay">
-            <div class="overlay-top">${this.renderPlayedDot()}</div>
-            <div class="overlay-bottom">
-              ${this.percentPlayed > 0.5 && this.percentPlayed < 99.5
-                ? html`<div
-                    class="progress"
-                    style="width: ${this.percentPlayed}%"
-                  ></div>`
-                : nothing}
+          <div class="image">
+            <img src="${this.image}" />
+            <div class="overlay">
+              <div class="overlay-top">${this.renderPlayedDot()}</div>
+              <div class="overlay-bottom">
+                ${this.percentPlayed > 0.5 && this.percentPlayed < 99.5
+                  ? html`<div
+                      class="progress"
+                      style="width: ${this.percentPlayed}%"
+                    ></div>`
+                  : nothing}
+              </div>
             </div>
           </div>
         </div>
