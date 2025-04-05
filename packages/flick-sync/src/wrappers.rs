@@ -1785,12 +1785,13 @@ impl Video {
     pub async fn set_playback_position(&self, position: u64) -> Result {
         trace!(video = self.id(), position, "Updating playback position");
 
-        let new_state = if position <= 60000 {
+        let new_state = if position <= (5 * 60000) {
             PlaybackState::Unplayed
         } else {
-            let duration = self.duration().await.as_millis() as u64;
+            let duration = self.duration().await.as_millis() as f64;
+            let percent_played = (100 * position) as f64 / duration;
 
-            if position > (duration - 5 * 60000) {
+            if (100.0 - percent_played) <= 12.5 {
                 PlaybackState::Played
             } else {
                 PlaybackState::InProgress { position }
