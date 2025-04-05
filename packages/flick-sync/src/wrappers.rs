@@ -1,5 +1,6 @@
 use std::{
     fmt,
+    hash::{Hash, Hasher},
     io::{ErrorKind, IoSlice},
     ops::{Add, AddAssign},
     os::unix::fs::MetadataExt,
@@ -1371,6 +1372,21 @@ impl fmt::Debug for Episode {
     }
 }
 
+impl PartialEq for Episode {
+    fn eq(&self, other: &Self) -> bool {
+        self.server.id == other.server.id && self.id == other.id
+    }
+}
+
+impl Eq for Episode {}
+
+impl Hash for Episode {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.server.id.hash(state);
+        self.id.hash(state);
+    }
+}
+
 state_wrapper!(Episode, VideoState, videos);
 wrapper_builders!(Episode, VideoState);
 
@@ -1570,6 +1586,21 @@ pub struct Movie {
     id: String,
 }
 
+impl PartialEq for Movie {
+    fn eq(&self, other: &Self) -> bool {
+        self.server.id == other.server.id && self.id == other.id
+    }
+}
+
+impl Eq for Movie {}
+
+impl Hash for Movie {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.server.id.hash(state);
+        self.id.hash(state);
+    }
+}
+
 impl fmt::Debug for Movie {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad(&format!("Movie({})", self.id))
@@ -1744,6 +1775,27 @@ impl Movie {
 pub enum Video {
     Movie(Movie),
     Episode(Episode),
+}
+
+impl PartialEq for Video {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Movie(v1), Self::Movie(v2)) => v1 == v2,
+            (Self::Episode(v1), Self::Episode(v2)) => v1 == v2,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Video {}
+
+impl Hash for Video {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            Self::Movie(v) => v.hash(state),
+            Self::Episode(v) => v.hash(state),
+        }
+    }
 }
 
 impl Video {

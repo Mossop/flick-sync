@@ -251,7 +251,8 @@ impl FlickSync {
     }
 
     pub async fn on_deck(&self) -> Vec<Video> {
-        let mut items: Vec<Video> = Vec::new();
+        #[allow(clippy::mutable_key_type)]
+        let mut items: HashSet<Video> = HashSet::new();
         let now = OffsetDateTime::now_utc();
 
         for server in self.servers().await {
@@ -264,7 +265,7 @@ impl FlickSync {
                                     if next.playback_state().await == PlaybackState::Unplayed
                                         && next.is_downloaded().await
                                     {
-                                        items.push(next);
+                                        items.insert(next);
                                     }
                                 }
                             }
@@ -272,7 +273,7 @@ impl FlickSync {
                     }
                     PlaybackState::InProgress { .. } => {
                         if video.is_downloaded().await {
-                            items.push(video);
+                            items.insert(video);
                         }
                     }
                     _ => {}
@@ -280,7 +281,7 @@ impl FlickSync {
             }
         }
 
-        items
+        items.into_iter().collect()
     }
 
     pub async fn server(&self, id: &str) -> Option<Server> {
