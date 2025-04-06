@@ -250,11 +250,12 @@ export class VideoPlayer extends LitElement {
       this.isCasting = true;
       this.classList.add("casting");
 
-      let mediaInfo = session.getMediaSession()?.media;
+      let castMedia = session.getMediaSession();
+      let mediaInfo = castMedia?.media;
       let videoUrl = new URL(document.documentURI);
 
       if (mediaInfo?.contentId == videoUrl.pathname) {
-        let previous = 0;
+        let previousTime = 0;
         let mediaIndex = 0;
 
         for (let media of this.playlist) {
@@ -264,10 +265,16 @@ export class VideoPlayer extends LitElement {
             this.previousTime = previousTime;
             this.castControllerEventListener();
 
+            castMedia.getStatus(
+              null,
+              () => this.castControllerEventListener(),
+              (error) => {}
+            );
+
             return;
           }
 
-          previous += media.duration;
+          previousTime += media.duration;
           mediaIndex++;
         }
       }
@@ -326,10 +333,6 @@ export class VideoPlayer extends LitElement {
           cast.framework.RemotePlayerEventType.ANY_CHANGE,
           this.castControllerEventListener
         );
-
-        if (this.isCasting()) {
-          this.castSession.endSession(true);
-        }
       }
     }
 
