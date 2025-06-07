@@ -5,6 +5,7 @@
 /packages/mobile/web-build/
 /.lego/
 
+*~
 npm-debug.*
 *.jks
 *.p8
