@@ -31,7 +31,7 @@ use tokio::{
     fs::{read_dir, remove_dir_all, remove_file, rename, write},
     sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, Semaphore},
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 pub use crate::{
@@ -316,6 +316,7 @@ impl FlickSync {
             .collect()
     }
 
+    #[instrument(skip_all)]
     pub async fn prune_root(&self) {
         info!("Pruning root filesystem");
 

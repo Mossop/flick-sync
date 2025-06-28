@@ -1,6 +1,7 @@
 use clap::Args;
 use flick_sync::{FlickSync, ItemType, VideoStats};
 use indicatif::{DecimalBytes, HumanDuration};
+use tracing::instrument;
 
 use crate::{Console, Result, Runnable};
 
@@ -18,6 +19,7 @@ fn percent<T: Into<u64>>(a: T, b: T) -> String {
 }
 
 impl Runnable for Stats {
+    #[instrument(name = "Stats", skip_all)]
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let mut total = VideoStats::default();
 
@@ -86,6 +88,7 @@ impl Runnable for Stats {
 pub struct List {}
 
 impl Runnable for List {
+    #[instrument(name = "List", skip_all)]
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let servers = flick_sync.servers().await;
         for (pos, server) in servers.iter().enumerate() {

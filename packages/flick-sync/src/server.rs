@@ -642,6 +642,7 @@ impl Server {
     }
 
     /// Updates the state for the synced items
+    #[instrument(level = "trace", skip(self), fields(server = self.id))]
     pub async fn update_state(&self, allow_video_deletion: bool) -> Result {
         info!("Updating item metadata");
         let plex_server = self.connect().await?;
@@ -703,6 +704,7 @@ impl Server {
     }
 
     /// Writes out the playlist files for playlists and collections
+    #[instrument(level = "trace", skip(self), fields(server = self.id))]
     pub async fn write_playlists(&self) {
         if self.inner.output_style().await != OutputStyle::Standardized {
             return;
@@ -724,6 +726,7 @@ impl Server {
     }
 
     /// Rebuilds metadata files for the synced items
+    #[instrument(level = "trace", skip(self), fields(server = self.id))]
     pub async fn rebuild_metadata(&self) -> Result {
         info!("Rebuilding item metadata");
 

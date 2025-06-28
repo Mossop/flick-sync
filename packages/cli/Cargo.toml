@@ -57,3 +57,8 @@ rustls = { version = "0.23.25", default-features = false, features = [
   "tls12",
 ] }
 sysinfo = "0.35.2"
+opentelemetry = "0.30.0"
+opentelemetry-otlp = { version = "0.30.0", features = ["http-proto"] }
+opentelemetry_sdk = { version = "0.30.0", features = ["rt-tokio"] }
+tracing-opentelemetry = "0.31.0"
+reqwest = "0.12.20"

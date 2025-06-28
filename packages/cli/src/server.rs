@@ -8,7 +8,7 @@ use flick_sync::{
         library::{Item, MetadataItem},
     },
 };
-use tracing::{error, warn};
+use tracing::{error, instrument, warn};
 use url::Url;
 
 use crate::{Console, Result, Runnable};
@@ -231,6 +231,7 @@ async fn create_server(args: Login, flick_sync: FlickSync, console: Console) -> 
 }
 
 impl Runnable for Login {
+    #[instrument(name = "Login", skip_all)]
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         match flick_sync.server(&self.id).await {
             Some(server) => reconnect_server(&server, &flick_sync, &console).await,
@@ -252,6 +253,7 @@ pub struct Add {
 }
 
 impl Runnable for Add {
+    #[instrument(name = "Add", skip_all)]
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let unexpected = || anyhow!("Unexpected URL format");
 
@@ -335,6 +337,7 @@ pub struct Remove {
 }
 
 impl Runnable for Remove {
+    #[instrument(name = "Remove", skip_all)]
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let server = if let Some(server) = flick_sync.server(&self.server).await {
             server
@@ -363,6 +366,7 @@ impl Runnable for Remove {
 pub struct Recover {}
 
 impl Runnable for Recover {
+    #[instrument(name = "Recover", skip_all)]
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         for server in flick_sync.servers().await {
             if let Err(e) = reconnect_server(&server, &flick_sync, &console).await {

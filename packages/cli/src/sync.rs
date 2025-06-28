@@ -1,6 +1,6 @@
 use clap::Args;
 use flick_sync::{DownloadProgress, FlickSync, Progress, VideoPart};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, instrument, warn};
 
 use crate::{
     Console, Result, Runnable,
@@ -17,6 +17,7 @@ pub struct Prune {
 }
 
 impl Runnable for Prune {
+    #[instrument(name = "Prune", skip_all)]
     async fn run(self, flick_sync: FlickSync, _console: Console) -> Result {
         flick_sync.prune_root().await;
 
@@ -47,6 +48,7 @@ pub struct BuildMetadata {
 }
 
 impl Runnable for BuildMetadata {
+    #[instrument(name = "BuildMetadata", skip_all)]
     async fn run(self, flick_sync: FlickSync, _console: Console) -> Result {
         let servers = select_servers(&flick_sync, &self.ids).await?;
 
@@ -118,6 +120,7 @@ pub struct Sync {
 }
 
 impl Runnable for Sync {
+    #[instrument(name = "Sync", skip_all)]
     async fn run(self, flick_sync: FlickSync, console: Console) -> Result {
         let servers = select_servers(&flick_sync, &self.ids).await?;
 
