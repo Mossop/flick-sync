@@ -1,9 +1,9 @@
 use std::cmp::Ordering;
 
+use askama::Template;
 use flick_sync::{
     Collection, FlickSync, PlaybackState, Season, Show, Video, VideoPart, VideoStats,
 };
-use rinja::Template;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tracing::warn;
 
@@ -236,7 +236,7 @@ impl Event {
         }
     }
 
-    pub async fn event_data(&self, flick_sync: &FlickSync) -> Result<String, rinja::Error> {
+    pub async fn event_data(&self, flick_sync: &FlickSync) -> Result<String, askama::Error> {
         match self {
             Self::SyncStart => Ok(
                 r#"<sl-icon id="spinner" class="spinning" name="arrow-repeat"></sl-icon> Syncing"#

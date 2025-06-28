@@ -11,10 +11,10 @@ use actix_web::{
     post,
     web::{Form, Path, Query, ThinData},
 };
+use askama::Template;
 use bytes::Bytes;
 use flick_sync::{Collection, Library, LibraryType, PlaybackState, Video, plex_api::library::Item};
 use futures::TryStreamExt;
-use rinja::Template;
 use serde::{Deserialize, Serialize};
 use tokio::io::BufReader;
 use tokio_stream::wrappers::BroadcastStream;
