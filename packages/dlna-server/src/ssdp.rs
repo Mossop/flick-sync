@@ -156,7 +156,7 @@ impl SsdpMessage {
                 push_line(buffer, "M-SEARCH * HTTP/1.1");
                 push_line(buffer, format!("HOST: {host}"));
                 push_line(buffer, "MAN: \"ssdp:discover\"");
-                push_line(buffer, format!("ST: {}", search_target));
+                push_line(buffer, format!("ST: {search_target}"));
 
                 if let Some(mx) = max_wait {
                     push_line(buffer, format!("MX: {mx}"));
@@ -197,7 +197,7 @@ impl SsdpMessage {
                 push_line(buffer, format!("LOCATION: {location}"));
                 push_line(buffer, format!("SERVER: {server}"));
                 push_line(buffer, format!("USN: {unique_service_name}"));
-                push_line(buffer, format!("ST: {}", search_target));
+                push_line(buffer, format!("ST: {search_target}"));
             }
         }
 
@@ -649,7 +649,7 @@ impl SsdpTask {
             ns::UPNP_MEDIASERVER | ns::UPNP_CONTENTDIRECTORY => {
                 messages.push(self.response_message(
                     local_interface,
-                    &format!("{}::{}", usn_base, search_target),
+                    &format!("{usn_base}::{search_target}"),
                     search_target,
                 ));
             }

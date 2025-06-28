@@ -157,7 +157,7 @@ impl<W: Write> ToXml<W> for Resource {
 
             builder = builder.attr(
                 "duration",
-                format!("{}:{:02}:{:02}.{:03}", hours, minutes, seconds, millis),
+                format!("{hours}:{minutes:02}:{seconds:02}.{millis:03}"),
             );
         }
 

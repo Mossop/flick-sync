@@ -135,9 +135,9 @@ async fn create_server(args: Login, flick_sync: FlickSync, console: Console) -> 
         let mut url = console.input("Enter the server address (IP:port or URL)");
         if !url.contains("://") {
             if !url.contains(':') {
-                url = format!("http://{}:32400", url);
+                url = format!("http://{url}:32400");
             } else {
-                url = format!("http://{}", url);
+                url = format!("http://{url}");
             }
         }
 

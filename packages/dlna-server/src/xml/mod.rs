@@ -521,16 +521,14 @@ where
 
         if let Err(e) = XmlWriter::write_document(&self.0, &mut body, None) {
             return Err(S::Error::custom(format!(
-                "Failed to serialize XML document: {}",
-                e
+                "Failed to serialize XML document: {e}"
             )));
         }
 
         match String::from_utf8(body) {
             Ok(st) => serializer.serialize_str(&st),
             Err(e) => Err(S::Error::custom(format!(
-                "Failed to serialize XML document: {}",
-                e
+                "Failed to serialize XML document: {e}"
             ))),
         }
     }
