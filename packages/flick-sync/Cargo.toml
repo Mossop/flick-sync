@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 plex-api = { git = "https://github.com/Mossop/plex-api.rs.git", branch = "container_limitations" }
-thiserror = "1.0.40"
+thiserror = "2.0.12"
 tracing = { version = "^0.1.37", features = ["attributes"] }
 serde = { version = "1.0.158", features = ["derive"] }
 serde_json = "1.0.94"
@@ -30,7 +30,7 @@ pathdiff = "0.2.3"
 tokio-util = "0.7.13"
 scoped-futures = "0.1.4"
 mime = "0.3.17"
-file-format = { version = "0.26.0", features = [
+file-format = { version = "0.27.0", features = [
   "reader-asf",
   "reader-ebml",
   "reader-mp4",

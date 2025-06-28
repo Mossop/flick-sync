@@ -15,9 +15,9 @@ futures = "0.3.28"
 flick-sync = { path = "../flick-sync" }
 dlna-server = { path = "../dlna-server" }
 clap = { version = "4.1.13", features = ["derive", "env"] }
-console = "0.15.5"
+console = "0.15.11"
 dialoguer = "0.11.0"
-indicatif = "0.17.3"
+indicatif = "0.17.11"
 tracing = { version = "0.1.37", features = ["attributes"] }
 thiserror = "2.0.11"
 url = "2.3.1"
@@ -56,4 +56,4 @@ rustls = { version = "0.23.25", default-features = false, features = [
   "std",
   "tls12",
 ] }
-sysinfo = "0.34.0"
+sysinfo = "0.35.2"
