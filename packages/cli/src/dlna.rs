@@ -25,7 +25,7 @@ use tokio::{
     io::{AsyncRead, AsyncSeek, ReadBuf},
     spawn,
 };
-use tracing::instrument;
+use tracing::{Instrument, Level, Span, instrument, span};
 
 use crate::{Resources, shared::uniform_title};
 
@@ -56,6 +56,7 @@ impl<A: AsyncRead, B: AsyncRead> AsyncRead for EitherReader<A, B> {
 struct ProgressReader<R> {
     #[pin]
     inner: R,
+    span: Option<Span>,
     position: u64,
     video: Video,
     offset: u64,
@@ -67,6 +68,7 @@ impl<R> ProgressReader<R> {
     fn new(inner: R, video: Video, offset: u64, secs_per_byte: f64) -> Self {
         Self {
             inner,
+            span: None,
             position: 0,
             video,
             offset,
@@ -85,6 +87,11 @@ impl<R: AsyncRead> AsyncRead for ProgressReader<R> {
         let remaining = buf.remaining();
 
         let this = self.project();
+
+        let span = this
+            .span
+            .get_or_insert_with(|| span!(Level::TRACE, "ProgressReader"));
+        let _entered = span.enter();
         let result = this.inner.poll_read(cx, buf);
 
         if matches!(result, Poll::Ready(Ok(()))) {
@@ -93,11 +100,15 @@ impl<R: AsyncRead> AsyncRead for ProgressReader<R> {
 
             let new_position = (*this.position as f64 * *this.secs_per_byte) as u64 + *this.offset;
 
-            if new_position.abs_diff(*this.last_report) > 10000 {
+            if new_position.abs_diff(*this.last_report) > 15000 {
                 *this.last_report = new_position;
                 let video = this.video.clone();
+                let span = span.clone();
                 spawn(async move {
-                    let _ = video.set_playback_position(new_position).await;
+                    let _ = video
+                        .set_playback_position(new_position)
+                        .instrument(span)
+                        .await;
                 });
             }
         }

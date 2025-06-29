@@ -262,7 +262,7 @@ fn init_logging(
         let filter = Targets::new()
             .with_target("flick_sync", Level::TRACE)
             .with_target("flick_sync_cli", Level::TRACE)
-            .with_target("dlna_server", Level::DEBUG)
+            .with_target("dlna_server", Level::TRACE)
             .with_default(Level::INFO);
 
         let telemetry = tracing_opentelemetry::layer()

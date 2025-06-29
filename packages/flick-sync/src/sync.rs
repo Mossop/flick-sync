@@ -18,13 +18,15 @@ use mime::Mime;
 use pin_project::pin_project;
 use tokio::{
     fs,
-    io::{AsyncRead, AsyncSeek, ReadBuf},
+    io::{AsyncRead, AsyncSeek, BufReader, ReadBuf},
     sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock},
     time::timeout,
 };
 use tracing::trace;
 
 type Lock = Arc<RwLock<()>>;
+
+const BUFFER_CAPACITY: usize = 4 * 8 * 1024;
 
 lazy_static! {
     static ref LOCKS: StdMutex<HashMap<String, (Lock, usize)>> = StdMutex::new(HashMap::new());
@@ -181,7 +183,7 @@ impl LockedFile {
     pub async fn async_read(self) -> result::Result<LockedFileAsyncRead, io::Error> {
         Ok(LockedFileAsyncRead {
             guard: self.guard,
-            file: fs::File::open(self.path).await?,
+            file: BufReader::with_capacity(BUFFER_CAPACITY, fs::File::open(self.path).await?),
         })
     }
 }
@@ -208,7 +210,7 @@ impl Seek for LockedFileRead {
 pub struct LockedFileAsyncRead {
     guard: OpReadGuard,
     #[pin]
-    file: fs::File,
+    file: BufReader<fs::File>,
 }
 
 impl AsyncRead for LockedFileAsyncRead {

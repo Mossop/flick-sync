@@ -28,13 +28,14 @@ use actix_web::{
     middleware::{Next, from_fn},
     web::{self, Data, Path, Payload, ReqData},
 };
+use futures::Stream;
 use mime::Mime;
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
 use serde_with::{StringWithSeparator, formats::CommaSeparator, serde_as};
 use tokio::io::{AsyncRead, AsyncSeek, AsyncSeekExt, ReadBuf};
 use tokio_util::io::ReaderStream;
-use tracing::{Instrument, Level, Span, field, instrument, span, trace, warn};
+use tracing::{Instrument, Level, Span, debug, error, field, instrument, span, trace, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -48,10 +49,70 @@ const CACHE_AGE: u32 = 10 * 60;
 const BUFFER_CAPACITY: usize = 8 * 1024;
 
 #[pin_project]
+struct TelemetryStream<R> {
+    #[pin]
+    stream: ReaderStream<R>,
+    total: u64,
+    span: Span,
+}
+
+impl<R> TelemetryStream<R>
+where
+    R: AsyncRead,
+{
+    fn new(reader: R) -> Self {
+        Self {
+            stream: ReaderStream::with_capacity(reader, BUFFER_CAPACITY),
+            span: span!(Level::DEBUG, "TelemetryStream"),
+            total: 0,
+        }
+    }
+}
+
+impl<R> Stream for TelemetryStream<R>
+where
+    R: AsyncRead,
+{
+    type Item = <ReaderStream<ByteRangeResponse<R>> as Stream>::Item;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+
+        let span = this.span.clone();
+        let _span = span.clone().entered();
+
+        let result = this.stream.poll_next(cx);
+
+        match &result {
+            Poll::Ready(Some(Ok(bytes))) => {
+                *this.total += bytes.len() as u64;
+
+                if bytes.len() < BUFFER_CAPACITY {
+                    debug!(parent: &span, total = this.total, bytes = bytes.len(), "Under read of bytes from resource");
+                }
+            }
+            Poll::Ready(Some(Err(error))) => {
+                error!(parent: &span, %error, "Error streaming data");
+            }
+            Poll::Ready(None) => {
+                trace!(parent: &span, total = this.total, "Streaming complete");
+            }
+            Poll::Pending => {
+                // trace!(parent: &span, total = this.total, "Unable to supply data yet");
+            }
+        }
+
+        result
+    }
+}
+
+#[pin_project]
 struct ByteRangeResponse<R> {
     #[pin]
     reader: R,
+    total: u64,
     remaining: u64,
+    span: Option<Span>,
 }
 
 impl<R> AsyncRead for ByteRangeResponse<R>
@@ -65,6 +126,12 @@ where
     ) -> Poll<io::Result<()>> {
         let this = self.project();
 
+        let span = this
+            .span
+            .get_or_insert_with(|| span!(Level::DEBUG, "ByteRangeResponse"))
+            .clone();
+        let _entered = span.clone().entered();
+
         if *this.remaining == 0 {
             return Poll::Ready(Ok(()));
         }
@@ -72,17 +139,30 @@ where
         let count = buf.filled().len();
         let result = this.reader.poll_read(cx, buf);
 
-        if let Poll::Ready(Ok(())) = result {
-            let new_count = buf.filled().len();
-            let filled = (new_count - count) as u64;
+        match &result {
+            Poll::Ready(Ok(())) => {
+                let new_count = buf.filled().len();
+                let filled = (new_count - count) as u64;
+                *this.total += filled;
 
-            if filled > 0 {
-                if *this.remaining < filled {
-                    buf.set_filled(*this.remaining as usize);
-                    *this.remaining = 0;
-                } else {
-                    *this.remaining -= filled;
+                if filled > 0 {
+                    if filled < BUFFER_CAPACITY as u64 {
+                        debug!(parent: &span, total = this.total, bytes = filled, "Under read of bytes from resource");
+                    }
+
+                    if *this.remaining < filled {
+                        buf.set_filled(*this.remaining as usize);
+                        *this.remaining = 0;
+                    } else {
+                        *this.remaining -= filled;
+                    }
                 }
+            }
+            Poll::Ready(Err(error)) => {
+                error!(parent: &span, %error, "Error reading data");
+            }
+            Poll::Pending => {
+                // trace!(parent: &span, total = this.total, "Unable to read data yet");
             }
         }
 
@@ -122,16 +202,15 @@ where
         response
     }
 
-    fn build_stream(reader: R, length: u64) -> SizedStream<ReaderStream<ByteRangeResponse<R>>> {
+    fn build_stream(reader: R, length: u64) -> SizedStream<TelemetryStream<ByteRangeResponse<R>>> {
         SizedStream::new(
             length,
-            ReaderStream::with_capacity(
-                Self {
-                    reader,
-                    remaining: length,
-                },
-                BUFFER_CAPACITY,
-            ),
+            TelemetryStream::new(Self {
+                reader,
+                remaining: length,
+                total: 0,
+                span: None,
+            }),
         )
     }
 
@@ -433,6 +512,7 @@ pub(crate) async fn resource_head<H: DlnaRequestHandler>(
     }
 }
 
+#[instrument(skip_all, fields(path = id.as_str()))]
 pub(crate) async fn resource_get<H: DlnaRequestHandler>(
     req_data: ReqData<RequestAppData<H>>,
     req: HttpRequest,
@@ -453,6 +533,7 @@ pub(crate) async fn resource_get<H: DlnaRequestHandler>(
     match req_data.app_data.handler.stream_resource(&id).await {
         Ok(reader) => {
             if let Some(size) = resource.size {
+                trace!(size, "Streaming resource with known size");
                 let mut headers = HeaderMap::new();
                 headers.append(
                     header::CONTENT_TYPE,
@@ -468,12 +549,13 @@ pub(crate) async fn resource_get<H: DlnaRequestHandler>(
                 );
                 ByteRangeResponse::build(&req, size, reader, headers).await
             } else {
+                trace!("Streaming resource with unknown size");
                 HttpResponse::Ok()
                     .append_header(header::ContentType(resource.mime_type))
                     .append_header(header::CacheControl(vec![CacheDirective::MaxAge(
                         CACHE_AGE,
                     )]))
-                    .streaming(ReaderStream::with_capacity(reader, BUFFER_CAPACITY))
+                    .streaming(TelemetryStream::new(reader))
             }
         }
         Err(err) => {
