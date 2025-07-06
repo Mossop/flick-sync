@@ -81,7 +81,7 @@ export class VideoPlayer extends LitElement {
         flex-direction: row;
         align-items: center;
         justify-content: space-evenly;
-        font-size: 400%;
+        font-size: 300%;
       }
 
       .controls {
@@ -96,7 +96,7 @@ export class VideoPlayer extends LitElement {
       }
 
       sl-icon-button {
-        font-size: 150%;
+        font-size: 200%;
       }
 
       .time {

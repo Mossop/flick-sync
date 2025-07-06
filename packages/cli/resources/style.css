@@ -14,24 +14,49 @@ body {
   color: var(--sl-color-neutral-900);
 }
 
-body.sidebar sl-split-panel {
-  height: 100vh;
-  width: 100vw;
+body.sidebar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+#banner {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sl-spacing-small);
+  background-color: var(--sl-panel-background-color);
+}
+
+#icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+#sidebar-container {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: stretch;
+  flex: 1;
 }
 
 #sidebar {
-  height: 100vh;
+  width: 175px;
   display: flex;
   flex-direction: column;
   justify-content: start;
   align-items: stretch;
   padding-block: var(--sl-spacing-2x-large);
   color: var(--sl-color-neutral-700);
+  background-color: var(--sl-panel-background-color);
 
   .sidebar-item {
     user-select: none;
     border-inline-start: 3px solid transparent;
-    padding-left: var(--sl-spacing-2x-large);
+    padding-inline: var(--sl-spacing-large);
     min-height: var(--sl-spacing-2x-large);
 
     display: flex;
@@ -55,6 +80,10 @@ body.sidebar sl-split-panel {
     }
   }
 
+  #sidebar-toggle {
+    justify-content: end;
+  }
+
   cast-icon {
     margin-block-start: auto;
   }
@@ -66,7 +95,7 @@ body.sidebar sl-split-panel {
 }
 
 #content {
-  height: 100vh;
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -271,5 +300,41 @@ body.sidebar sl-split-panel {
     sl-input {
       flex: 1;
     }
+  }
+}
+
+@media (max-width: 500px) {
+  #sidebar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1000;
+    width: 100vw;
+    height: 100vh;
+    margin-left: -100%;
+    padding-block: var(--sl-spacing-medium);
+    transition: var(--sl-transition-medium) margin-left ease-in-out;
+  }
+
+  #content {
+    border-top: var(--sl-panel-border-width) solid var(--sl-panel-border-color);
+  }
+
+  body.sidebar-open #sidebar {
+    margin-left: 0;
+  }
+}
+
+@media (min-width: 500px) {
+  #banner {
+    display: none;
+  }
+
+  #sidebar-toggle {
+    display: none !important;
+  }
+
+  #content {
+    border-left: var(--sl-panel-border-width) solid var(--sl-panel-border-color);
   }
 }

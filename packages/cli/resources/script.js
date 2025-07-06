@@ -23,15 +23,28 @@ function updateLinks() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", updateLinks);
+function openSidebar() {
+  document.body.classList.add("sidebar-open");
+}
 
-htmx.on("htmx:historyRestore", updateLinks);
+function closeSidebar() {
+  document.body.classList.remove("sidebar-open");
+}
 
-htmx.on("htmx:pushedIntoHistory", updateLinks);
+function contentChanged() {
+  updateLinks();
+  closeSidebar();
+}
 
-htmx.on("htmx:replacedIntoHistory", updateLinks);
+document.addEventListener("DOMContentLoaded", contentChanged);
 
-htmx.on("htmx:afterSwap", updateLinks);
+htmx.on("htmx:historyRestore", contentChanged);
+
+htmx.on("htmx:pushedIntoHistory", contentChanged);
+
+htmx.on("htmx:replacedIntoHistory", contentChanged);
+
+htmx.on("htmx:afterSwap", contentChanged);
 
 window.__onGCastApiAvailable = function (isAvailable) {
   if (isAvailable) {
