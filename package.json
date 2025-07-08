@@ -1,9 +1,0 @@
-{
-  "private": true,
-  "scripts": {
-    "start": "cd packages/mobile && npm start",
-    "pregentypes": "sed -i '/Typeshare generated types/,$d' packages/mobile/state/base.ts",
-    "gentypes": "typeshare --lang typescript -o rusttypes packages/flick-sync",
-    "postgentypes": "echo '// Typeshare generated types' | cat - rusttypes >> packages/mobile/state/base.ts && rm rusttypes"
-  }
-}

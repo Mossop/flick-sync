@@ -1,16 +1,38 @@
 [tools]
 node = "22"
+"cargo:cross" = "latest"
+"npm:eas-cli" = "latest"
 
 [tasks.crossbuild]
+description = "Cross-compile flick-sync for The Raspberry Pi Zero"
 run = "cross build --release --features vendored-openssl --target arm-unknown-linux-gnueabihf"
 
 [tasks.build]
+description = "Builds the flick-sync server"
 sources = [
   "packages/**/*.rs",
   "packages/cli/resources/**/*",
   "packages/cli/templates/*.html",
 ]
 outputs = ["target/debug/flick-sync"]
+run = "cargo build"
 
 [tasks.serve]
+description = "Runs the flick-sync server on port 3000"
 run = "cargo run -- serve -p 3000"
+
+[tasks."mobile:dev-client"]
+dir = "{{ config_root }}/packages/mobile"
+run = "eas build --profile development --platform android"
+
+[tasks."mobile:dev-server"]
+dir = "{{ config_root }}/packages/mobile"
+run = "expo start --dev-client"
+
+[tasks."mobile:build"]
+dir = "{{ config_root }}/packages/mobile"
+run = "eas build --profile preview --platform android"
+
+[tasks."mobile:lint"]
+dir = "{{ config_root }}/packages/mobile"
+run = "npx eslint ."
