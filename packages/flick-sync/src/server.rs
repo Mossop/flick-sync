@@ -795,7 +795,7 @@ impl Server {
                             warn!(error=?e);
                         }
 
-                        if rebuild && self.inner.output_style().await == OutputStyle::Standardized {
+                        if rebuild {
                             for part in video.parts().await {
                                 part.strip_metadata().await;
                             }
@@ -814,9 +814,7 @@ impl Server {
                                     warn!(error=?e);
                                 }
 
-                                if rebuild
-                                    && self.inner.output_style().await == OutputStyle::Standardized
-                                {
+                                if rebuild {
                                     for part in video.parts().await {
                                         part.strip_metadata().await;
                                     }

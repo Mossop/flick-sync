@@ -1042,13 +1042,11 @@ impl VideoPart {
         })
         .await?;
 
-        if self.server.inner.output_style().await == OutputStyle::Standardized {
-            if let Err(e) = new_state
-                .strip_metadata(guard, &self.server.inner.path)
-                .await
-            {
-                warn!(path=?path, error=%e, "Failed to strip metadata");
-            }
+        if let Err(e) = new_state
+            .strip_metadata(guard, &self.server.inner.path)
+            .await
+        {
+            warn!(path=?path, error=%e, "Failed to strip metadata");
         }
 
         Ok(())
@@ -1136,13 +1134,11 @@ impl VideoPart {
             );
         }
 
-        if self.server.inner.output_style().await == OutputStyle::Standardized {
-            if let Err(e) = new_state
-                .strip_metadata(guard, &self.server.inner.path)
-                .await
-            {
-                warn!(path=?path, error=%e, "Failed to strip metadata");
-            }
+        if let Err(e) = new_state
+            .strip_metadata(guard, &self.server.inner.path)
+            .await
+        {
+            warn!(path=?path, error=%e, "Failed to strip metadata");
         }
 
         Ok(())
@@ -1279,10 +1275,8 @@ impl VideoPart {
 
         let state = self.download_state().await;
 
-        if self.server.inner.output_style().await == OutputStyle::Standardized {
-            if let Err(e) = state.strip_metadata(&guard, &self.server.inner.path).await {
-                warn!(error=%e, "Unable to strip metadata from video file");
-            }
+        if let Err(e) = state.strip_metadata(&guard, &self.server.inner.path).await {
+            warn!(error=%e, "Unable to strip metadata from video file");
         }
     }
 
