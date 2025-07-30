@@ -4,6 +4,7 @@ node = "22"
 "npm:eas-cli" = "latest"
 
 [tasks.crossbuild]
+env = { CROSS_CONTAINER_OPTS = "--platform linux/amd64" }
 description = "Cross-compile flick-sync for The Raspberry Pi Zero"
 run = "cross build --release --features vendored-openssl --target arm-unknown-linux-gnueabihf"
 
