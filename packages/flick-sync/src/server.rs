@@ -29,7 +29,7 @@ use tokio::{
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
-    Collection, DEFAULT_PROFILE, DEFAULT_PROFILES, FileType, Inner, Library, OutputStyle, Result,
+    Collection, DEFAULT_PROFILE, DEFAULT_PROFILES, FileType, Inner, Library, Result,
     ServerConnection, TransferState, VideoStats,
     config::{Config, ServerConfig, SyncItem, TranscodeProfile},
     state::{
@@ -706,10 +706,6 @@ impl Server {
     /// Writes out the playlist files for playlists and collections
     #[instrument(level = "trace", skip(self), fields(server = self.id))]
     pub async fn write_playlists(&self) {
-        if self.inner.output_style().await != OutputStyle::Standardized {
-            return;
-        }
-
         info!("Writing playlists");
 
         for collection in self.collections().await {
@@ -913,8 +909,6 @@ impl Server {
         let guard = self.try_lock_write().await?;
         info!("Pruning server filesystem");
 
-        let output_standardized = self.inner.output_style().await == OutputStyle::Standardized;
-
         let mut expected_files: HashSet<PathBuf> = HashSet::new();
 
         let state = self.inner.state.read().await;
@@ -936,13 +930,9 @@ impl Server {
             }
         }
 
-        if output_standardized {
-            for collection in self.collections().await {
-                expected_files.insert(
-                    self.inner
-                        .path
-                        .join(collection.file_path(FileType::Playlist, "m3u").await),
-                );
+        for collection in self.collections().await {
+            if let Some(playlist_path) = collection.file_path(FileType::Playlist, "m3u").await {
+                expected_files.insert(self.inner.path.join(playlist_path));
             }
         }
 
@@ -972,13 +962,9 @@ impl Server {
             }
         }
 
-        if output_standardized {
-            for playlist in self.playlists().await {
-                expected_files.insert(
-                    self.inner
-                        .path
-                        .join(playlist.file_path(FileType::Playlist, "m3u").await),
-                );
+        for playlist in self.playlists().await {
+            if let Some(playlist_path) = playlist.file_path(FileType::Playlist, "m3u").await {
+                expected_files.insert(self.inner.path.join(playlist_path));
             }
         }
 

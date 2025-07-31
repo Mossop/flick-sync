@@ -34,16 +34,13 @@ use tokio::{
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
+use crate::{config::H264Profile, schema::MigratableStore};
 pub use crate::{
-    config::ServerConnection,
+    config::{OutputStyle, ServerConnection},
     server::{DownloadProgress, ItemType, Progress, Server, SyncItemInfo},
     state::{LibraryType, PlaybackState},
     sync::{LockedFile, LockedFileAsyncRead, LockedFileRead, Timeout},
     wrappers::*,
-};
-use crate::{
-    config::{H264Profile, OutputStyle},
-    schema::MigratableStore,
 };
 
 pub type Result<T = ()> = anyhow::Result<T>;
@@ -282,6 +279,33 @@ impl FlickSync {
         }
 
         items.into_iter().collect()
+    }
+
+    pub async fn update_output_style(&self, style: OutputStyle) -> Result {
+        {
+            let mut config = self.inner.config.write().await;
+
+            // if config.output_style == style {
+            //     return Ok(());
+            // }
+
+            config.output_style = style;
+            self.inner.persist_config(&config).await?;
+        }
+
+        for server in self.servers().await {
+            if let Err(e) = server.update_state(false).await {
+                error!(server=server.id(), error=?e, "Failed to update server");
+                continue;
+            }
+
+            if let Err(e) = server.prune().await {
+                error!(server=server.id(), error=?e, "Failed to prune server");
+                continue;
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn server(&self, id: &str) -> Option<Server> {

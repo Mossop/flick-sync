@@ -7,7 +7,7 @@ use plex_api::{
     },
 };
 use serde::{Deserialize, Serialize};
-use serde_plain::derive_display_from_serialize;
+use serde_plain::{derive_display_from_serialize, derive_fromstr_from_deserialize};
 
 use crate::{
     Result,
@@ -183,11 +183,13 @@ impl PartialOrd for TranscodeProfile {
 
 #[derive(Default, Deserialize, Debug, Serialize, PartialEq, Clone, Copy, Eq)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum OutputStyle {
+pub enum OutputStyle {
     #[default]
     Minimal,
     Standardized,
 }
+
+derive_fromstr_from_deserialize!(OutputStyle);
 
 impl OutputStyle {
     fn is_default(&self) -> bool {

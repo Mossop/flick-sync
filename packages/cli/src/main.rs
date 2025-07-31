@@ -14,6 +14,7 @@ use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use console::Console;
 use enum_dispatch::enum_dispatch;
+use flick_sync::{CONFIG_FILE, FlickSync, STATE_FILE, Server};
 use futures::Stream;
 use opentelemetry::{KeyValue, global, trace::TracerProvider as _};
 use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig};
@@ -26,6 +27,7 @@ use tracing_subscriber::{
     Layer, Registry, filter::Targets, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
+mod config;
 mod console;
 mod dlna;
 mod serve;
@@ -34,7 +36,7 @@ pub(crate) mod shared;
 mod sync;
 mod util;
 
-use flick_sync::{CONFIG_FILE, FlickSync, STATE_FILE, Server};
+use config::SetOutputStyle;
 use serve::Serve;
 use server::{Add, Login, Recover, Remove};
 use sync::BuildMetadata;
@@ -99,6 +101,8 @@ pub enum Command {
     BuildMetadata,
     /// Serves downloaded media over DLNA.
     Serve,
+    /// Changes the output style.
+    SetOutputStyle,
 }
 
 #[enum_dispatch(Command)]
