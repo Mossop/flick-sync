@@ -1076,7 +1076,7 @@ impl VideoPart {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(self, plex_server, guard, path, progress), fields(video=self.id, part=self.index))]
+    #[instrument(level = "trace", skip(self, plex_server, guard, path, request_permit, progress), fields(video=self.id, part=self.index))]
     async fn download_transcode<P: Progress>(
         &self,
         plex_server: &PlexServer,
