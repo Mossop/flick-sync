@@ -193,6 +193,17 @@ class StatePersister {
   constructor(private store: string, private persistedState: State) {}
 
   public async persistState(state: State) {
+    if (
+      typeof state !== "object" ||
+      state === null ||
+      !state.schema ||
+      Object.keys(state.servers ?? {}).length === 0
+    ) {
+      // Refuse to persist empty or invalid state.
+      console.warn("Refusing to persist empty or invalid state", state);
+      return;
+    }
+
     this.stateToPersist = state;
 
     if (this.isPersisting) {
@@ -202,24 +213,25 @@ class StatePersister {
     this.isPersisting = true;
     try {
       while (this.persistedState !== this.stateToPersist) {
-        await StorageAccessFramework.deleteAsync(
-          storagePath(this.store, STATE_FILE),
-          {
-            idempotent: true,
-          },
-        );
-
-        let file = await StorageAccessFramework.createFileAsync(
-          this.store,
-          STATE_FILE.substring(0, STATE_FILE.length - 5),
-          "application/json",
-        );
+        let path = storagePath(this.store, STATE_FILE);
+        let info = await getInfoAsync(path, { size: true });
 
         let writingState: State = this.stateToPersist;
-        await StorageAccessFramework.writeAsStringAsync(
-          file,
-          JSON.stringify(writingState, undefined, 2),
-        );
+        let data = JSON.stringify(writingState, undefined, 2);
+
+        if (!info.exists) {
+          await StorageAccessFramework.createFileAsync(
+            this.store,
+            STATE_FILE.substring(0, STATE_FILE.length - 5),
+            "application/json",
+          );
+        } else if (data.length < info.size) {
+          // Writes to existing files don't truncate the file so pad out the
+          // data to write to the current size of the file.
+          data += " ".repeat(info.size - data.length);
+        }
+
+        await StorageAccessFramework.writeAsStringAsync(path, data);
         this.persistedState = writingState;
       }
     } catch (e) {
@@ -319,7 +331,12 @@ async function loadMediaState(storeLocation: string): Promise<State> {
       storagePath(storeLocation, STATE_FILE),
     );
 
-    let state = await StateDecoder.decodeToPromise(JSON.parse(stateStr));
+    let state: State = JSON.parse(stateStr);
+    let result = StateDecoder.decode(state);
+    if (!result.isOk()) {
+      throw new Error(`Invalid state: ${result.error}`);
+    }
+
     let servers = Object.values(state.servers ?? {});
     let videos = servers.flatMap((server) =>
       Object.values(server.videos ?? {}),
@@ -327,6 +344,7 @@ async function loadMediaState(storeLocation: string): Promise<State> {
     console.log(
       `Loaded state with ${servers.length} servers and ${videos.length} videos.`,
     );
+
     return state;
   } catch (e) {
     console.error("State read failed", e);

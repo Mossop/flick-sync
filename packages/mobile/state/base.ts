@@ -1,6 +1,6 @@
-export type ThumbnailState =
+export type RelatedFileState =
   | { state: "none" }
-  | { state: "stored"; path: string };
+  | { state: "stored"; path: string; updated: number };
 
 export type DownloadState =
   | { state: "none" }
@@ -27,7 +27,7 @@ export interface CollectionState {
   title: string;
   contents: string[];
   lastUpdated: number;
-  thumbnail: ThumbnailState;
+  thumbnail: RelatedFileState;
 }
 
 export interface PlaylistState {
@@ -60,7 +60,8 @@ export interface ShowState {
   title: string;
   year: number;
   lastUpdated: number;
-  thumbnail: ThumbnailState;
+  thumbnail: RelatedFileState;
+  metadata?: RelatedFileState;
 }
 
 export interface MovieDetail {
@@ -86,13 +87,14 @@ export interface VideoState {
   title: string;
   detail: VideoDetail;
   airDate: string;
-  thumbnail: ThumbnailState;
+  thumbnail: RelatedFileState;
   mediaId: string;
   lastUpdated: number;
   parts: VideoPartState[];
   transcodeProfile?: string;
   playbackState: PlaybackState;
   lastViewedAt?: number;
+  metadata?: RelatedFileState;
 }
 
 export interface ServerState {
@@ -107,6 +109,7 @@ export interface ServerState {
 }
 
 export interface State {
+  schema?: number;
   clientId: string;
   servers?: Record<string, ServerState>;
 }

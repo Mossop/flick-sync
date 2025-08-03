@@ -12,13 +12,13 @@ import {
   ServerState,
   ShowState,
   State,
-  ThumbnailState,
+  RelatedFileState,
   VideoDetail,
   VideoPartState,
   VideoState,
 } from "./base";
 
-const ThumbnailStateDecoder = JsonDecoder.oneOf<ThumbnailState>(
+const RelatedFileStateDecoder = JsonDecoder.oneOf<RelatedFileState>(
   [
     JsonDecoder.object(
       {
@@ -30,11 +30,12 @@ const ThumbnailStateDecoder = JsonDecoder.oneOf<ThumbnailState>(
       {
         state: JsonDecoder.isExactly("stored"),
         path: JsonDecoder.string,
+        updated: JsonDecoder.number,
       },
       "stored",
     ),
   ],
-  "ThumbnailState",
+  "RelatedFileState",
 );
 
 const DownloadStateDecoder = JsonDecoder.oneOf<DownloadState>(
@@ -133,8 +134,9 @@ const ShowStateDecoder = JsonDecoder.object<ShowState>(
     library: JsonDecoder.string,
     title: JsonDecoder.string,
     year: JsonDecoder.number,
-    thumbnail: ThumbnailStateDecoder,
+    thumbnail: RelatedFileStateDecoder,
     lastUpdated: JsonDecoder.number,
+    metadata: JsonDecoder.optional(RelatedFileStateDecoder),
   },
   "ShowState",
 );
@@ -174,7 +176,7 @@ const VideoStateDecoder = JsonDecoder.object<VideoState>(
   {
     id: JsonDecoder.string,
     title: JsonDecoder.string,
-    thumbnail: ThumbnailStateDecoder,
+    thumbnail: RelatedFileStateDecoder,
     airDate: JsonDecoder.string,
     mediaId: JsonDecoder.string,
     parts: JsonDecoder.array(VideoPartStateDecoder, "VideoPart[]"),
@@ -183,6 +185,7 @@ const VideoStateDecoder = JsonDecoder.object<VideoState>(
     playbackState: PlaybackStateDecoder,
     lastUpdated: JsonDecoder.number,
     lastViewedAt: JsonDecoder.optional(JsonDecoder.number),
+    metadata: JsonDecoder.optional(RelatedFileStateDecoder),
   },
   "VideoState",
 );
@@ -202,7 +205,7 @@ const CollectionStateDecoder = JsonDecoder.object<CollectionState>(
     library: JsonDecoder.string,
     title: JsonDecoder.string,
     contents: JsonDecoder.array(JsonDecoder.string, "CollectionState.items"),
-    thumbnail: ThumbnailStateDecoder,
+    thumbnail: RelatedFileStateDecoder,
     lastUpdated: JsonDecoder.number,
   },
   "CollectionState",
@@ -236,6 +239,7 @@ const ServerStateDecoder = JsonDecoder.object<ServerState>(
 
 export const StateDecoder = JsonDecoder.object<State>(
   {
+    schema: JsonDecoder.number,
     clientId: JsonDecoder.string,
     servers: JsonDecoder.dictionary(ServerStateDecoder, "State.servers"),
   },

@@ -28,7 +28,7 @@ run = "eas build --profile development --platform android"
 
 [tasks."mobile:dev-server"]
 dir = "{{ config_root }}/packages/mobile"
-run = "expo start --dev-client"
+run = "npx expo start --dev-client"
 
 [tasks."mobile:build"]
 dir = "{{ config_root }}/packages/mobile"

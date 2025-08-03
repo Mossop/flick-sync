@@ -1,6 +1,6 @@
 import { DownloadState } from "./base";
 
-export { ThumbnailState, DownloadState } from "./base";
+export { DownloadState } from "./base";
 export { StateDecoder } from "./decoders";
 export * from "./wrappers";
 
