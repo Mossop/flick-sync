@@ -163,7 +163,7 @@ export class VideoPlayer extends LitElement {
     isFullscreen: { state: true },
     isCastAvailable: { state: true },
     isCasting: { state: true },
-    airDate: { type: String },
+    airDate: { type: Object },
     image: { type: String },
     videoTitle: { type: String },
     show: { type: Object },

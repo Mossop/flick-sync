@@ -221,7 +221,19 @@ function useSorted<T extends ChildItem>(
       let result = [...items];
       result.sort((a, b) => {
         if (isVideo(a) && isVideo(b)) {
-          return a.airDate.localeCompare(b.airDate);
+          if (a.airDate && b.airDate) {
+            return a.airDate.localeCompare(b.airDate);
+          }
+
+          if (a.airDate) {
+            return -1;
+          }
+
+          if (b.airDate) {
+            return 1;
+          }
+
+          return 0;
         }
 
         return a.title.localeCompare(b.title);

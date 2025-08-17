@@ -177,7 +177,7 @@ const VideoStateDecoder = JsonDecoder.object<VideoState>(
     id: JsonDecoder.string,
     title: JsonDecoder.string,
     thumbnail: RelatedFileStateDecoder,
-    airDate: JsonDecoder.string,
+    airDate: JsonDecoder.optional(JsonDecoder.string),
     mediaId: JsonDecoder.string,
     parts: JsonDecoder.array(VideoPartStateDecoder, "VideoPart[]"),
     detail: VideoDetailDecoder,

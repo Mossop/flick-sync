@@ -697,7 +697,7 @@ pub(crate) struct VideoState {
     pub(crate) title: String,
     pub(crate) detail: VideoDetail,
     #[typeshare(serialized_as = "string")]
-    pub(crate) air_date: Date,
+    pub(crate) air_date: Option<Date>,
     pub(crate) thumbnail: RelatedFileState,
     #[serde(default, skip_serializing_if = "RelatedFileState::is_none")]
     pub(crate) metadata: RelatedFileState,
@@ -753,7 +753,7 @@ impl VideoState {
             id: item.rating_key().to_owned(),
             title: item.title().to_owned(),
             detail,
-            air_date: metadata.originally_available_at.unwrap(),
+            air_date: metadata.originally_available_at,
             thumbnail: Default::default(),
             metadata: Default::default(),
             media_id: media.metadata().id.clone().unwrap(),

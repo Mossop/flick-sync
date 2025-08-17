@@ -86,7 +86,7 @@ export interface VideoState {
   id: string;
   title: string;
   detail: VideoDetail;
-  airDate: string;
+  airDate?: string;
   thumbnail: RelatedFileState;
   mediaId: string;
   lastUpdated: number;

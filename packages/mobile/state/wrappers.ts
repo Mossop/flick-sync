@@ -10,7 +10,7 @@ import {
   PlaylistState,
   State,
   CollectionState,
-  ThumbnailState,
+  RelatedFileState,
   VideoPartState,
   LibraryType,
   PlaybackState,
@@ -260,7 +260,7 @@ export abstract class CollectionWrapper
     return this.state.title;
   }
 
-  public get thumbnail(): ThumbnailState {
+  public get thumbnail(): RelatedFileState {
     return this.state.thumbnail;
   }
 
@@ -340,7 +340,7 @@ export class Show extends ServerItemWrapper<ShowState> implements IShow {
     return this.state.year;
   }
 
-  public get thumbnail(): ThumbnailState {
+  public get thumbnail(): RelatedFileState {
     return this.state.thumbnail;
   }
 
@@ -409,11 +409,11 @@ abstract class VideoWrapper<S extends Omit<VideoState, "detail">>
     return this.state.title;
   }
 
-  public get airDate(): string {
+  public get airDate(): string | undefined {
     return this.state.airDate;
   }
 
-  public get thumbnail(): ThumbnailState {
+  public get thumbnail(): RelatedFileState {
     return this.state.thumbnail;
   }
 

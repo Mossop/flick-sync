@@ -1417,7 +1417,7 @@ impl Episode {
         self.with_state(|vs| vs.episode_state().index).await
     }
 
-    pub async fn air_date(&self) -> Date {
+    pub async fn air_date(&self) -> Option<Date> {
         self.with_state(|vs| vs.air_date).await
     }
 
@@ -1638,7 +1638,7 @@ impl Movie {
     metadata_methods!();
     parent!(library, MovieLibrary, movie_state().library);
 
-    pub async fn air_date(&self) -> Date {
+    pub async fn air_date(&self) -> Option<Date> {
         self.with_state(|vs| vs.air_date).await
     }
 
@@ -1844,7 +1844,7 @@ impl Video {
         }
     }
 
-    pub async fn air_date(&self) -> Date {
+    pub async fn air_date(&self) -> Option<Date> {
         match self {
             Self::Movie(v) => v.air_date().await,
             Self::Episode(v) => v.air_date().await,
