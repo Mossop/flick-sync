@@ -391,13 +391,17 @@ impl Runnable for Serve {
         let status: Arc<Mutex<SyncStatus>> = Default::default();
         let sync_trigger = Arc::new(Notify::new());
 
-        let background_task = tokio::spawn(background_task(
-            flick_sync.clone(),
-            status.clone(),
-            event_sender.clone(),
-            sync_trigger.clone(),
-            !self.disable_syncing,
-        ));
+        let background_task = if !self.disable_syncing {
+            Some(tokio::spawn(background_task(
+                flick_sync.clone(),
+                status.clone(),
+                event_sender.clone(),
+                sync_trigger.clone(),
+                !self.disable_syncing,
+            )))
+        } else {
+            None
+        };
 
         let service_data = ServiceData {
             flick_sync,
@@ -466,7 +470,10 @@ impl Runnable for Serve {
             }
         }
 
-        background_task.abort();
+        if let Some(background_task) = background_task {
+            background_task.abort();
+        }
+
         http_handle.stop(false).await;
         dlna_server.shutdown().await;
 
