@@ -1,4 +1,5 @@
 use std::{
+    cmp,
     collections::HashMap,
     fmt,
     io::ErrorKind,
@@ -674,7 +675,9 @@ where
         let metadata = part.metadata();
         metadata.id.as_ref().is_some_and(|id| id == &self.id)
             && metadata.key.as_ref().is_some_and(|key| key == &self.key)
-            && metadata.size.is_some_and(|size| size == self.size)
+            && metadata
+                .size
+                .is_some_and(|size| (cmp::max(size, self.size) - cmp::min(size, self.size)) < 100)
             && metadata
                 .duration
                 .is_some_and(|duration| duration == self.duration)
