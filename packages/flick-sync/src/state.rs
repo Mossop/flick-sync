@@ -569,6 +569,13 @@ impl DownloadState {
         if expected_path != path {
             let new_target = root.join(&expected_path);
 
+            if let Some(parent) = new_target.parent() {
+                if let Err(e) = fs::create_dir_all(parent).await {
+                    warn!(?parent, error=?e, "Failed to create parent directories");
+                    return;
+                }
+            }
+
             if let Err(e) = fs::rename(&file, &new_target).await {
                 warn!(?path, ?expected_path, error=?e, "Failed to move file to expected location");
             } else if matches!(self, DownloadState::Downloaded { .. }) {
