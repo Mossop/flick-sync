@@ -325,15 +325,14 @@ async fn write_playlist(root: &Path, playlist_path: &Path, videos: Vec<Video>) -
         for part in video.parts().await {
             let download = part.download_state().await;
 
-            if let Some(video_path) = download.path() {
-                if !download.needs_download() {
-                    if let Some(relative) = diff_paths(root.join(video_path), parent) {
-                        writer
-                            .write_all(relative.as_os_str().as_encoded_bytes())
-                            .await?;
-                        writer.write_all(b"\n").await?;
-                    }
-                }
+            if let Some(video_path) = download.path()
+                && !download.needs_download()
+                && let Some(relative) = diff_paths(root.join(video_path), parent)
+            {
+                writer
+                    .write_all(relative.as_os_str().as_encoded_bytes())
+                    .await?;
+                writer.write_all(b"\n").await?;
             }
         }
     }
@@ -722,20 +721,20 @@ impl VideoPart {
             let path = self.file_path(&container.to_string()).await;
             let target = self.server.inner.path.join(&path);
 
-            if let Ok(stats) = metadata(target).await {
-                if stats.is_file() {
-                    info!(path=?path.display(), "Recovered download for {title}");
+            if let Ok(stats) = metadata(target).await
+                && stats.is_file()
+            {
+                info!(path=?path.display(), "Recovered download for {title}");
 
-                    let download_state = if stats.size() == expected_size {
-                        DownloadState::Downloaded { path }
-                    } else {
-                        DownloadState::Transcoded { path }
-                    };
+                let download_state = if stats.size() == expected_size {
+                    DownloadState::Downloaded { path }
+                } else {
+                    DownloadState::Transcoded { path }
+                };
 
-                    return self
-                        .update_state(|state| state.download = download_state)
-                        .await;
-                }
+                return self
+                    .update_state(|state| state.download = download_state)
+                    .await;
             }
         }
 
@@ -863,10 +862,10 @@ impl VideoPart {
             .await;
 
         let target = self.server.inner.path.join(&path);
-        if let Err(e) = remove_file(target).await {
-            if e.kind() != ErrorKind::NotFound {
-                return Err(e.into());
-            }
+        if let Err(e) = remove_file(target).await
+            && e.kind() != ErrorKind::NotFound
+        {
+            return Err(e.into());
         }
 
         self.update_state(|state| state.download = DownloadState::Downloading { path })

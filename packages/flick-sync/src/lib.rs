@@ -256,16 +256,13 @@ impl FlickSync {
             for video in server.videos().await {
                 match video.playback_state().await {
                     PlaybackState::Played => {
-                        if let Some(last_played) = video.last_played().await {
-                            if (now - last_played).whole_days() <= 7 {
-                                if let Some(next) = video.next_video().await {
-                                    if next.playback_state().await == PlaybackState::Unplayed
-                                        && next.is_downloaded().await
-                                    {
-                                        items.insert(next);
-                                    }
-                                }
-                            }
+                        if let Some(last_played) = video.last_played().await
+                            && (now - last_played).whole_days() <= 7
+                            && let Some(next) = video.next_video().await
+                            && next.playback_state().await == PlaybackState::Unplayed
+                            && next.is_downloaded().await
+                        {
+                            items.insert(next);
                         }
                     }
                     PlaybackState::InProgress { .. } => {
@@ -361,10 +358,10 @@ impl FlickSync {
         loop {
             match reader.next_entry().await {
                 Ok(Some(entry)) => {
-                    if let Some(str) = entry.file_name().to_str() {
-                        if str == STATE_FILE || str == CONFIG_FILE || servers.contains(str) {
-                            continue;
-                        }
+                    if let Some(str) = entry.file_name().to_str()
+                        && (str == STATE_FILE || str == CONFIG_FILE || servers.contains(str))
+                    {
+                        continue;
                     }
 
                     let path = entry.path();

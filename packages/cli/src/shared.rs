@@ -50,10 +50,10 @@ pub(crate) fn disk_info_for_path(path: &Path) -> DiskInfo {
     let disks = Disks::new_with_refreshed_list();
     for disk in disks.list() {
         if path.starts_with(disk.mount_point()) {
-            if let Some(ref best) = best_path {
-                if best.starts_with(disk.mount_point()) {
-                    continue;
-                }
+            if let Some(ref best) = best_path
+                && best.starts_with(disk.mount_point())
+            {
+                continue;
             }
 
             best_path = Some(disk.mount_point().to_owned());

@@ -34,10 +34,10 @@ use crate::{
 const SCHEMA_VERSION: u64 = 4;
 
 async fn remove_file(path: &Path) {
-    if let Err(e) = fs::remove_file(path).await {
-        if e.kind() != ErrorKind::NotFound {
-            warn!(?path, error=?e, "Failed to remove file");
-        }
+    if let Err(e) = fs::remove_file(path).await
+        && e.kind() != ErrorKind::NotFound
+    {
+        warn!(?path, error=?e, "Failed to remove file");
     }
 }
 
@@ -116,11 +116,11 @@ impl RelatedFileState {
             if path != expected_path {
                 let new_target = root.join(expected_path);
 
-                if let Some(parent) = new_target.parent() {
-                    if let Err(e) = fs::create_dir_all(parent).await {
-                        warn!(?parent, error=?e, "Failed to create parent directories");
-                        return;
-                    }
+                if let Some(parent) = new_target.parent()
+                    && let Err(e) = fs::create_dir_all(parent).await
+                {
+                    warn!(?parent, error=?e, "Failed to create parent directories");
+                    return;
                 }
 
                 if let Err(e) = fs::rename(&file, &new_target).await {
@@ -570,11 +570,11 @@ impl DownloadState {
         if expected_path != path {
             let new_target = root.join(&expected_path);
 
-            if let Some(parent) = new_target.parent() {
-                if let Err(e) = fs::create_dir_all(parent).await {
-                    warn!(?parent, error=?e, "Failed to create parent directories");
-                    return;
-                }
+            if let Some(parent) = new_target.parent()
+                && let Err(e) = fs::create_dir_all(parent).await
+            {
+                warn!(?parent, error=?e, "Failed to create parent directories");
+                return;
             }
 
             if let Err(e) = fs::rename(&file, &new_target).await {
@@ -604,10 +604,10 @@ impl DownloadState {
             DownloadState::None => return,
             DownloadState::Downloading { path } => path,
             DownloadState::Transcoding { session_id, path } => {
-                if let Ok(session) = plex_server.transcode_session(session_id).await {
-                    if let Err(e) = session.cancel().await {
-                        warn!(error=?e, "Failed to cancel stale transcode session");
-                    }
+                if let Ok(session) = plex_server.transcode_session(session_id).await
+                    && let Err(e) = session.cancel().await
+                {
+                    warn!(error=?e, "Failed to cancel stale transcode session");
                 }
 
                 path
@@ -851,35 +851,33 @@ impl VideoState {
         let media = &item.media()[0];
         let parts = media.parts();
 
-        if allow_delete {
-            if let Ok(guard) = server.try_lock_write_key(&self.id).await {
-                if parts.len() != self.parts.len() {
-                    info!("Number of video parts changed, deleting existing downloads.");
-                    for part in self.parts.iter_mut() {
-                        part.download.delete(&guard, plex_server, root).await;
-                    }
+        if allow_delete && let Ok(guard) = server.try_lock_write_key(&self.id).await {
+            if parts.len() != self.parts.len() {
+                info!("Number of video parts changed, deleting existing downloads.");
+                for part in self.parts.iter_mut() {
+                    part.download.delete(&guard, plex_server, root).await;
+                }
 
-                    self.parts = parts.iter().map(VideoPartState::from).collect()
-                } else {
-                    for (part_state, part) in self.parts.iter_mut().zip(parts.iter()) {
-                        let metadata = part.metadata();
+                self.parts = parts.iter().map(VideoPartState::from).collect()
+            } else {
+                for (part_state, part) in self.parts.iter_mut().zip(parts.iter()) {
+                    let metadata = part.metadata();
 
-                        if part_state != part {
-                            info!(
-                                old_id = part_state.id,
-                                new_id = metadata.id,
-                                old_key = part_state.key,
-                                new_key = metadata.key,
-                                old_size = part_state.size,
-                                new_size = metadata.size,
-                                old_duration = part_state.duration,
-                                new_duration = metadata.duration,
-                                part = part_state.id,
-                                "Part changed, deleting existing download."
-                            );
-                            part_state.download.delete(&guard, plex_server, root).await;
-                            *part_state = part.into();
-                        }
+                    if part_state != part {
+                        info!(
+                            old_id = part_state.id,
+                            new_id = metadata.id,
+                            old_key = part_state.key,
+                            new_key = metadata.key,
+                            old_size = part_state.size,
+                            new_size = metadata.size,
+                            old_duration = part_state.duration,
+                            new_duration = metadata.duration,
+                            part = part_state.id,
+                            "Part changed, deleting existing download."
+                        );
+                        part_state.download.delete(&guard, plex_server, root).await;
+                        *part_state = part.into();
                     }
                 }
             }
@@ -1012,16 +1010,16 @@ impl State {
             .as_object()
         {
             if let Some(updated) = video.get("lastUpdated").cloned() {
-                if let Some(Value::Object(obj)) = video.get_mut("thumbnail") {
-                    if obj.contains_key("path") {
-                        obj.insert("updated".to_string(), updated.clone());
-                    }
+                if let Some(Value::Object(obj)) = video.get_mut("thumbnail")
+                    && obj.contains_key("path")
+                {
+                    obj.insert("updated".to_string(), updated.clone());
                 }
 
-                if let Some(Value::Object(obj)) = video.get_mut("metadata") {
-                    if obj.contains_key("path") {
-                        obj.insert("updated".to_string(), updated);
-                    }
+                if let Some(Value::Object(obj)) = video.get_mut("metadata")
+                    && obj.contains_key("path")
+                {
+                    obj.insert("updated".to_string(), updated);
                 }
             }
         }
@@ -1034,16 +1032,16 @@ impl State {
             .as_object()
         {
             if let Some(updated) = show.get("lastUpdated").cloned() {
-                if let Some(Value::Object(obj)) = show.get_mut("thumbnail") {
-                    if obj.contains_key("path") {
-                        obj.insert("updated".to_string(), updated.clone());
-                    }
+                if let Some(Value::Object(obj)) = show.get_mut("thumbnail")
+                    && obj.contains_key("path")
+                {
+                    obj.insert("updated".to_string(), updated.clone());
                 }
 
-                if let Some(Value::Object(obj)) = show.get_mut("metadata") {
-                    if obj.contains_key("path") {
-                        obj.insert("updated".to_string(), updated);
-                    }
+                if let Some(Value::Object(obj)) = show.get_mut("metadata")
+                    && obj.contains_key("path")
+                {
+                    obj.insert("updated".to_string(), updated);
                 }
             }
         }
@@ -1055,12 +1053,11 @@ impl State {
             .values()
             .as_object()
         {
-            if let Some(updated) = collection.get("lastUpdated").cloned() {
-                if let Some(Value::Object(obj)) = collection.get_mut("thumbnail") {
-                    if obj.contains_key("path") {
-                        obj.insert("updated".to_string(), updated);
-                    }
-                }
+            if let Some(updated) = collection.get("lastUpdated").cloned()
+                && let Some(Value::Object(obj)) = collection.get_mut("thumbnail")
+                && obj.contains_key("path")
+            {
+                obj.insert("updated".to_string(), updated);
             }
         }
 

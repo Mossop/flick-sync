@@ -519,11 +519,11 @@ impl Server {
     pub async fn connect(&self) -> Result<plex_api::Server> {
         let mut connection = self.connection.lock().await;
 
-        if let Some(api) = connection.take() {
-            if let Ok(api) = api.refresh().await {
-                *connection = Some(api.clone());
-                return Ok(api);
-            }
+        if let Some(api) = connection.take()
+            && let Ok(api) = api.refresh().await
+        {
+            *connection = Some(api.clone());
+            return Ok(api);
         }
 
         let config = self.inner.config.read().await;
@@ -607,10 +607,11 @@ impl Server {
 
         let mut config = self.inner.config.write().await;
 
-        if let Some(ref profile) = transcode_profile {
-            if !config.profiles.contains_key(profile) && !DEFAULT_PROFILES.contains_key(profile) {
-                bail!("Unknown profile: {profile}");
-            }
+        if let Some(ref profile) = transcode_profile
+            && !config.profiles.contains_key(profile)
+            && !DEFAULT_PROFILES.contains_key(profile)
+        {
+            bail!("Unknown profile: {profile}");
         }
 
         let server_config = config.servers.get_mut(&self.id).unwrap();
@@ -972,10 +973,10 @@ impl Server {
 
         if expected_files.is_empty() {
             debug!("Deleting empty server directory {}", server_root.display());
-            if let Err(e) = remove_dir_all(&server_root).await {
-                if e.kind() != ErrorKind::NotFound {
-                    warn!(error=%e, "Failed to remove empty server directory.");
-                }
+            if let Err(e) = remove_dir_all(&server_root).await
+                && e.kind() != ErrorKind::NotFound
+            {
+                warn!(error=%e, "Failed to remove empty server directory.");
             }
             return Ok(());
         }

@@ -21,10 +21,10 @@ fn is_safe(addr: SocketAddr) -> bool {
 
 fn client_addr(req: &HttpRequest) -> Option<String> {
     if let Some(addr) = req.peer_addr() {
-        if is_safe(addr) {
-            if let Some(ip) = req.connection_info().realip_remote_addr() {
-                return Some(ip.to_owned());
-            }
+        if is_safe(addr)
+            && let Some(ip) = req.connection_info().realip_remote_addr()
+        {
+            return Some(ip.to_owned());
         }
 
         Some(addr.to_string())
