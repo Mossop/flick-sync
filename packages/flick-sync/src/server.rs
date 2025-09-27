@@ -24,7 +24,7 @@ use plex_api::{
 use scoped_futures::{ScopedBoxFuture, ScopedFutureExt};
 use tokio::{
     fs::{read_dir, remove_dir, remove_dir_all, remove_file},
-    sync::{Mutex, RwLockMappedWriteGuard, RwLockWriteGuard, Semaphore},
+    sync::{Mutex, RwLockMappedWriteGuard, RwLockWriteGuard},
 };
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -65,17 +65,17 @@ pub trait Progress: Unpin + Sized + Send + Sync {
 pub trait DownloadProgress: Clone {
     fn transcode_started(
         &self,
-        video_part: &wrappers::VideoPart,
+        video: &wrappers::Video,
     ) -> impl Future<Output = impl Progress + Clone + 'static>;
 
     fn download_started(
         &self,
-        video_part: &wrappers::VideoPart,
+        video: &wrappers::Video,
     ) -> impl Future<Output = impl Progress + Clone + 'static>;
 
     fn download_failed(
         &self,
-        #[expect(unused)] video_part: &wrappers::VideoPart,
+        #[expect(unused)] video: &wrappers::Video,
         #[expect(unused)] error: anyhow::Error,
     ) -> impl Future<Output = ()> {
         ready(())
@@ -154,8 +154,6 @@ pub struct Server {
     pub(crate) id: String,
     pub(crate) inner: Arc<Inner>,
     connection: Arc<Mutex<Option<plex_api::Server>>>,
-    pub(crate) transcode_requests: Arc<Semaphore>,
-    pub(crate) transcode_permits: Arc<Semaphore>,
 }
 
 impl fmt::Debug for Server {
@@ -233,13 +231,11 @@ async fn prune_directory(path: &Path, expected_files: &HashSet<PathBuf>) -> bool
 }
 
 impl Server {
-    pub(crate) fn new(id: &str, inner: &Arc<Inner>, config: &ServerConfig) -> Self {
+    pub(crate) fn new(id: &str, inner: &Arc<Inner>) -> Self {
         Self {
             id: id.to_owned(),
             inner: inner.clone(),
             connection: Arc::new(Mutex::new(None)),
-            transcode_requests: Arc::new(Semaphore::new(1)),
-            transcode_permits: Arc::new(Semaphore::new(config.max_transcodes.unwrap_or(2))),
         }
     }
 
@@ -787,15 +783,13 @@ impl Server {
         for library in self.libraries().await {
             match library {
                 Library::Movie(l) => {
-                    for video in l.movies().await {
-                        if let Err(e) = video.update_metadata(rebuild).await {
+                    for movie in l.movies().await {
+                        if let Err(e) = movie.update_metadata(rebuild).await {
                             warn!(error=?e);
                         }
 
                         if rebuild {
-                            for part in video.parts().await {
-                                part.strip_metadata().await;
-                            }
+                            movie.video().strip_metadata().await;
                         }
                     }
                 }
@@ -806,15 +800,13 @@ impl Server {
                         }
 
                         for season in show.seasons().await {
-                            for video in season.episodes().await {
-                                if let Err(e) = video.update_metadata(rebuild).await {
+                            for episode in season.episodes().await {
+                                if let Err(e) = episode.update_metadata(rebuild).await {
                                     warn!(error=?e);
                                 }
 
                                 if rebuild {
-                                    for part in video.parts().await {
-                                        part.strip_metadata().await;
-                                    }
+                                    episode.video().strip_metadata().await;
                                 }
                             }
                         }
@@ -838,13 +830,11 @@ impl Server {
         info!("Verifying downloads");
 
         for video in self.videos().await {
-            for part in video.parts().await {
-                if let Err(e) = part
-                    .verify_download(&plex_server, allow_video_deletion)
-                    .await
-                {
-                    warn!(error=?e);
-                }
+            if let Err(e) = video
+                .verify_download(&plex_server, allow_video_deletion)
+                .await
+            {
+                warn!(error=?e);
             }
         }
     }
@@ -866,36 +856,10 @@ impl Server {
         let mut jobs = Vec::new();
 
         for video in self.videos().await {
-            for part in video.parts().await {
-                match part.transfer_state().await {
-                    TransferState::Transcoding => {
-                        jobs.push(part.download(
-                            plex_server.clone(),
-                            progress.clone(),
-                            None,
-                            self.transcode_permits.clone().try_acquire_owned().ok(),
-                            self.inner.download_permits.clone().try_acquire_owned().ok(),
-                        ));
-                    }
-                    TransferState::Downloading => {
-                        jobs.push(part.download(
-                            plex_server.clone(),
-                            progress.clone(),
-                            None,
-                            None,
-                            self.inner.download_permits.clone().try_acquire_owned().ok(),
-                        ));
-                    }
-                    TransferState::Waiting => {
-                        jobs.push(part.download(
-                            plex_server.clone(),
-                            progress.clone(),
-                            None,
-                            None,
-                            None,
-                        ));
-                    }
-                    TransferState::Downloaded => {}
+            match video.transfer_state().await {
+                TransferState::Downloaded => {}
+                _ => {
+                    jobs.push(video.download(plex_server.clone(), progress.clone()));
                 }
             }
         }
@@ -956,10 +920,8 @@ impl Server {
                 expected_files.insert(self.inner.path.join(file));
             }
 
-            for part in video.parts.iter() {
-                if let Some(file) = part.download.path() {
-                    expected_files.insert(self.inner.path.join(file));
-                }
+            if let Some(file) = video.download.path() {
+                expected_files.insert(self.inner.path.join(file));
             }
         }
 
@@ -1134,11 +1096,11 @@ impl StateSync<'_> {
     }
 
     fn select_profile(&self, profiles: &HashSet<String>) -> Option<String> {
-        let mut profile_list: Vec<(String, Option<TranscodeProfile>)> = profiles
+        let mut profile_list: Vec<(String, TranscodeProfile)> = profiles
             .iter()
             .filter_map(|name| {
                 if let Some(profile) = self.config.profiles.get(name) {
-                    Some((name.clone(), Some(profile.clone())))
+                    Some((name.clone(), profile.clone()))
                 } else if let Some(profile) = DEFAULT_PROFILES.get(name) {
                     Some((name.clone(), profile.clone()))
                 } else {
@@ -1149,21 +1111,14 @@ impl StateSync<'_> {
             .collect();
 
         profile_list.sort_unstable_by(|(na, pa), (nb, pb)| {
-            match (pa, pb) {
-                (Some(_), None) => return Ordering::Greater,
-                (None, Some(_)) => return Ordering::Less,
-                (Some(a), Some(b)) => {
-                    // Note reversed sort
-                    match b.partial_cmp(a) {
-                        Some(Ordering::Equal) | None => {
-                            warn!("Unable to compare transcode profiles {na} and {nb}.");
-                        }
-                        Some(o) => {
-                            return o;
-                        }
-                    }
+            // Note reversed sort
+            match pb.partial_cmp(pa) {
+                Some(Ordering::Equal) | None => {
+                    warn!("Unable to compare transcode profiles {na} and {nb}.");
                 }
-                _ => {}
+                Some(o) => {
+                    return o;
+                }
             }
 
             na.cmp(nb)
@@ -1185,18 +1140,13 @@ impl StateSync<'_> {
                 let mut server_state = self.server_state().await;
                 let video_state = server_state.videos.get_mut(key).unwrap();
                 if video_state.transcode_profile.as_ref() != Some(&selected_profile) {
-                    if video_state
-                        .parts
-                        .iter()
-                        .any(|p| p.download != DownloadState::None)
-                    {
-                        info!(item=key, old=?video_state.transcode_profile, new=?selected_profile, "Transcode profile changed, deleting existing downloads.");
+                    if video_state.download != DownloadState::None {
+                        info!(item=key, old=?video_state.transcode_profile, new=?selected_profile, "Transcode profile changed, deleting existing download.");
 
-                        for part in video_state.parts.iter_mut() {
-                            part.download
-                                .delete(&guard, &self.plex_server, self.root)
-                                .await;
-                        }
+                        video_state
+                            .download
+                            .delete(&guard, &self.plex_server, self.root)
+                            .await;
                     }
 
                     video_state.transcode_profile = Some(selected_profile);

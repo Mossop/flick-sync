@@ -14,7 +14,7 @@ use actix_web::{
     App, HttpServer, dev::Extensions, middleware::from_fn, rt::net::TcpStream, web::ThinData,
 };
 use clap::{Args, builder::FalseyValueParser};
-use flick_sync::{DownloadProgress, FlickSync, Progress, Server, VideoPart};
+use flick_sync::{DownloadProgress, FlickSync, Progress, Server, Video};
 use futures::{FutureExt, StreamExt, select};
 use rustls::{
     ServerConfig,
@@ -62,7 +62,7 @@ struct SyncStatus {
 
 struct SyncProgress {
     is_download: bool,
-    video_part: VideoPart,
+    video: Video,
     task: SyncTask,
     position: u64,
     length: Option<u64>,
@@ -70,10 +70,10 @@ struct SyncProgress {
 }
 
 impl SyncProgress {
-    fn new(task: SyncTask, video_part: VideoPart, is_download: bool) -> Self {
+    fn new(task: SyncTask, video: Video, is_download: bool) -> Self {
         let this = Self {
             task,
-            video_part,
+            video,
             is_download,
             position: 0,
             length: if is_download { None } else { Some(100) },
@@ -92,7 +92,7 @@ impl Clone for SyncProgress {
 
         Self {
             is_download: self.is_download,
-            video_part: self.video_part.clone(),
+            video: self.video.clone(),
             task: self.task.clone(),
             position: self.position,
             length: self.length,
@@ -134,10 +134,10 @@ impl Progress for SyncProgress {
 
         if self.is_download {
             self.task
-                .log(SyncLogMessage::DownloadComplete(self.video_part.clone()));
+                .log(SyncLogMessage::DownloadComplete(self.video.clone()));
         } else {
             self.task
-                .log(SyncLogMessage::TranscodeComplete(self.video_part.clone()));
+                .log(SyncLogMessage::TranscodeComplete(self.video.clone()));
         }
     }
 
@@ -146,12 +146,12 @@ impl Progress for SyncProgress {
 
         if self.is_download {
             self.task.log(SyncLogMessage::DownloadFailed((
-                self.video_part.clone(),
+                self.video.clone(),
                 error.to_string(),
             )));
         } else {
             self.task.log(SyncLogMessage::TranscodeFailed((
-                self.video_part.clone(),
+                self.video.clone(),
                 error.to_string(),
             )));
         }
@@ -175,7 +175,7 @@ impl SyncTask {
     fn progress_key(progress: &SyncProgress) -> String {
         format!(
             "{}:{}",
-            progress.video_part.id(),
+            progress.video.id(),
             if progress.is_download { "D" } else { "T" }
         )
     }
@@ -200,7 +200,7 @@ impl SyncTask {
             Self::progress_key(progress),
             SyncProgressBar {
                 is_download: progress.is_download,
-                video_part: progress.video_part.clone(),
+                video: progress.video.clone(),
                 position: progress.position,
                 length: progress.length,
             },
@@ -275,21 +275,21 @@ impl SyncTask {
 }
 
 impl DownloadProgress for SyncTask {
-    async fn transcode_started(&self, video_part: &VideoPart) -> impl Progress + Clone + 'static {
-        self.log(SyncLogMessage::TranscodeStarted(video_part.clone()));
+    async fn transcode_started(&self, video: &Video) -> impl Progress + Clone + 'static {
+        self.log(SyncLogMessage::TranscodeStarted(video.clone()));
 
-        SyncProgress::new(self.clone(), video_part.clone(), false)
+        SyncProgress::new(self.clone(), video.clone(), false)
     }
 
-    async fn download_started(&self, video_part: &VideoPart) -> impl Progress + Clone + 'static {
-        self.log(SyncLogMessage::DownloadStarted(video_part.clone()));
+    async fn download_started(&self, video: &Video) -> impl Progress + Clone + 'static {
+        self.log(SyncLogMessage::DownloadStarted(video.clone()));
 
-        SyncProgress::new(self.clone(), video_part.clone(), true)
+        SyncProgress::new(self.clone(), video.clone(), true)
     }
 
-    async fn download_failed(&self, video_part: &VideoPart, error: anyhow::Error) {
+    async fn download_failed(&self, video: &Video, error: anyhow::Error) {
         self.log(SyncLogMessage::DownloadFailed((
-            video_part.clone(),
+            video.clone(),
             error.to_string(),
         )));
     }

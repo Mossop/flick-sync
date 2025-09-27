@@ -70,25 +70,12 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
 
   let finalState = useRef(video.playbackState);
 
-  let previousDuration = useRef<number>(0);
-  let currentPart = useRef<number>();
   let seek = useCallback(
-    async (position: number): Promise<void> => {
-      previousDuration.current = 0;
-      let targetPart = 0;
-      let partPosition = Math.min(Math.max(position, 0), video.totalDuration);
+    async (position: number, isNewVideo: boolean = false): Promise<void> => {
+      let actualPosition = Math.min(Math.max(position, 0), video.totalDuration);
 
-      while (
-        targetPart < video.parts.length - 1 &&
-        video.parts[targetPart]!.duration >= partPosition
-      ) {
-        partPosition -= video.parts[targetPart]!.duration;
-        previousDuration.current += video.parts[targetPart]!.duration;
-        targetPart++;
-      }
-
-      if (targetPart === currentPart.current) {
-        await videoRef.current!.playFromPositionAsync(partPosition);
+      if (!isNewVideo) {
+        await videoRef.current!.playFromPositionAsync(actualPosition);
       } else {
         try {
           await videoRef.current!.unloadAsync();
@@ -96,20 +83,19 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
           console.error(e);
         }
 
-        currentPart.current = targetPart;
-        let { download } = video.parts[targetPart]!;
+        let { download } = video;
 
         if (!isDownloaded(download)) {
-          dispatchSetError("Unexpected non-downloaded part");
+          dispatchSetError("Unexpected non-downloaded video");
           navigation.pop();
           return;
         }
 
-        console.log(`Loading ${download.path} at position ${partPosition}`);
+        console.log(`Loading ${download.path} at position ${actualPosition}`);
         await videoRef.current!.loadAsync(
           { uri: storagePath(download.path) },
           {
-            positionMillis: partPosition,
+            positionMillis: actualPosition,
             shouldPlay: true,
             androidImplementation: "MediaPlayer",
           },
@@ -156,11 +142,11 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   useEffect(() => {
     if (initialized.current !== video.id) {
       console.log("Initializing for new video");
-      currentPart.current = undefined;
       seek(
         video.playbackState.state == "played" || restart
           ? 0
           : video.playPosition,
+        true,
       );
       initialized.current = video.id;
     }
@@ -169,8 +155,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let onStatus = useCallback(
     (avStatus: AVPlaybackStatus) => {
       if ("uri" in avStatus) {
-        let currentPosition =
-          previousDuration.current + avStatus.positionMillis;
+        let currentPosition = avStatus.positionMillis;
         setPlaybackStatus({
           position: currentPosition,
           duration: video.totalDuration,
@@ -189,51 +174,22 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
         }
 
         if (avStatus.didJustFinish) {
-          if (currentPart.current == video.parts.length - 1) {
-            finalState.current = { state: "played" };
-            if (index + 1 >= queue.length) {
-              navigation.pop();
-            } else {
-              setPlayState(finalState.current);
-              navigation.setParams({
-                index: index + 1,
-                restart: true,
-              });
-            }
+          finalState.current = { state: "played" };
+          if (index + 1 >= queue.length) {
+            navigation.pop();
           } else {
-            previousDuration.current +=
-              video.parts[currentPart.current!]!.duration;
-            currentPart.current = currentPart.current! + 1;
-            setPlayPosition(previousDuration.current);
-
-            let { download } = video.parts[currentPart.current!]!;
-            if (!isDownloaded(download)) {
-              dispatchSetError("Unexpected non-downloaded part");
-              navigation.pop();
-              return;
-            }
-
-            videoRef.current?.loadAsync(
-              { uri: storagePath(download.path) },
-              { positionMillis: 0, shouldPlay: true },
-            );
+            setPlayState(finalState.current);
+            navigation.setParams({
+              index: index + 1,
+              restart: true,
+            });
           }
         } else if (Math.abs(currentPosition - video.playPosition) > 5000) {
           setPlayPosition(currentPosition);
         }
       }
     },
-    [
-      video,
-      previousDuration,
-      navigation,
-      dispatchSetError,
-      storagePath,
-      index,
-      queue,
-      setPlayState,
-      setPlayPosition,
-    ],
+    [video, navigation, index, queue, setPlayState, setPlayPosition],
   );
 
   let onError = useCallback(

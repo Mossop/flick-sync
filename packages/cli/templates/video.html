@@ -5,7 +5,6 @@
 {% block content %}
   <div id="video-container">
     <video-player
-      playlist="{{ parts|json }}"
       currentTime="{{ playback_position }}"
       videoTitle="{{ title }}"
       airDate="{{ air_date|json }}"
@@ -13,6 +12,9 @@
       show="{{ show|json }}"
       season="{{ season|json }}"
       episode="{{ episode|json }}"
+      url="{{ url }}"
+      mimetype="{{ mime_type }}"
+      totalTime="{{ total_duration }}"
     >
     </video-player>
   </div>

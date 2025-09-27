@@ -15,7 +15,7 @@ use askama::Template;
 use bytes::Bytes;
 use flick_sync::{Collection, Library, LibraryType, PlaybackState, Video, plex_api::library::Item};
 use futures::TryStreamExt;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::io::BufReader;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::io::ReaderStream;
@@ -236,13 +236,13 @@ pub(super) async fn thumbnail_image(
     }
 }
 
-#[get("/stream/{server}/{video_id}/{part}")]
+#[get("/stream/{server}/{video_id}")]
 pub(super) async fn video_stream(
     ThinData(service_data): ThinData<ServiceData>,
     req: HttpRequest,
-    path: Path<(String, String, usize)>,
+    path: Path<(String, String)>,
 ) -> HttpResponse {
-    let (server_id, video_id, part_index) = path.into_inner();
+    let (server_id, video_id) = path.into_inner();
 
     let Some(server) = service_data.flick_sync.server(&server_id).await else {
         return HttpResponse::NotFound().finish();
@@ -252,12 +252,7 @@ pub(super) async fn video_stream(
         return HttpResponse::NotFound().finish();
     };
 
-    let parts = video.parts().await;
-    let Some(part) = parts.get(part_index) else {
-        return HttpResponse::NotFound().finish();
-    };
-
-    let Ok(Some(file)) = part.file().await else {
+    let Ok(Some(file)) = video.file().await else {
         return HttpResponse::NotFound().finish();
     };
 
@@ -728,47 +723,28 @@ pub(super) async fn video_page(
         "".to_string()
     };
 
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct VideoPart {
-        url: String,
-        mime_type: String,
-        duration: f64,
-    }
+    let Ok(Some(file)) = video.file().await else {
+        return HttpResponse::NotFound().finish();
+    };
 
-    let mut parts = Vec::new();
-    for part in video.parts().await {
-        let Ok(Some(file)) = part.file().await else {
-            return HttpResponse::NotFound().finish();
-        };
-
-        let Ok(mime_type) = file.mime_type().await else {
-            return HttpResponse::NotFound().finish();
-        };
-
-        parts.push(VideoPart {
-            url: format!(
-                "{url_base}stream/{server_id}/{}/{}",
-                video.id(),
-                part.index()
-            ),
-            mime_type: mime_type.to_string(),
-            duration: part.duration().await.as_millis() as f64 / 1000.0,
-        })
-    }
+    let Ok(mime_type) = file.mime_type().await else {
+        return HttpResponse::NotFound().finish();
+    };
 
     #[derive(Template)]
     #[template(path = "video.html")]
     struct VideoTemplate {
         sidebar: Option<Sidebar>,
         title: String,
-        parts: Vec<VideoPart>,
         playback_position: f64,
         air_date: Option<String>,
         image: String,
         show: Option<String>,
         season: Option<usize>,
         episode: Option<usize>,
+        url: String,
+        mime_type: String,
+        total_duration: f64,
     }
 
     let playback_state = video.playback_state().await;
@@ -799,13 +775,15 @@ pub(super) async fn video_page(
     let template = VideoTemplate {
         sidebar,
         title: video.title().await,
-        parts,
         playback_position,
         image,
         air_date: video.air_date().await.map(|date| date.to_string()),
         show,
         season,
         episode,
+        url: format!("{url_base}stream/{server_id}/{}", video.id()),
+        mime_type: mime_type.to_string(),
+        total_duration: video.duration().await.as_millis() as f64 / 1000.0,
     };
 
     render(template)

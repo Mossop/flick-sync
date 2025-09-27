@@ -27,7 +27,7 @@ run = "cargo build"
 description = "Runs the flick-sync server on port 3000"
 run = "cargo run -- serve -p 3000"
 
-[tasks."mobile:dev-client"]
+[tasks."mobile:build-dev"]
 description = "Builds the development client for android"
 dir = "{{ config_root }}/packages/mobile"
 run = "eas build --profile development --platform android"

@@ -156,8 +156,6 @@ export class VideoPlayer extends LitElement {
   ];
 
   static properties = {
-    playlist: { type: Array },
-    mediaIndex: { state: true },
     currentTime: { type: Number },
     isPlaying: { state: true },
     isFullscreen: { state: true },
@@ -169,15 +167,15 @@ export class VideoPlayer extends LitElement {
     show: { type: Object },
     season: { type: Object },
     episode: { type: Object },
+    url: { type: String },
+    totalTime: { type: Number },
   };
 
   constructor() {
     super();
     this.currentTime = 0;
     this.lastReportedTime = 0;
-    this.mediaIndex = 0;
     this.isPlaying = false;
-    this.previousTime = 0;
     this.onFullscreenChanged();
     this.isCastAvailable = window.castAvailable;
     this.isCasting = false;
@@ -206,7 +204,7 @@ export class VideoPlayer extends LitElement {
 
   castControllerEventListener = (event) => {
     this.isPlaying = !this.castPlayer.isPaused;
-    this.updateTime(this.castPlayer.currentTime + this.previousTime);
+    this.updateTime(this.castPlayer.currentTime);
   };
 
   updateCastSession(session) {
@@ -255,27 +253,17 @@ export class VideoPlayer extends LitElement {
       let videoUrl = new URL(document.documentURI);
 
       if (mediaInfo?.contentId == videoUrl.pathname) {
-        let previousTime = 0;
-        let mediaIndex = 0;
+        let url = new URL(this.url, document.documentURI);
+        if (mediaInfo.contentUrl == url.toString()) {
+          this.castControllerEventListener();
 
-        for (let media of this.playlist) {
-          let url = new URL(media.url, document.documentURI);
-          if (mediaInfo.contentUrl == url.toString()) {
-            this.mediaIndex = mediaIndex;
-            this.previousTime = previousTime;
-            this.castControllerEventListener();
+          castMedia.getStatus(
+            null,
+            () => this.castControllerEventListener(),
+            (error) => {}
+          );
 
-            castMedia.getStatus(
-              null,
-              () => this.castControllerEventListener(),
-              (error) => {}
-            );
-
-            return;
-          }
-
-          previousTime += media.duration;
-          mediaIndex++;
+          return;
         }
       }
     } else {
@@ -286,7 +274,6 @@ export class VideoPlayer extends LitElement {
       this.classList.remove("casting");
     }
 
-    this.mediaIndex = -1;
     this.seek(this.currentTime);
   }
 
@@ -298,7 +285,7 @@ export class VideoPlayer extends LitElement {
     this.videoElement = element;
 
     if (this.videoElement) {
-      this.videoElement.currentTime = this.currentTime - this.previousTime;
+      this.videoElement.currentTime = this.currentTime;
       if (this.isPlaying) {
         this.videoElement.play();
       } else {
@@ -339,21 +326,6 @@ export class VideoPlayer extends LitElement {
     this.videoElement?.pause();
 
     super.disconnectedCallback();
-  }
-
-  willUpdate(changedProperties) {
-    if (changedProperties.has("playlist")) {
-      this.totalTime = this.playlist
-        .map((m) => m.duration)
-        .reduce((t, v) => t + v, 0);
-    }
-
-    if (changedProperties.has("mediaIndex")) {
-      this.previousTime = this.playlist
-        .slice(0, this.mediaIndex)
-        .map((m) => m.duration)
-        .reduce((t, v) => t + v, 0);
-    }
   }
 
   togglePlayback(event) {
@@ -427,17 +399,11 @@ export class VideoPlayer extends LitElement {
     }
 
     this.isPlaying = !(this.videoElement.paused || this.videoElement.ended);
-    this.updateTime(this.previousTime + this.videoElement.currentTime);
+    this.updateTime(this.videoElement.currentTime);
   }
 
   onMediaEnded() {
-    if (this.mediaIndex < this.playlist.length - 1) {
-      this.previousTime =
-        this.previousTime + this.playlist[this.mediaIndex].duration;
-      this.mediaIndex++;
-    } else {
-      this.onMediaStateChanged;
-    }
+    this.onMediaStateChanged();
   }
 
   castMediaInfo(media) {
@@ -477,35 +443,13 @@ export class VideoPlayer extends LitElement {
       return;
     }
 
-    let previousTime = 0;
-    let mediaIndex = 0;
     this.currentTime = targetTime;
 
-    while (targetTime >= this.playlist[mediaIndex].duration) {
-      mediaIndex++;
-      previousTime += this.playlist[mediaIndex].duration;
-      targetTime -= this.playlist[mediaIndex].duration;
-    }
-
-    this.previousTime = previousTime;
-
     if (this.isCasting) {
-      if (mediaIndex == this.mediaIndex) {
-        this.castPlayer.currentTime = targetTime;
-        this.castController.seek();
-      } else {
-        this.mediaIndex = mediaIndex;
-
-        let mediaInfo = this.castMediaInfo(this.playlist[mediaIndex]);
-        let loadRequest = new chrome.cast.media.LoadRequest(mediaInfo);
-        loadRequest.currentTime = targetTime;
-        loadRequest.autoplay = this.isPlaying;
-        await this.castSession.loadMedia(loadRequest);
-      }
-    } else if (mediaIndex == this.mediaIndex) {
-      this.videoElement.currentTime = targetTime;
+      this.castPlayer.currentTime = targetTime;
+      this.castController.seek();
     } else {
-      this.mediaIndex = mediaIndex;
+      this.videoElement.currentTime = targetTime;
     }
   }
 
@@ -582,8 +526,7 @@ export class VideoPlayer extends LitElement {
       return nothing;
     }
 
-    let media = this.playlist[this.mediaIndex];
-    let mediaUrl = new URL(media.url, document.documentURI);
+    let mediaUrl = new URL(this.url, document.documentURI);
     mediaUrl = new URL(mediaUrl.pathname, document.documentURI);
 
     return keyed(
@@ -599,7 +542,7 @@ export class VideoPlayer extends LitElement {
         @timeupdate="${this.onMediaStateChanged}"
         @seeked="${this.onMediaStateChanged}"
       >
-        <source type="${media.mimeType}" src="${mediaUrl.toString()}"></source>
+        <source type="${this.mimeType}" src="${mediaUrl.toString()}"></source>
       </video>`
     );
   }

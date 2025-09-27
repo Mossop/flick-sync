@@ -1,9 +1,7 @@
 use std::cmp::Ordering;
 
 use askama::Template;
-use flick_sync::{
-    Collection, FlickSync, PlaybackState, Season, Show, Video, VideoPart, VideoStats,
-};
+use flick_sync::{Collection, FlickSync, PlaybackState, Season, Show, Video, VideoStats};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tracing::warn;
 
@@ -183,7 +181,7 @@ impl ServerTemplate {
                     name: sync.title,
                     duration: format_duration(stats.local_duration.as_secs()),
                     size: stats.local_bytes,
-                    percent: if stats.remote_parts == 0 {
+                    percent: if stats.remote_videos == 0 {
                         0.0
                     } else {
                         (100.0 * stats.local_bytes as f64) / stats.remote_bytes as f64
@@ -307,12 +305,12 @@ pub(crate) enum SyncLogMessage {
     SyncStarted(String),
     SyncFailed((String, String)),
     SyncFinished((String, bool)),
-    DownloadStarted(VideoPart),
-    DownloadComplete(VideoPart),
-    DownloadFailed((VideoPart, String)),
-    TranscodeStarted(VideoPart),
-    TranscodeComplete(VideoPart),
-    TranscodeFailed((VideoPart, String)),
+    DownloadStarted(Video),
+    DownloadComplete(Video),
+    DownloadFailed((Video, String)),
+    TranscodeStarted(Video),
+    TranscodeComplete(Video),
+    TranscodeFailed((Video, String)),
 }
 
 #[derive(Clone)]
@@ -373,49 +371,37 @@ impl SyncLogItem {
             SyncLogMessage::DownloadStarted(video_part) => SyncLogTemplate {
                 timestamp,
                 message_type: "info",
-                message: format!(
-                    "Download started for {}.",
-                    video_part.video().await.title().await
-                ),
+                message: format!("Download started for {}.", video_part.title().await),
             },
             SyncLogMessage::DownloadComplete(video_part) => SyncLogTemplate {
                 timestamp,
                 message_type: "success",
-                message: format!(
-                    "Download complete for {}.",
-                    video_part.video().await.title().await
-                ),
+                message: format!("Download complete for {}.", video_part.title().await),
             },
             SyncLogMessage::DownloadFailed((video_part, message)) => SyncLogTemplate {
                 timestamp,
                 message_type: "error",
                 message: format!(
                     "Download failed for {}: {message}",
-                    video_part.video().await.title().await
+                    video_part.title().await
                 ),
             },
             SyncLogMessage::TranscodeStarted(video_part) => SyncLogTemplate {
                 timestamp,
                 message_type: "info",
-                message: format!(
-                    "Transcode started for {}.",
-                    video_part.video().await.title().await
-                ),
+                message: format!("Transcode started for {}.", video_part.title().await),
             },
             SyncLogMessage::TranscodeComplete(video_part) => SyncLogTemplate {
                 timestamp,
                 message_type: "success",
-                message: format!(
-                    "Transcode complete for {}.",
-                    video_part.video().await.title().await
-                ),
+                message: format!("Transcode complete for {}.", video_part.title().await),
             },
             SyncLogMessage::TranscodeFailed((video_part, message)) => SyncLogTemplate {
                 timestamp,
                 message_type: "error",
                 message: format!(
                     "Transcode failed for {}: {message}",
-                    video_part.video().await.title().await
+                    video_part.title().await
                 ),
             },
         }
@@ -435,7 +421,7 @@ pub(crate) struct ProgressBarTemplate {
 #[derive(Clone)]
 pub(crate) struct SyncProgressBar {
     pub(super) is_download: bool,
-    pub(super) video_part: VideoPart,
+    pub(super) video: Video,
     pub(super) position: u64,
     pub(super) length: Option<u64>,
 }
@@ -443,9 +429,9 @@ pub(crate) struct SyncProgressBar {
 impl SyncProgressBar {
     pub(crate) async fn template(&self) -> ProgressBarTemplate {
         ProgressBarTemplate {
-            id: self.video_part.id().to_owned(),
+            id: self.video.id().to_owned(),
             is_download: self.is_download,
-            video: self.video_part.video().await.title().await,
+            video: self.video.title().await,
             position: self.position,
             length: self.length,
         }

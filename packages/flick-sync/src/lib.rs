@@ -51,12 +51,11 @@ pub const CONFIG_FILE: &str = "flicksync.json";
 pub(crate) const DEFAULT_PROFILE: &str = "720p";
 
 lazy_static! {
-    static ref DEFAULT_PROFILES: HashMap<String, Option<TranscodeProfile>> = {
+    static ref DEFAULT_PROFILES: HashMap<String, TranscodeProfile> = {
         let mut map = HashMap::new();
-        map.insert("original".to_string(), None);
         map.insert(
             "720p".to_string(),
-            Some(TranscodeProfile {
+            TranscodeProfile {
                 bitrate: Some(4000),
                 dimensions: Some((1280, 720)),
                 audio_channels: Some(2),
@@ -68,11 +67,11 @@ lazy_static! {
                 h264_level: Some("51".to_string()),
                 containers: Some(vec![ContainerFormat::Mp4]),
                 ..Default::default()
-            }),
+            },
         );
         map.insert(
             "1080p".to_string(),
-            Some(TranscodeProfile {
+            TranscodeProfile {
                 bitrate: Some(10000),
                 dimensions: Some((1920, 1080)),
                 audio_channels: Some(2),
@@ -84,7 +83,7 @@ lazy_static! {
                 h264_level: Some("51".to_string()),
                 containers: Some(vec![ContainerFormat::Mp4]),
                 ..Default::default()
-            }),
+            },
         );
         map
     };
@@ -121,18 +120,17 @@ impl Inner {
         self.config.read().await.output_style
     }
 
-    async fn transcode_options(&self, profile: &str) -> Option<VideoTranscodeOptions> {
+    async fn transcode_options(&self, profile: &str) -> VideoTranscodeOptions {
         let config = self.config.read().await;
         if let Some(profile) = config.profiles.get(profile) {
-            return Some(profile.options());
+            return profile.options();
         }
 
         match DEFAULT_PROFILES.get(profile) {
-            Some(Some(profile)) => Some(profile.options()),
-            Some(None) => None,
+            Some(profile) => profile.options(),
             _ => {
                 warn!("Unknown transcode profile {profile}, falling back to defaults.");
-                Some(Default::default())
+                Default::default()
             }
         }
     }
@@ -236,7 +234,6 @@ impl FlickSync {
             ServerConfig {
                 connection,
                 syncs: Default::default(),
-                max_transcodes: None,
                 transcode_profile,
             },
         );
@@ -312,9 +309,11 @@ impl FlickSync {
         }
 
         let config = self.inner.config.read().await;
-        let server_config = config.servers.get(id)?;
+        if !config.servers.contains_key(id) {
+            return None;
+        }
 
-        let server = Server::new(id, &self.inner, server_config);
+        let server = Server::new(id, &self.inner);
         servers.insert(id.to_owned(), server.clone());
 
         Some(server)
@@ -326,10 +325,10 @@ impl FlickSync {
         let config = self.inner.config.read().await;
         config
             .servers
-            .iter()
-            .map(|(id, server_config)| {
+            .keys()
+            .map(|id| {
                 servers.get(id).cloned().unwrap_or_else(|| {
-                    let server = Server::new(id, &self.inner, server_config);
+                    let server = Server::new(id, &self.inner);
                     servers.insert(id.to_owned(), server.clone());
                     server
                 })

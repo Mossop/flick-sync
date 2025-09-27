@@ -109,7 +109,6 @@ const VideoPartStateDecoder = JsonDecoder.object<VideoPartState>(
     key: JsonDecoder.string,
     size: JsonDecoder.number,
     duration: JsonDecoder.number,
-    download: DownloadStateDecoder,
   },
   "VideoPart",
 );
@@ -186,6 +185,7 @@ const VideoStateDecoder = JsonDecoder.object<VideoState>(
     lastUpdated: JsonDecoder.number,
     lastViewedAt: JsonDecoder.optional(JsonDecoder.number),
     metadata: JsonDecoder.optional(RelatedFileStateDecoder),
+    download: DownloadStateDecoder,
   },
   "VideoState",
 );

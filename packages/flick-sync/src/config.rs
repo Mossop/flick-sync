@@ -2,9 +2,7 @@ use std::{cmp::Ordering, collections::HashMap};
 
 use plex_api::{
     media_container::server::library::{AudioCodec, ContainerFormat, VideoCodec},
-    transcode::{
-        AudioSetting, Constraint, ContainerSetting, Limitation, VideoSetting, VideoTranscodeOptions,
-    },
+    transcode::{AudioSetting, Constraint, Limitation, VideoSetting, VideoTranscodeOptions},
 };
 use serde::{Deserialize, Serialize};
 use serde_plain::{derive_display_from_serialize, derive_fromstr_from_deserialize};
@@ -52,8 +50,6 @@ pub(crate) struct ServerConfig {
     )]
     pub(crate) syncs: HashMap<String, SyncItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) max_transcodes: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) transcode_profile: Option<String>,
 }
 
@@ -91,25 +87,12 @@ impl TranscodeProfile {
     pub(crate) fn options(&self) -> VideoTranscodeOptions {
         let mut video_limitations: Vec<Limitation<VideoCodec, VideoSetting>> = Vec::new();
         let mut audio_limitations: Vec<Limitation<AudioCodec, AudioSetting>> = Vec::new();
-        let mut container_limitations: Vec<Limitation<ContainerFormat, ContainerSetting>> =
-            Vec::new();
 
         if let Some(channels) = self.audio_channels {
             audio_limitations.push(
                 (
                     AudioSetting::Channels,
                     Constraint::Max(channels.to_string()),
-                )
-                    .into(),
-            );
-        }
-
-        if let Some(ref profiles) = self.h264_profiles {
-            video_limitations.push(
-                (
-                    VideoCodec::H264,
-                    VideoSetting::Profile,
-                    Constraint::MatchList(profiles.iter().map(|p| p.to_string()).collect()),
                 )
                     .into(),
             );
@@ -126,15 +109,6 @@ impl TranscodeProfile {
             );
         }
 
-        let mut limit: Limitation<ContainerFormat, ContainerSetting> = (
-            ContainerFormat::Mp4,
-            ContainerSetting::OptimizedForStreaming,
-            Constraint::Match("1".to_string()),
-        )
-            .into();
-        limit.is_required = true;
-        container_limitations.push(limit);
-
         let (width, height) = self.dimensions.unwrap_or((1280, 720));
 
         VideoTranscodeOptions {
@@ -142,12 +116,11 @@ impl TranscodeProfile {
             width,
             height,
             audio_boost: None,
-            burn_subtitles: true,
+            burn_subtitles: false,
             containers: self
                 .containers
                 .clone()
                 .unwrap_or_else(|| vec![ContainerFormat::Mp4]),
-            container_limitations,
             video_codecs: self
                 .video_codecs
                 .clone()
@@ -158,6 +131,7 @@ impl TranscodeProfile {
                 .clone()
                 .unwrap_or_else(|| vec![AudioCodec::Aac, AudioCodec::Mp3]),
             audio_limitations,
+            subtitle_codecs: Vec::new(),
         }
     }
 }

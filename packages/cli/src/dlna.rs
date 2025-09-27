@@ -4,7 +4,6 @@ use std::{
     pin::Pin,
     str::FromStr,
     task::{Context, Poll},
-    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -14,7 +13,7 @@ use dlna_server::{
 };
 use flick_sync::{
     Collection, FlickSync, Library, LockedFile, MovieCollection, MovieLibrary, Playlist, Season,
-    Server, Show, ShowCollection, ShowLibrary, Timeout, Video, VideoPart,
+    Server, Show, ShowCollection, ShowLibrary, Timeout, Video,
 };
 use image::ImageReader;
 use lazy_static::lazy_static;
@@ -30,7 +29,7 @@ use tracing::{Instrument, Level, Span, instrument, span};
 use crate::{Resources, shared::uniform_title};
 
 lazy_static! {
-    static ref RE_VIDEO_PART: Regex = Regex::new("^video/(.+)/VP:(.+)/(\\d+)$").unwrap();
+    static ref RE_VIDEO: Regex = Regex::new("^video/(.+)/V:(.+)$").unwrap();
 }
 
 #[pin_project(project = EitherReaderProj)]
@@ -59,19 +58,17 @@ struct ProgressReader<R> {
     span: Option<Span>,
     position: u64,
     video: Video,
-    offset: u64,
     secs_per_byte: f64,
     last_report: u64,
 }
 
 impl<R> ProgressReader<R> {
-    fn new(inner: R, video: Video, offset: u64, secs_per_byte: f64) -> Self {
+    fn new(inner: R, video: Video, secs_per_byte: f64) -> Self {
         Self {
             inner,
             span: None,
             position: 0,
             video,
-            offset,
             secs_per_byte,
             last_report: 0,
         }
@@ -98,7 +95,7 @@ impl<R: AsyncRead> AsyncRead for ProgressReader<R> {
             let read = remaining - buf.remaining();
             *this.position += read as u64;
 
-            let new_position = (*this.position as f64 * *this.secs_per_byte) as u64 + *this.offset;
+            let new_position = (*this.position as f64 * *this.secs_per_byte) as u64;
 
             if new_position.abs_diff(*this.last_report) > 15000 {
                 *this.last_report = new_position;
@@ -127,20 +124,15 @@ impl<R: AsyncSeek> AsyncSeek for ProgressReader<R> {
     }
 }
 
-async fn video_part_from_id(flick_sync: &FlickSync, id: &str) -> Option<VideoPart> {
-    let captures = RE_VIDEO_PART.captures(id)?;
+async fn video_from_id(flick_sync: &FlickSync, id: &str) -> Option<Video> {
+    let captures = RE_VIDEO.captures(id)?;
 
     let server_id = captures.get(1).unwrap().as_str();
     let video_id = captures.get(2).unwrap().as_str();
-    let video_part = captures.get(3).unwrap().as_str().parse::<usize>().unwrap();
 
     let server = flick_sync.server(server_id).await?;
 
-    let video = server.video(video_id).await?;
-
-    let parts = video.parts().await;
-
-    Some(parts.get(video_part)?.clone())
+    server.video(video_id).await
 }
 
 // Object ID forms and hierarchy:
@@ -193,24 +185,18 @@ async fn icon_resource(id: &str, file: Result<Option<LockedFile>, Timeout>) -> O
 }
 
 async fn file_resource(
-    video_part: &VideoPart,
+    video: &Video,
     file: Result<Option<LockedFile>, Timeout>,
 ) -> Option<Resource> {
     let file = file.ok()??;
     let size = file.len().await.ok()?;
 
     let mime_type = file.mime_type().await.ok()?;
-    let video = video_part.video().await;
 
     Some(Resource {
-        id: format!(
-            "video/{}/VP:{}/{}",
-            video.server().id(),
-            video.id(),
-            video_part.index()
-        ),
+        id: format!("video/{}/V:{}", video.server().id(), video.id()),
         mime_type,
-        duration: Some(video_part.duration().await),
+        duration: Some(video.duration().await),
         size: Some(size),
         seekable: true,
     })
@@ -268,70 +254,6 @@ async fn video_parent(video: &Video) -> String {
     }
 }
 
-impl FromId for VideoPart {
-    async fn from_id(server: Server, id: &str) -> Result<Self, UpnpError> {
-        let Some((video_id, index)) = id.split_once('/') else {
-            return Err(UpnpError::unknown_object());
-        };
-
-        let Ok(index) = usize::from_str(index) else {
-            return Err(UpnpError::unknown_object());
-        };
-
-        let Some(video) = server.video(video_id).await else {
-            return Err(UpnpError::unknown_object());
-        };
-
-        let parts = video.parts().await;
-        parts
-            .into_iter()
-            .nth(index)
-            .ok_or(UpnpError::unknown_object())
-    }
-}
-
-impl ToObject for VideoPart {
-    type Children = Object;
-
-    async fn to_object(self) -> Object {
-        let video = self.video().await;
-        let parts = video.parts().await;
-
-        let video_id = format!("{}/V:{}", video.server().id(), video.id());
-
-        let mut resources = Vec::new();
-        if let Some(resource) = file_resource(&self, self.file().await).await {
-            resources.push(resource);
-        }
-
-        let (id, title, parent_id) = if parts.len() == 1 {
-            (
-                video_id.clone(),
-                video.title().await,
-                video_parent(&video).await,
-            )
-        } else {
-            (
-                format!("{}/VP:{}/{}", video.server().id(), video.id(), self.index()),
-                format!("{} - Pt {}", video.title().await, self.index() + 1),
-                video_id.clone(),
-            )
-        };
-
-        Object::Item(Item {
-            thumbnail: icon_resource(&video_id, video.thumbnail().await).await,
-            id,
-            parent_id,
-            title,
-            resources,
-        })
-    }
-
-    async fn to_children(self) -> Vec<Self::Children> {
-        Vec::new()
-    }
-}
-
 impl FromId for Video {
     async fn from_id(server: Server, id: &str) -> Result<Self, UpnpError> {
         server.video(id).await.ok_or(UpnpError::unknown_object())
@@ -339,31 +261,26 @@ impl FromId for Video {
 }
 
 impl ToObject for Video {
-    type Children = VideoPart;
+    type Children = Object;
 
     async fn to_object(self) -> Object {
-        let parts = self.parts().await;
-
-        if parts.len() == 1 {
-            let part = parts.into_iter().next().unwrap();
-
-            part.to_object().await
-        } else {
-            let id = format!("{}/V:{}", self.server().id(), self.id());
-            Object::Container(Container {
-                thumbnail: icon_resource(&id, self.thumbnail().await).await,
-                id,
-                parent_id: video_parent(&self).await,
-                title: self.title().await,
-                child_count: Some(parts.len()),
-            })
+        let mut resources = Vec::new();
+        if let Some(resource) = file_resource(&self, self.file().await).await {
+            resources.push(resource);
         }
+
+        let id = format!("{}/V:{}", self.server().id(), self.id());
+        Object::Item(Item {
+            thumbnail: icon_resource(&id, self.thumbnail().await).await,
+            id,
+            parent_id: video_parent(&self).await,
+            title: self.title().await,
+            resources,
+        })
     }
 
     async fn to_children(self) -> Vec<Self::Children> {
-        let parts = self.parts().await;
-
-        if parts.len() == 1 { Vec::new() } else { parts }
+        Vec::new()
     }
 
     fn sort_children(_: &mut Vec<Object>) {}
@@ -896,7 +813,6 @@ impl DlnaRequestHandler for DlnaHandler {
                 "S" => Ok(Show::from_id(server, item_id).await?.to_object().await),
                 "N" => Ok(Season::from_id(server, item_id).await?.to_object().await),
                 "V" => Ok(Video::from_id(server, item_id).await?.to_object().await),
-                "VP" => Ok(VideoPart::from_id(server, item_id).await?.to_object().await),
                 _ => Err(UpnpError::unknown_object()),
             }
         }
@@ -963,10 +879,6 @@ impl DlnaRequestHandler for DlnaHandler {
                     .await?
                     .collect_children()
                     .await),
-                "VP" => Ok(VideoPart::from_id(server, item_id)
-                    .await?
-                    .collect_children()
-                    .await),
                 _ => Err(UpnpError::unknown_object()),
             }
         }
@@ -1029,11 +941,11 @@ impl DlnaRequestHandler for DlnaHandler {
     }
 
     async fn get_resource(&self, resource_id: &str) -> Result<Resource, UpnpError> {
-        let Some(part) = video_part_from_id(&self.flick_sync, resource_id).await else {
+        let Some(video) = video_from_id(&self.flick_sync, resource_id).await else {
             return Err(UpnpError::unknown_object());
         };
 
-        let Ok(Some(file)) = part.file().await else {
+        let Ok(Some(file)) = video.file().await else {
             return Err(UpnpError::unknown_object());
         };
 
@@ -1059,11 +971,11 @@ impl DlnaRequestHandler for DlnaHandler {
         &self,
         resource_id: &str,
     ) -> Result<impl AsyncRead + AsyncSeek + Unpin + 'static, UpnpError> {
-        let Some(part) = video_part_from_id(&self.flick_sync, resource_id).await else {
+        let Some(video) = video_from_id(&self.flick_sync, resource_id).await else {
             return Err(UpnpError::unknown_object());
         };
 
-        let Ok(Some(file)) = part.file().await else {
+        let Ok(Some(file)) = video.file().await else {
             return Err(UpnpError::unknown_object());
         };
 
@@ -1075,24 +987,10 @@ impl DlnaRequestHandler for DlnaHandler {
             return Err(UpnpError::unknown_object());
         };
 
-        let video = part.video().await;
-        let mut initial_duration = Duration::from_millis(0);
-        if part.index() > 0 {
-            let parts = video.parts().await;
-            for previous in &parts[0..part.index()] {
-                initial_duration += previous.duration().await;
-            }
-        }
-
-        let part_duration = part.duration().await;
+        let part_duration = video.duration().await;
         let secs_per_byte = part_duration.as_millis() as f64 / size as f64;
 
-        let progress_reader = ProgressReader::new(
-            reader,
-            video,
-            initial_duration.as_millis() as u64,
-            secs_per_byte,
-        );
+        let progress_reader = ProgressReader::new(reader, video, secs_per_byte);
 
         Ok(progress_reader)
     }

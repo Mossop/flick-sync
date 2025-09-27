@@ -1,5 +1,5 @@
 use clap::Args;
-use flick_sync::{DownloadProgress, FlickSync, Progress, VideoPart};
+use flick_sync::{DownloadProgress, FlickSync, Progress, Video};
 use tracing::{debug, error, instrument, warn};
 
 use crate::{
@@ -90,8 +90,8 @@ struct ConsoleProgress {
 }
 
 impl DownloadProgress for ConsoleProgress {
-    async fn transcode_started(&self, video_part: &VideoPart) -> impl Progress + Clone + 'static {
-        let title = video_part.video().await.title().await;
+    async fn transcode_started(&self, video_part: &Video) -> impl Progress + Clone + 'static {
+        let title = video_part.title().await;
 
         let bar = self
             .console
@@ -101,8 +101,8 @@ impl DownloadProgress for ConsoleProgress {
         ProgressBar { bar }
     }
 
-    async fn download_started(&self, video_part: &VideoPart) -> impl Progress + Clone + 'static {
-        let title = video_part.video().await.title().await;
+    async fn download_started(&self, video_part: &Video) -> impl Progress + Clone + 'static {
+        let title = video_part.title().await;
 
         let bar = self
             .console

@@ -7,33 +7,28 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     result,
-    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
 
 use anyhow::{anyhow, bail};
-use futures::{
-    FutureExt,
-    io::{AsyncWrite, sink},
-    select,
-};
+use futures::io::AsyncWrite;
 use pathdiff::diff_paths;
 use pin_project::pin_project;
 use plex_api::{
     Server as PlexServer,
-    library::{self, Item, MediaItem, MetadataItem},
+    library::{self, Item, MediaItemWithTranscoding, MetadataItem},
     media_container::server::library::ContainerFormat,
-    transcode::TranscodeStatus,
+    transcode::{DownloadQueue, QueueItemStatus, VideoTranscodeOptions},
 };
 use time::{Date, OffsetDateTime};
 use tokio::{
-    fs::{File, OpenOptions, create_dir_all, metadata, remove_file},
+    fs::{File, OpenOptions, create_dir_all, metadata},
     io::{AsyncWriteExt, BufWriter},
-    sync::{OwnedSemaphorePermit, Semaphore},
+    sync::OwnedSemaphorePermit,
     time::sleep,
 };
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 use xml::{EmitterConfig, writer::XmlEvent};
 
 use crate::{
@@ -55,7 +50,7 @@ const METADATA_DIR: &str = ".metadata";
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum FileType {
-    Video(usize),
+    Video,
     Thumbnail,
     Metadata,
     Playlist,
@@ -63,7 +58,7 @@ pub(crate) enum FileType {
 
 impl FileType {
     fn is_metadata(&self) -> bool {
-        !matches!(self, FileType::Video(_))
+        !matches!(self, FileType::Video)
     }
 }
 
@@ -322,18 +317,16 @@ async fn write_playlist(root: &Path, playlist_path: &Path, videos: Vec<Video>) -
     let mut writer = BufWriter::new(output);
 
     for video in videos {
-        for part in video.parts().await {
-            let download = part.download_state().await;
+        let download = video.download_state().await;
 
-            if let Some(video_path) = download.path()
-                && !download.needs_download()
-                && let Some(relative) = diff_paths(root.join(video_path), parent)
-            {
-                writer
-                    .write_all(relative.as_os_str().as_encoded_bytes())
-                    .await?;
-                writer.write_all(b"\n").await?;
-            }
+        if let Some(video_path) = download.path()
+            && !download.needs_download()
+            && let Some(relative) = diff_paths(root.join(video_path), parent)
+        {
+            writer
+                .write_all(relative.as_os_str().as_encoded_bytes())
+                .await?;
+            writer.write_all(b"\n").await?;
         }
     }
 
@@ -403,7 +396,7 @@ impl Show {
             let state = ss.shows.get(&self.id).unwrap();
 
             let name = match file_type {
-                FileType::Video(_) | FileType::Playlist => {
+                FileType::Video | FileType::Playlist => {
                     return None;
                 }
                 FileType::Thumbnail => {
@@ -578,12 +571,6 @@ impl fmt::Debug for VideoPart {
     }
 }
 
-enum TranscodeResult {
-    Skipped,
-    Transcoding,
-    Refused,
-}
-
 impl VideoPart {
     async fn with_server_state<F, R>(&self, cb: F) -> R
     where
@@ -599,30 +586,6 @@ impl VideoPart {
     {
         self.with_video_state(|vs| cb(vs.parts.get(self.index).unwrap()))
             .await
-    }
-
-    async fn update_state<F>(&self, cb: F) -> Result
-    where
-        F: Send + FnOnce(&mut VideoPartState),
-    {
-        let mut state = self.server.inner.state.write().await;
-        let server_state = state.servers.get_mut(&self.server.id).unwrap();
-        cb(server_state
-            .videos
-            .get_mut(&self.id)
-            .unwrap()
-            .parts
-            .get_mut(self.index)
-            .unwrap());
-        self.server.inner.persist_state(&state).await
-    }
-
-    async fn try_lock_write(&self) -> result::Result<OpWriteGuard, Timeout> {
-        self.server.try_lock_write_key(&self.id).await
-    }
-
-    async fn try_lock_read(&self) -> result::Result<OpReadGuard, Timeout> {
-        self.server.try_lock_read_key(&self.id).await
     }
 
     pub fn id(&self) -> &str {
@@ -646,661 +609,9 @@ impl VideoPart {
             .await
     }
 
-    pub(crate) async fn transfer_state(&self) -> TransferState {
-        let download_state = self.download_state().await;
-
-        match download_state {
-            DownloadState::None => TransferState::Waiting,
-            DownloadState::Downloading { .. } => TransferState::Downloading,
-            DownloadState::Transcoding { .. } => TransferState::Transcoding,
-            _ => TransferState::Downloaded,
-        }
-    }
-
-    pub async fn file(&self) -> result::Result<Option<LockedFile>, Timeout> {
-        let guard = self.try_lock_read().await?;
-
-        Ok(self
-            .download_state()
-            .await
-            .file(guard, &self.server.inner.path)
-            .await)
-    }
-
-    #[instrument(level = "trace", skip(self, plex_server), fields(video=self.id, part=self.index))]
-    pub(crate) async fn verify_download(
-        &self,
-        plex_server: &PlexServer,
-        allow_video_deletion: bool,
-    ) -> Result {
-        let Ok(guard) = self.try_lock_write().await else {
-            return Ok(());
-        };
-
-        let mut download_state = self.download_state().await;
-
-        download_state
-            .verify(
-                &guard,
-                plex_server,
-                self,
-                &self.server.inner.path,
-                allow_video_deletion,
-            )
-            .await;
-
-        self.update_state(|state| state.download = download_state)
-            .await
-    }
-
     pub async fn video(&self) -> Video {
         self.with_video_state(|video_state| Video::wrap(&self.server, video_state))
             .await
-    }
-
-    pub(crate) async fn file_path(&self, extension: &str) -> PathBuf {
-        let video = self.video().await;
-        video
-            .file_path(FileType::Video(self.index), extension)
-            .await
-            .unwrap()
-    }
-
-    pub async fn recover_download(&self) -> Result {
-        let title = self.with_video_state(|vs| vs.title.clone()).await;
-        let expected_size = self.remote_size().await;
-
-        for container in [
-            ContainerFormat::Avi,
-            ContainerFormat::Mpeg,
-            ContainerFormat::MpegTs,
-            ContainerFormat::M4v,
-            ContainerFormat::Mp4,
-            ContainerFormat::Mkv,
-        ] {
-            let path = self.file_path(&container.to_string()).await;
-            let target = self.server.inner.path.join(&path);
-
-            if let Ok(stats) = metadata(target).await
-                && stats.is_file()
-            {
-                info!(path=?path.display(), "Recovered download for {title}");
-
-                let download_state = if stats.size() == expected_size {
-                    DownloadState::Downloaded { path }
-                } else {
-                    DownloadState::Transcoded { path }
-                };
-
-                return self
-                    .update_state(|state| state.download = download_state)
-                    .await;
-            }
-        }
-
-        Ok(())
-    }
-
-    pub async fn is_downloaded(&self) -> bool {
-        let download_state = self.download_state().await;
-        !download_state.needs_download()
-    }
-
-    #[instrument(level = "trace", skip(self, plex_server), fields(session_id, video=self.id, part=self.index))]
-    async fn start_transcode(&self, plex_server: &PlexServer) -> Result<TranscodeResult> {
-        let (media_id, profile) = self
-            .with_video_state(|vs| (vs.media_id.clone(), vs.transcode_profile.clone()))
-            .await;
-
-        let server_profile = self.server.transcode_profile().await;
-
-        let options = if let Some(options) = self
-            .server
-            .inner
-            .transcode_options(&profile.unwrap_or(server_profile))
-            .await
-        {
-            options
-        } else {
-            return Ok(TranscodeResult::Skipped);
-        };
-
-        let item = plex_server.item_by_id(&self.id).await?;
-
-        let video = match item {
-            Item::Movie(m) => library::Video::Movie(m),
-            Item::Episode(e) => library::Video::Episode(e),
-            _ => panic!("Unexpected item type"),
-        };
-
-        let media = video
-            .media()
-            .into_iter()
-            .find(|m| m.metadata().id.as_ref() == Some(&media_id))
-            .ok_or_else(|| anyhow!("Item was not found on the server"))?;
-        let parts = media.parts();
-        let part = parts
-            .get(self.index)
-            .ok_or_else(|| anyhow!("Item was not found on the server"))?;
-
-        trace!("Attempting transcode");
-
-        let session = match part.create_download_session(options).await {
-            Ok(s) => s,
-            Err(plex_api::Error::TranscodeRefused) => return Ok(TranscodeResult::Refused),
-            Err(e) => return Err(e.into()),
-        };
-
-        tracing::Span::current().record("session_id", session.session_id());
-
-        // Wait until the transcode session has started.
-        let mut count = 0;
-        loop {
-            if count >= 20 {
-                error!("Transcode session failed to start");
-                bail!("Failed to start transcode");
-            }
-
-            match session.stats().await {
-                Ok(_) => {
-                    break;
-                }
-                Err(plex_api::Error::ItemNotFound) => {}
-                Err(e) => return Err(e.into()),
-            }
-
-            sleep(Duration::from_millis(500)).await;
-            count += 1;
-        }
-
-        debug!("Started transcode session");
-
-        let path = self.file_path(&session.container().to_string()).await;
-        if let Err(e) = self
-            .update_state(|state| {
-                state.download = DownloadState::Transcoding {
-                    session_id: session.session_id().to_string(),
-                    path,
-                }
-            })
-            .await
-        {
-            warn!("Failed to store download state, abandoning transcode.");
-            if let Err(e) = session.cancel().await {
-                error!(error=?e, "Failed to cancel transcode.");
-            }
-
-            return Err(e);
-        }
-
-        Ok(TranscodeResult::Transcoding)
-    }
-
-    #[instrument(level = "trace", skip(self, plex_server), fields(video=self.id, part=self.index))]
-    async fn enter_downloading_state(&self, plex_server: &PlexServer) -> Result {
-        let item = plex_server.item_by_id(&self.id).await?;
-
-        let media_id = self
-            .with_server_state(|ss| {
-                let video_state = ss.videos.get(&self.id).unwrap();
-                video_state.media_id.clone()
-            })
-            .await;
-
-        let media = item
-            .media()
-            .into_iter()
-            .find(|m| m.metadata().id.as_ref() == Some(&media_id))
-            .ok_or_else(|| anyhow!("Item was not found on the server"))?;
-        let parts = media.parts();
-        let part = parts
-            .get(self.index)
-            .ok_or_else(|| anyhow!("Item was not found on the server"))?;
-
-        let path = self
-            .file_path(&part.metadata().container.unwrap().to_string())
-            .await;
-
-        let target = self.server.inner.path.join(&path);
-        if let Err(e) = remove_file(target).await
-            && e.kind() != ErrorKind::NotFound
-        {
-            return Err(e.into());
-        }
-
-        self.update_state(|state| state.download = DownloadState::Downloading { path })
-            .await?;
-
-        Ok(())
-    }
-
-    #[instrument(level = "trace", skip(self, plex_server, progress, request_permit), fields(video=self.id, part=self.index))]
-    async fn monitor_transcode_progress<P: Progress>(
-        &self,
-        plex_server: &PlexServer,
-        session_id: &str,
-        request_permit: &mut Option<OwnedSemaphorePermit>,
-        progress: &mut P,
-    ) -> Result {
-        let session = match plex_server.transcode_session(session_id).await {
-            Ok(session) => session,
-            Err(plex_api::Error::ItemNotFound) => {
-                warn!("Server dropped transcode session");
-                self.update_state(|vps| vps.download = DownloadState::None)
-                    .await?;
-                bail!("Transcode session was cancelled on the server");
-            }
-            Err(e) => {
-                error!(error=?e, "Error getting transcode status");
-                return Err(e.into());
-            }
-        };
-
-        // We must maintain a download connection to avoid the server deciding to cancel the
-        // ongoing transcode.
-        let mut download_future = Box::pin(session.download(sink()).fuse());
-
-        loop {
-            let delay = match session.status().await {
-                Ok(TranscodeStatus::Complete) => {
-                    debug!("Transcode complete");
-                    break;
-                }
-                Ok(TranscodeStatus::Error) => {
-                    drop(download_future);
-                    let _ = session.cancel().await;
-                    self.update_state(|vps| vps.download = DownloadState::None)
-                        .await?;
-                    bail!("Transcode session failed");
-                }
-                Ok(TranscodeStatus::Transcoding {
-                    remaining,
-                    progress: p,
-                }) => {
-                    if p > 1.0 {
-                        // Let another transcode start now.
-                        request_permit.take();
-                    }
-
-                    progress.progress(p as u64);
-                    if let Some(remaining) = remaining {
-                        remaining.clamp(1, 5)
-                    } else {
-                        5
-                    }
-                }
-                Err(plex_api::Error::ItemNotFound) => {
-                    warn!("Server dropped transcode session");
-                    self.update_state(|vps| vps.download = DownloadState::None)
-                        .await?;
-                    bail!("Transcode session was cancelled on the server");
-                }
-                Err(e) => {
-                    error!(error=?e, "Error getting transcode status");
-                    return Err(e.into());
-                }
-            };
-
-            select! {
-                _ = sleep(Duration::from_secs(delay.into())).fuse() => {},
-                _ = download_future => {},
-            }
-        }
-
-        // Re-acquire the transcode request permit while we wait for the proper download to start.
-        if request_permit.is_none() {
-            *request_permit = Some(
-                self.server
-                    .transcode_requests
-                    .clone()
-                    .acquire_owned()
-                    .await
-                    .unwrap(),
-            );
-        }
-
-        Ok(())
-    }
-
-    #[instrument(level = "trace", skip(self, plex_server, guard), fields(video=self.id, part=self.index))]
-    async fn negotiate_transfer_type(
-        &self,
-        plex_server: &PlexServer,
-        guard: &OpWriteGuard,
-    ) -> Result {
-        let mut download_state = self.download_state().await;
-
-        if matches!(download_state, DownloadState::Transcoding { .. }) {
-            download_state
-                .verify(guard, plex_server, self, &self.server.inner.path, false)
-                .await;
-
-            self.update_state(|state| state.download = download_state.clone())
-                .await?;
-        }
-
-        if matches!(download_state, DownloadState::None) {
-            match self.start_transcode(plex_server).await? {
-                TranscodeResult::Skipped => (),
-                TranscodeResult::Refused => debug!("Transcode attempt refused"),
-                _ => {
-                    return Ok(());
-                }
-            }
-
-            self.enter_downloading_state(plex_server).await?;
-        }
-
-        Ok(())
-    }
-
-    #[instrument(level = "trace", skip(self, plex_server, guard, path, progress), fields(video=self.id, part=self.index))]
-    async fn download_direct<P: Progress>(
-        &self,
-        plex_server: &PlexServer,
-        guard: &OpWriteGuard,
-        path: &Path,
-        progress: &mut P,
-    ) -> Result {
-        let target = self.server.inner.path.join(path);
-        let offset = match metadata(&target).await {
-            Ok(stats) => stats.len(),
-            Err(e) => {
-                if e.kind() == ErrorKind::NotFound {
-                    0
-                } else {
-                    return Err(e.into());
-                }
-            }
-        };
-
-        let item = plex_server.item_by_id(&self.id).await?;
-
-        let media_id = self
-            .with_server_state(|ss| {
-                let video_state = ss.videos.get(&self.id).unwrap();
-                video_state.media_id.clone()
-            })
-            .await;
-
-        let media = item
-            .media()
-            .into_iter()
-            .find(|m| m.metadata().id.as_ref() == Some(&media_id))
-            .ok_or_else(|| anyhow!("Item was not found on the server"))?;
-        let parts = media.parts();
-        let part = parts
-            .get(self.index)
-            .ok_or_else(|| anyhow!("Item was not found on the server"))?;
-
-        if let Some(parent) = target.parent() {
-            create_dir_all(parent).await?;
-        }
-
-        let file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(&target)
-            .await?;
-
-        progress.length(part.metadata().size.unwrap());
-
-        let writer = WriterProgress {
-            offset,
-            writer: AsyncWriteAdapter::new(BufWriter::new(file)),
-            progress,
-            access_permit: &mut None,
-        };
-        info!(path=?path, offset, "Downloading source file");
-
-        part.download(writer, offset..).await?;
-        info!(path=?path, "Download complete");
-
-        let new_state = DownloadState::Downloaded {
-            path: path.to_owned(),
-        };
-
-        self.update_state(|state| {
-            state.download = new_state.clone();
-        })
-        .await?;
-
-        if let Err(e) = new_state
-            .strip_metadata(guard, &self.server.inner.path)
-            .await
-        {
-            warn!(path=?path, error=%e, "Failed to strip metadata");
-        }
-
-        Ok(())
-    }
-
-    #[instrument(level = "trace", skip(self, plex_server, guard, path, request_permit, progress), fields(video=self.id, part=self.index))]
-    async fn download_transcode<P: Progress>(
-        &self,
-        plex_server: &PlexServer,
-        guard: &OpWriteGuard,
-        session_id: &str,
-        path: &Path,
-        request_permit: &mut Option<OwnedSemaphorePermit>,
-        progress: &mut P,
-    ) -> Result {
-        let session = match plex_server.transcode_session(session_id).await {
-            Ok(session) => session,
-            Err(plex_api::Error::ItemNotFound) => {
-                warn!("Server dropped transcode session");
-                self.update_state(|state| state.download = DownloadState::None)
-                    .await?;
-
-                bail!("Transcode session was cancelled on the server");
-            }
-            Err(e) => {
-                error!(error=?e, "Error getting transcode status");
-                return Err(e.into());
-            }
-        };
-
-        match session.stats().await {
-            Ok(stats) => {
-                progress.length(stats.size as u64);
-            }
-            Err(plex_api::Error::ItemNotFound) => {
-                warn!("Server dropped transcode session");
-                self.update_state(|state| state.download = DownloadState::None)
-                    .await?;
-
-                bail!("Transcode session was cancelled on the server");
-            }
-            Err(e) => {
-                error!(error=?e, "Error getting transcode status");
-                return Err(e.into());
-            }
-        }
-
-        let target = self.server.inner.path.join(path);
-
-        if let Some(parent) = target.parent() {
-            create_dir_all(parent).await?;
-        }
-
-        let file = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .create(true)
-            .open(&target)
-            .await?;
-
-        let writer = WriterProgress {
-            offset: 0,
-            writer: AsyncWriteAdapter::new(file),
-            progress,
-            access_permit: request_permit,
-        };
-        info!(path=?path, "Downloading transcoded video");
-
-        session.download(writer).await?;
-        info!(path=?path, "Download complete");
-
-        let new_state = DownloadState::Downloaded {
-            path: path.to_owned(),
-        };
-
-        self.update_state(|state| {
-            state.download = new_state.clone();
-        })
-        .await?;
-
-        if let Err(e) = session.cancel().await {
-            warn!(
-                error=?e,
-                "Transcode session failed to cancel"
-            );
-        }
-
-        if let Err(e) = new_state
-            .strip_metadata(guard, &self.server.inner.path)
-            .await
-        {
-            warn!(path=?path, error=%e, "Failed to strip metadata");
-        }
-
-        Ok(())
-    }
-
-    #[instrument(level = "trace", skip_all, fields(video=self.id, part=self.index))]
-    pub(crate) async fn download<D: DownloadProgress>(
-        self,
-        plex_server: PlexServer,
-        progress: D,
-        mut transcode_request: Option<OwnedSemaphorePermit>,
-        mut transcode_permit: Option<OwnedSemaphorePermit>,
-        mut download_permit: Option<OwnedSemaphorePermit>,
-    ) -> bool {
-        let Ok(guard) = self.try_lock_write().await else {
-            progress
-                .download_failed(&self, anyhow!("Failed to lock item for writing"))
-                .await;
-            return false;
-        };
-
-        let acquire = async |opt: &mut Option<OwnedSemaphorePermit>, sem: &Arc<Semaphore>| {
-            if opt.is_none() {
-                *opt = Some(sem.clone().acquire_owned().await.unwrap());
-            }
-        };
-
-        let mut download_state = self.download_state().await;
-        download_state
-            .verify(&guard, &plex_server, &self, &self.server.inner.path, false)
-            .await;
-
-        if let Err(e) = self
-            .update_state(|state| state.download = download_state.clone())
-            .await
-        {
-            progress.download_failed(&self, e).await;
-            return false;
-        }
-
-        loop {
-            match download_state {
-                DownloadState::None => {
-                    acquire(&mut transcode_permit, &self.server.transcode_permits).await;
-                    acquire(&mut download_permit, &self.server.inner.download_permits).await;
-                    acquire(&mut transcode_request, &self.server.transcode_requests).await;
-
-                    if let Err(e) = self.negotiate_transfer_type(&plex_server, &guard).await {
-                        warn!(error=?e);
-                        progress.download_failed(&self, e).await;
-                        return false;
-                    }
-                }
-                DownloadState::Downloading { path } => {
-                    transcode_request = None;
-                    transcode_permit = None;
-                    acquire(&mut download_permit, &self.server.inner.download_permits).await;
-
-                    let mut progress = progress.download_started(&self).await;
-
-                    if let Err(e) = self
-                        .download_direct(&plex_server, &guard, &path, &mut progress)
-                        .await
-                    {
-                        warn!(error=?e);
-                        progress.failed(e);
-                        return false;
-                    }
-
-                    progress.finished();
-                }
-                DownloadState::Transcoding { session_id, path } => {
-                    acquire(&mut transcode_permit, &self.server.transcode_permits).await;
-                    acquire(&mut download_permit, &self.server.inner.download_permits).await;
-                    acquire(&mut transcode_request, &self.server.transcode_requests).await;
-
-                    let mut transcode_progress = progress.transcode_started(&self).await;
-
-                    match self
-                        .monitor_transcode_progress(
-                            &plex_server,
-                            &session_id,
-                            &mut transcode_request,
-                            &mut transcode_progress,
-                        )
-                        .await
-                    {
-                        Ok(()) => transcode_progress.finished(),
-                        Err(e) => {
-                            transcode_progress.failed(e);
-                            return false;
-                        }
-                    }
-
-                    let mut download_progress = progress.download_started(&self).await;
-
-                    match self
-                        .download_transcode(
-                            &plex_server,
-                            &guard,
-                            &session_id,
-                            &path,
-                            &mut transcode_request,
-                            &mut download_progress,
-                        )
-                        .await
-                    {
-                        Ok(()) => {
-                            download_progress.finished();
-                            return true;
-                        }
-                        Err(e) => {
-                            download_progress.failed(e);
-                            return false;
-                        }
-                    }
-                }
-                DownloadState::Downloaded { .. } | DownloadState::Transcoded { .. } => return true,
-            }
-
-            download_state = self.download_state().await;
-        }
-    }
-
-    async fn download_state(&self) -> DownloadState {
-        self.with_state(|part_state| part_state.download.clone())
-            .await
-    }
-
-    pub(crate) async fn strip_metadata(&self) {
-        let Ok(guard) = self.try_lock_write().await else {
-            return;
-        };
-
-        let state = self.download_state().await;
-
-        if let Err(e) = state.strip_metadata(&guard, &self.server.inner.path).await {
-            warn!(error=%e, "Unable to strip metadata from video file");
-        }
     }
 
     pub(crate) async fn remote_size(&self) -> u64 {
@@ -1310,8 +621,8 @@ impl VideoPart {
 
 #[derive(Clone, Copy, Default)]
 pub struct VideoStats {
-    pub local_parts: u32,
-    pub remote_parts: u32,
+    pub local_videos: u32,
+    pub remote_videos: u32,
     pub local_bytes: u64,
     pub remote_bytes: u64,
     pub local_duration: Duration,
@@ -1323,8 +634,8 @@ impl Add for VideoStats {
 
     fn add(self, rhs: VideoStats) -> VideoStats {
         Self {
-            local_parts: self.local_parts + rhs.local_parts,
-            remote_parts: self.remote_parts + rhs.remote_parts,
+            local_videos: self.local_videos + rhs.local_videos,
+            remote_videos: self.remote_videos + rhs.remote_videos,
             local_bytes: self.local_bytes + rhs.local_bytes,
             remote_bytes: self.remote_bytes + rhs.remote_bytes,
             local_duration: self.local_duration + rhs.local_duration,
@@ -1335,8 +646,8 @@ impl Add for VideoStats {
 
 impl AddAssign for VideoStats {
     fn add_assign(&mut self, rhs: VideoStats) {
-        self.local_parts += rhs.local_parts;
-        self.remote_parts += rhs.remote_parts;
+        self.local_videos += rhs.local_videos;
+        self.remote_videos += rhs.remote_videos;
         self.local_bytes += rhs.local_bytes;
         self.remote_bytes += rhs.remote_bytes;
         self.local_duration += rhs.local_duration;
@@ -1345,22 +656,25 @@ impl AddAssign for VideoStats {
 }
 
 impl VideoStats {
-    async fn from(parts: Vec<VideoPart>) -> Self {
+    async fn from(video: &Video) -> Self {
         let mut stats = VideoStats::default();
 
-        for part in parts.into_iter() {
-            stats.remote_parts += 1;
+        let state = video.download_state().await;
+        if !state.needs_download() {
+            stats.local_videos += 1;
+        }
+
+        for part in video.parts().await {
+            stats.remote_videos += 1;
 
             let part_duration = part.duration().await;
             stats.remote_duration += part_duration;
-            let state = part.download_state().await;
-
-            let mut remote_bytes = part.remote_size().await;
 
             if !state.needs_download() {
                 stats.local_duration += part_duration;
-                stats.local_parts += 1;
             }
+
+            let mut remote_bytes = part.remote_size().await;
 
             if let Some(path) = state.path() {
                 let path = part.server.inner.path.join(path);
@@ -1411,6 +725,10 @@ impl Episode {
     thumbnail_methods!();
     metadata_methods!();
     parent!(season, Season, episode_state().season);
+
+    pub fn video(&self) -> Video {
+        Video::Episode(self.clone())
+    }
 
     pub async fn index(&self) -> usize {
         self.with_state(|vs| vs.episode_state().index).await
@@ -1502,17 +820,11 @@ impl Episode {
     }
 
     pub async fn stats(&self) -> VideoStats {
-        VideoStats::from(self.parts().await).await
+        VideoStats::from(&self.video()).await
     }
 
     pub async fn is_downloaded(&self) -> bool {
-        for part in self.parts().await {
-            if !part.is_downloaded().await {
-                return false;
-            }
-        }
-
-        true
+        self.video().is_downloaded().await
     }
 
     pub async fn show(&self) -> Show {
@@ -1549,15 +861,9 @@ impl Episode {
 
             let name = match file_type {
                 FileType::Playlist => return None,
-                FileType::Video(index) => {
-                    let part_name = if state.parts.len() == 1 {
-                        "".to_string()
-                    } else {
-                        format!(" - pt{}", index + 1)
-                    };
-
+                FileType::Video => {
                     format!(
-                        "S{:02}E{:02} - {}{part_name}.{extension}",
+                        "S{:02}E{:02} - {}.{extension}",
                         season.index, ep_state.index, state.title
                     )
                 }
@@ -1636,6 +942,10 @@ impl Movie {
     thumbnail_methods!();
     metadata_methods!();
     parent!(library, MovieLibrary, movie_state().library);
+
+    pub fn video(&self) -> Video {
+        Video::Movie(self.clone())
+    }
 
     pub async fn air_date(&self) -> Option<Date> {
         self.with_state(|vs| vs.air_date).await
@@ -1718,17 +1028,11 @@ impl Movie {
     }
 
     pub async fn is_downloaded(&self) -> bool {
-        for part in self.parts().await {
-            if !part.is_downloaded().await {
-                return false;
-            }
-        }
-
-        true
+        self.video().is_downloaded().await
     }
 
     pub async fn stats(&self) -> VideoStats {
-        VideoStats::from(self.parts().await).await
+        VideoStats::from(&self.video()).await
     }
 
     pub async fn parts(&self) -> Vec<VideoPart> {
@@ -1755,14 +1059,8 @@ impl Movie {
 
             let name = match file_type {
                 FileType::Playlist => return None,
-                FileType::Video(index) => {
-                    let part_name = if state.parts.len() == 1 {
-                        "".to_string()
-                    } else {
-                        format!(" - pt{}", index + 1)
-                    };
-
-                    format!("{} ({}){part_name}.{extension}", state.title, m_state.year)
+                FileType::Video => {
+                    format!("{} ({}).{extension}", state.title, m_state.year)
                 }
                 FileType::Thumbnail => {
                     if output_style != OutputStyle::Standardized {
@@ -1911,16 +1209,6 @@ impl Video {
         }
     }
 
-    pub async fn is_downloaded(&self) -> bool {
-        for part in self.parts().await {
-            if !part.is_downloaded().await {
-                return false;
-            }
-        }
-
-        true
-    }
-
     pub fn flick_sync(&self) -> FlickSync {
         match self {
             Self::Movie(v) => v.flick_sync(),
@@ -1988,6 +1276,463 @@ impl Video {
         match self {
             Self::Movie(v) => v.update_metadata(rebuild).await,
             Self::Episode(v) => v.update_metadata(rebuild).await,
+        }
+    }
+
+    pub(crate) async fn transfer_state(&self) -> TransferState {
+        let download_state = self.download_state().await;
+
+        match download_state {
+            DownloadState::None => TransferState::Waiting,
+            DownloadState::Downloading { .. } => TransferState::Downloading,
+            DownloadState::Transcoding { .. } => TransferState::Transcoding,
+            _ => TransferState::Downloaded,
+        }
+    }
+
+    async fn try_lock_write(&self) -> result::Result<OpWriteGuard, Timeout> {
+        self.server().try_lock_write_key(self.id()).await
+    }
+
+    async fn try_lock_read(&self) -> result::Result<OpReadGuard, Timeout> {
+        self.server().try_lock_read_key(self.id()).await
+    }
+
+    async fn with_server_state<F, R>(&self, cb: F) -> R
+    where
+        F: Send + FnOnce(&ServerState) -> R,
+    {
+        let server = self.server();
+        let state = server.inner.state.read().await;
+        cb(state.servers.get(server.id()).unwrap())
+    }
+
+    async fn with_state<F, R>(&self, cb: F) -> R
+    where
+        F: Send + FnOnce(&VideoState) -> R,
+    {
+        self.with_server_state(|ss| cb(ss.videos.get(self.id()).unwrap()))
+            .await
+    }
+
+    #[allow(unused)]
+    async fn update_state<F>(&self, cb: F) -> Result
+    where
+        F: Send + FnOnce(&mut VideoState),
+    {
+        let server = self.server();
+        let mut state = server.inner.state.write().await;
+        let server_state = state.servers.get_mut(server.id()).unwrap();
+        cb(server_state.videos.get_mut(self.id()).unwrap());
+        server.inner.persist_state(&state).await
+    }
+
+    pub async fn file(&self) -> result::Result<Option<LockedFile>, Timeout> {
+        let guard = self.try_lock_read().await?;
+
+        Ok(self
+            .download_state()
+            .await
+            .file(guard, &self.server().inner.path)
+            .await)
+    }
+
+    #[instrument(level = "trace", skip(self, plex_server), fields(video=self.id()))]
+    pub(crate) async fn verify_download(
+        &self,
+        plex_server: &PlexServer,
+        allow_video_deletion: bool,
+    ) -> Result {
+        let Ok(guard) = self.try_lock_write().await else {
+            return Ok(());
+        };
+
+        let mut download_state = self.download_state().await;
+
+        download_state
+            .verify(
+                &guard,
+                plex_server,
+                self,
+                &self.server().inner.path,
+                allow_video_deletion,
+            )
+            .await;
+
+        self.update_state(|state| state.download = download_state)
+            .await
+    }
+
+    pub async fn recover_download(&self) -> Result {
+        let title = self.with_state(|vs| vs.title.clone()).await;
+        let mut expected_size = 0;
+
+        for part in self.parts().await {
+            expected_size += part.remote_size().await;
+        }
+
+        for container in [
+            ContainerFormat::Avi,
+            ContainerFormat::Mpeg,
+            ContainerFormat::MpegTs,
+            ContainerFormat::M4v,
+            ContainerFormat::Mp4,
+            ContainerFormat::Mkv,
+        ] {
+            let path = self
+                .file_path(FileType::Video, &container.to_string())
+                .await
+                .unwrap();
+            let target = self.server().inner.path.join(&path);
+
+            if let Ok(stats) = metadata(target).await
+                && stats.is_file()
+            {
+                info!(path=?path.display(), "Recovered download for {title}");
+
+                let download_state = if stats.size() == expected_size {
+                    DownloadState::Downloaded { path }
+                } else {
+                    DownloadState::Transcoded { path }
+                };
+
+                return self
+                    .update_state(|state| state.download = download_state)
+                    .await;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn is_downloaded(&self) -> bool {
+        let download_state = self.download_state().await;
+        !download_state.needs_download()
+    }
+
+    async fn transcode_profile(&self) -> VideoTranscodeOptions {
+        let profile = self.with_state(|vs| vs.transcode_profile.clone()).await;
+
+        let server_profile = self.server().transcode_profile().await;
+
+        self.server()
+            .inner
+            .transcode_options(&profile.unwrap_or(server_profile))
+            .await
+    }
+
+    #[instrument(level = "trace", skip(self, queue, guard, path, progress), fields(video=self.id()))]
+    async fn download_media<P: Progress>(
+        &self,
+        queue: &DownloadQueue,
+        queue_id: u32,
+        guard: &OpWriteGuard,
+        path: &Path,
+        progress: &mut P,
+    ) -> Result {
+        let target = self.server().inner.path.join(path);
+        let offset = match metadata(&target).await {
+            Ok(stats) => stats.len(),
+            Err(e) => {
+                if e.kind() == ErrorKind::NotFound {
+                    0
+                } else {
+                    return Err(e.into());
+                }
+            }
+        };
+
+        let item = queue.item(queue_id).await?;
+
+        if let Some(parent) = target.parent() {
+            create_dir_all(parent).await?;
+        }
+
+        let file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&target)
+            .await?;
+
+        if let Ok(Some(len)) = item.len().await {
+            progress.length(len);
+        }
+
+        let writer = WriterProgress {
+            offset,
+            writer: AsyncWriteAdapter::new(BufWriter::new(file)),
+            progress,
+            access_permit: &mut None,
+        };
+        info!(path=?path, offset, "Downloading source file");
+
+        item.download(writer, offset..).await?;
+
+        info!(path=?path, "Download complete");
+
+        let new_state = if item.is_transcode() {
+            DownloadState::Transcoded {
+                path: path.to_owned(),
+            }
+        } else {
+            DownloadState::Downloaded {
+                path: path.to_owned(),
+            }
+        };
+
+        if let Err(e) = item.delete().await {
+            warn!(error=?e, "Failed to delete transcode session");
+        }
+
+        self.update_state(|state| {
+            state.download = new_state.clone();
+        })
+        .await?;
+
+        if let Err(e) = new_state
+            .strip_metadata(guard, &self.server().inner.path)
+            .await
+        {
+            warn!(path=?path, error=%e, "Failed to strip metadata");
+        }
+
+        Ok(())
+    }
+
+    async fn queue_download(&self, plex_server: &PlexServer, queue: &DownloadQueue) -> Result {
+        let item = plex_server.item_by_id(self.id()).await?;
+        let video = match item {
+            Item::Movie(m) => library::Video::Movie(m),
+            Item::Episode(e) => library::Video::Episode(e),
+            _ => panic!("Unexpected item type"),
+        };
+
+        let options = self.transcode_profile().await;
+
+        let queue_item = video.queue_download(queue, options).await?;
+
+        self.update_state(|state| {
+            state.download = DownloadState::Transcoding {
+                queue_id: queue_item.id(),
+            };
+        })
+        .await?;
+
+        Ok(())
+    }
+
+    #[instrument(level = "trace", skip(self, queue, queue_id, progress), fields(video=self.id()))]
+    async fn wait_for_available<D: DownloadProgress>(
+        &self,
+        queue: &DownloadQueue,
+        queue_id: u32,
+        progress: D,
+    ) -> Result {
+        let mut queue_item = queue.item(queue_id).await?;
+
+        loop {
+            match queue_item.status() {
+                QueueItemStatus::Available => break,
+                QueueItemStatus::Waiting | QueueItemStatus::Deciding => {
+                    sleep(Duration::from_millis(500)).await;
+                    queue_item.update().await?;
+                }
+                QueueItemStatus::Processing => {
+                    let mut progress = progress.transcode_started(self).await;
+
+                    loop {
+                        match queue_item.status() {
+                            QueueItemStatus::Waiting | QueueItemStatus::Deciding => {
+                                // This shouldn't happen.
+                                progress.failed(anyhow!(
+                                    "Transcode session unexpectedly went back to waiting/deciding"
+                                ));
+                                break;
+                            }
+                            QueueItemStatus::Available => {
+                                progress.finished();
+                                break;
+                            }
+                            QueueItemStatus::Processing => {
+                                let delay = if let Some(stats) = queue_item.stats() {
+                                    progress.progress(stats.progress as u64);
+                                    if let Some(remaining) = stats.remaining {
+                                        remaining.clamp(1, 5) as u64
+                                    } else {
+                                        5
+                                    }
+                                } else {
+                                    5
+                                };
+
+                                sleep(Duration::from_secs(delay)).await;
+                                queue_item.update().await?;
+                            }
+                            QueueItemStatus::Expired | QueueItemStatus::Error => {
+                                warn!("Transcode failed or expired");
+                                progress.failed(anyhow!("Transcode failed or expired"));
+
+                                self.update_state(|state| {
+                                    state.download = DownloadState::None;
+                                })
+                                .await?;
+
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+                QueueItemStatus::Expired | QueueItemStatus::Error => {
+                    self.update_state(|state| {
+                        state.download = DownloadState::None;
+                    })
+                    .await?;
+
+                    bail!("Transcode failed or expired");
+                }
+            }
+        }
+
+        let container = match queue_item.container().await? {
+            Some(c) => c,
+            None => {
+                let options = self.transcode_profile().await;
+                let container = options
+                    .containers
+                    .first()
+                    .cloned()
+                    .unwrap_or(ContainerFormat::Mp4);
+
+                warn!(
+                    ?container,
+                    "No container specified by Plex. Guessing based on transcode profile"
+                );
+                container
+            }
+        };
+
+        let path = self
+            .file_path(FileType::Video, &container.to_string())
+            .await
+            .unwrap();
+
+        self.update_state(|state| {
+            state.download = DownloadState::Downloading { queue_id, path };
+        })
+        .await
+    }
+
+    #[instrument(level = "trace", skip_all, fields(video=self.id()))]
+    pub(crate) async fn download<D: DownloadProgress>(
+        self,
+        plex_server: PlexServer,
+        progress: D,
+    ) -> bool {
+        let Ok(guard) = self.try_lock_write().await else {
+            progress
+                .download_failed(&self, anyhow!("Failed to lock item for writing"))
+                .await;
+            return false;
+        };
+
+        let mut download_state = self.download_state().await;
+        download_state
+            .verify(
+                &guard,
+                &plex_server,
+                &self,
+                &self.server().inner.path,
+                false,
+            )
+            .await;
+
+        if let Err(e) = self
+            .update_state(|state| state.download = download_state.clone())
+            .await
+        {
+            progress.download_failed(&self, e).await;
+            return false;
+        }
+
+        let queue = match plex_server.download_queue().await {
+            Ok(q) => q,
+            Err(e) => {
+                warn!(error=?e);
+                progress.download_failed(&self, e.into()).await;
+                return false;
+            }
+        };
+
+        if download_state == DownloadState::None
+            && let Err(e) = self.queue_download(&plex_server, &queue).await
+        {
+            warn!(error=?e);
+            progress.download_failed(&self, e).await;
+            return false;
+        }
+
+        loop {
+            download_state = self.download_state().await;
+
+            match download_state {
+                DownloadState::None => {
+                    return false;
+                }
+                DownloadState::Transcoding { queue_id } => {
+                    if let Err(e) = self
+                        .wait_for_available(&queue, queue_id, progress.clone())
+                        .await
+                    {
+                        warn!(error=?e);
+                        progress.download_failed(&self, e).await;
+                        return false;
+                    }
+                }
+                DownloadState::Downloading { queue_id, path } => {
+                    let _permit = self
+                        .server()
+                        .inner
+                        .download_permits
+                        .clone()
+                        .acquire_owned()
+                        .await
+                        .unwrap();
+
+                    let mut progress = progress.download_started(&self).await;
+
+                    if let Err(e) = self
+                        .download_media(&queue, queue_id, &guard, &path, &mut progress)
+                        .await
+                    {
+                        warn!(error=?e);
+                        progress.failed(e);
+                        return false;
+                    }
+
+                    progress.finished();
+                }
+                DownloadState::Downloaded { .. } | DownloadState::Transcoded { .. } => return true,
+            }
+        }
+    }
+
+    async fn download_state(&self) -> DownloadState {
+        self.with_state(|part_state| part_state.download.clone())
+            .await
+    }
+
+    pub(crate) async fn strip_metadata(&self) {
+        let Ok(guard) = self.try_lock_write().await else {
+            return;
+        };
+
+        let state = self.download_state().await;
+
+        if let Err(e) = state
+            .strip_metadata(&guard, &self.server().inner.path)
+            .await
+        {
+            warn!(error=%e, "Unable to strip metadata from video file");
         }
     }
 }

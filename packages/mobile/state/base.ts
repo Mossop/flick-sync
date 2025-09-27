@@ -79,7 +79,6 @@ export interface VideoPartState {
   key: string;
   size: number;
   duration: number;
-  download: DownloadState;
 }
 
 export interface VideoState {
@@ -95,6 +94,7 @@ export interface VideoState {
   playbackState: PlaybackState;
   lastViewedAt?: number;
   metadata?: RelatedFileState;
+  download: DownloadState;
 }
 
 export interface ServerState {

@@ -14,6 +14,7 @@ import {
   VideoPartState,
   LibraryType,
   PlaybackState,
+  DownloadState,
 } from "./base";
 import { Replace } from "../modules/types";
 
@@ -449,11 +450,14 @@ abstract class VideoWrapper<S extends Omit<VideoState, "detail">>
     return 0;
   }
 
+  public get download(): DownloadState {
+    return this.state.download;
+  }
+
   public get isDownloaded(): boolean {
-    return this.parts.every(
-      (part) =>
-        part.download.state == "downloaded" ||
-        part.download.state == "transcoded",
+    return (
+      this.state.download.state == "downloaded" ||
+      this.state.download.state == "transcoded"
     );
   }
 

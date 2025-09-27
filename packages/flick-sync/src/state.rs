@@ -14,10 +14,10 @@ use plex_api::{
     Server as PlexServer,
     library::{Collection, FromMetadata, MediaItem, MetadataItem, Part, Playlist, Season, Show},
     media_container::server::library::{Metadata, MetadataType},
-    transcode::TranscodeStatus,
+    transcode::QueueItemStatus,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value};
+use serde_json::{Number, Value, to_value};
 use tempfile::NamedTempFile;
 use time::{Date, OffsetDateTime};
 use tokio::{fs, process::Command};
@@ -26,12 +26,12 @@ use typeshare::typeshare;
 use uuid::Uuid;
 
 use crate::{
-    LockedFile, Result, Server, VideoPart,
+    FileType, LockedFile, Result, Server, Video,
     schema::{JsonObject, JsonUtils, MigratableStore, SchemaVersion},
     sync::{OpReadGuard, OpWriteGuard},
 };
 
-const SCHEMA_VERSION: u64 = 4;
+const SCHEMA_VERSION: u64 = 5;
 
 async fn remove_file(path: &Path) {
     if let Err(e) = fs::remove_file(path).await
@@ -383,9 +383,9 @@ pub(crate) enum DownloadState {
     #[default]
     None,
     #[serde(rename_all = "camelCase")]
-    Downloading { path: PathBuf },
+    Downloading { queue_id: u32, path: PathBuf },
     #[serde(rename_all = "camelCase")]
-    Transcoding { session_id: String, path: PathBuf },
+    Transcoding { queue_id: u32 },
     #[serde(rename_all = "camelCase")]
     Downloaded { path: PathBuf },
     #[serde(rename_all = "camelCase")]
@@ -397,7 +397,7 @@ impl DownloadState {
         match self {
             Self::None => None,
             Self::Transcoding { .. } => None,
-            Self::Downloading { path } => Some(path.clone()),
+            Self::Downloading { path, .. } => Some(path.clone()),
             Self::Downloaded { path } => Some(path.clone()),
             Self::Transcoded { path } => Some(path.clone()),
         }
@@ -453,65 +453,63 @@ impl DownloadState {
         Ok(())
     }
 
-    async fn verify_transcode_status(
-        &mut self,
-        plex_server: &PlexServer,
-        video_part: &VideoPart,
-        session_id: &str,
-    ) {
-        match plex_server.transcode_session(session_id).await {
-            Ok(session) => {
-                let status = match session.status().await {
-                    Ok(status) => status,
-                    Err(e) => {
-                        error!(error=?e, "Failed to get transcode status");
-                        return;
-                    }
-                };
-
-                match status {
-                    TranscodeStatus::Transcoding { .. } | TranscodeStatus::Complete => {
-                        let path = video_part.file_path(&session.container().to_string()).await;
-                        *self = DownloadState::Transcoding {
-                            session_id: session_id.to_owned(),
-                            path: path.clone(),
-                        }
-                    }
-                    TranscodeStatus::Error => {
-                        error!("Transcode session has failed");
-                        let _ = session.cancel().await;
-
-                        *self = DownloadState::None;
-                    }
-                }
+    async fn verify_queue_status(&mut self, plex_server: &PlexServer, queue_id: u32) {
+        let queue = match plex_server.download_queue().await {
+            Ok(q) => q,
+            Err(e) => {
+                error!(error=?e, "Failed to get download queue");
+                return;
             }
+        };
+
+        match queue.item(queue_id).await {
+            Ok(item) => match item.status() {
+                QueueItemStatus::Processing
+                | QueueItemStatus::Deciding
+                | QueueItemStatus::Waiting => *self = DownloadState::Transcoding { queue_id },
+                QueueItemStatus::Error | QueueItemStatus::Expired => {
+                    error!("Download queue item has failed");
+                    let _ = item.delete().await;
+
+                    *self = DownloadState::None;
+                }
+                QueueItemStatus::Available => {
+                    // We only call this method when in transcoding or downloading state so we don't
+                    // need to do anything else.
+                    assert!(matches!(
+                        self,
+                        DownloadState::Transcoding { .. } | DownloadState::Downloading { .. }
+                    ));
+                }
+            },
             Err(plex_api::Error::ItemNotFound) => {
-                warn!("Transcode session is no longer present");
+                warn!("Download queue item is no longer present");
                 *self = DownloadState::None;
             }
             Err(e) => {
-                error!(error=?e, "Failed to get transcode session");
+                error!(error=?e, "Failed to get download queue item");
             }
         }
     }
 
-    #[instrument(level = "trace", skip(self, root, guard, plex_server, video_part), fields(video = video_part.id()))]
+    #[instrument(level = "trace", skip(self, root, guard, plex_server, video), fields(video = video.id()))]
     pub(crate) async fn verify(
         &mut self,
         #[expect(unused)] guard: &OpWriteGuard,
         plex_server: &PlexServer,
-        video_part: &VideoPart,
+        video: &Video,
         root: &Path,
         allow_delete: bool,
     ) {
         match self.clone() {
             DownloadState::None => return,
-            DownloadState::Downloading { .. } => {
+            DownloadState::Downloading { queue_id, .. } => {
+                self.verify_queue_status(plex_server, queue_id).await;
                 return;
             }
-            DownloadState::Transcoding { session_id, .. } => {
-                self.verify_transcode_status(plex_server, video_part, &session_id)
-                    .await;
+            DownloadState::Transcoding { queue_id, .. } => {
+                self.verify_queue_status(plex_server, queue_id).await;
+                return;
             }
             _ => {}
         }
@@ -527,7 +525,7 @@ impl DownloadState {
             .and_then(|os| os.to_str())
             .unwrap()
             .to_owned();
-        let expected_path = video_part.file_path(&extension).await;
+        let expected_path = video.file_path(FileType::Video, &extension).await.unwrap();
 
         match fs::metadata(&file).await {
             Ok(stats) => {
@@ -600,27 +598,39 @@ impl DownloadState {
         plex_server: &PlexServer,
         root: &Path,
     ) {
-        let path = match self {
+        let (queue_id, path) = match self {
             DownloadState::None => return,
-            DownloadState::Downloading { path } => path,
-            DownloadState::Transcoding { session_id, path } => {
-                if let Ok(session) = plex_server.transcode_session(session_id).await
-                    && let Err(e) = session.cancel().await
-                {
-                    warn!(error=?e, "Failed to cancel stale transcode session");
-                }
-
-                path
-            }
-            DownloadState::Downloaded { path } => path,
-            DownloadState::Transcoded { path } => path,
+            DownloadState::Downloading { queue_id, path } => (Some(queue_id), Some(path)),
+            DownloadState::Transcoding { queue_id } => (Some(queue_id), None),
+            DownloadState::Downloaded { path } => (None, Some(path)),
+            DownloadState::Transcoded { path } => (None, Some(path)),
         };
 
-        let file = root.join(&path);
+        if let Some(queue_id) = queue_id {
+            match plex_server.download_queue().await {
+                Ok(queue) => match queue.item(*queue_id).await {
+                    Ok(item) => {
+                        if let Err(e) = item.delete().await {
+                            warn!(error=?e, "Failed to cancel download queue item");
+                        }
+                    }
+                    Err(e) => {
+                        warn!(error=?e, "Failed to cancel download queue item");
+                    }
+                },
+                Err(e) => {
+                    warn!(error=?e, "Failed to cancel download queue item");
+                }
+            }
+        }
 
-        trace!(?path, "Removing old video file");
+        if let Some(path) = path {
+            let file = root.join(&path);
 
-        remove_file(&file).await;
+            trace!(?path, "Removing old video file");
+
+            remove_file(&file).await;
+        }
 
         *self = DownloadState::None;
     }
@@ -630,8 +640,8 @@ impl fmt::Debug for DownloadState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::None => write!(f, "None"),
-            Self::Downloading { .. } => write!(f, "Downloading"),
-            Self::Transcoding { session_id, .. } => write!(f, "Transcoding({session_id})"),
+            Self::Downloading { queue_id, .. } => write!(f, "Downloading({queue_id})"),
+            Self::Transcoding { queue_id, .. } => write!(f, "Transcoding({queue_id})"),
             Self::Downloaded { .. } => write!(f, "Downloaded"),
             Self::Transcoded { .. } => write!(f, "Transcoded"),
         }
@@ -648,7 +658,6 @@ pub(crate) struct VideoPartState {
     pub(crate) size: u64,
     #[typeshare(serialized_as = "number")]
     pub(crate) duration: u64,
-    pub(crate) download: DownloadState,
 }
 
 impl<M> From<&Part<'_, M>> for VideoPartState
@@ -662,7 +671,6 @@ where
             key: metadata.key.clone().unwrap(),
             size: metadata.size.unwrap(),
             duration: metadata.duration.unwrap(),
-            download: Default::default(),
         }
     }
 }
@@ -721,6 +729,7 @@ pub(crate) struct VideoState {
     #[serde(default, with = "time::serde::timestamp::option")]
     #[typeshare(serialized_as = "Option<number>")]
     pub(crate) last_viewed_at: Option<OffsetDateTime>,
+    pub(crate) download: DownloadState,
 }
 
 fn playback_state_from_metadata(metadata: &Metadata) -> PlaybackState {
@@ -773,6 +782,7 @@ impl VideoState {
             transcode_profile: None,
             playback_state: playback_state_from_metadata(metadata),
             last_viewed_at: metadata.last_viewed_at,
+            download: DownloadState::None,
         }
     }
 
@@ -852,12 +862,9 @@ impl VideoState {
         let parts = media.parts();
 
         if allow_delete && let Ok(guard) = server.try_lock_write_key(&self.id).await {
-            if parts.len() != self.parts.len() {
-                info!("Number of video parts changed, deleting existing downloads.");
-                for part in self.parts.iter_mut() {
-                    part.download.delete(&guard, plex_server, root).await;
-                }
+            let mut parts_changed = parts.len() != self.parts.len();
 
+            if parts_changed {
                 self.parts = parts.iter().map(VideoPartState::from).collect()
             } else {
                 for (part_state, part) in self.parts.iter_mut().zip(parts.iter()) {
@@ -874,12 +881,17 @@ impl VideoState {
                             old_duration = part_state.duration,
                             new_duration = metadata.duration,
                             part = part_state.id,
-                            "Part changed, deleting existing download."
+                            "Part changed."
                         );
-                        part_state.download.delete(&guard, plex_server, root).await;
+                        parts_changed = true;
                         *part_state = part.into();
                     }
                 }
+            }
+
+            if parts_changed {
+                info!("Video parts changed, deleting existing download.");
+                self.download.delete(&guard, plex_server, root).await;
             }
         }
     }
@@ -894,9 +906,7 @@ impl VideoState {
 
         self.metadata.delete(guard, root).await;
 
-        for part in self.parts.iter_mut() {
-            part.download.delete(guard, plex_server, root).await;
-        }
+        self.download.delete(guard, plex_server, root).await;
     }
 }
 
@@ -1106,6 +1116,35 @@ impl State {
 
         Ok(())
     }
+
+    fn migrate_v4(data: &mut JsonObject) -> Result {
+        for video in data
+            .prop("servers")
+            .values()
+            .prop("videos")
+            .values()
+            .as_object()
+        {
+            let mut video_download: Option<Value> = None;
+
+            for part in video.prop("parts").values().as_object() {
+                if let Some(val) = part.remove("download") {
+                    if video_download.is_some() {
+                        video_download = Some(to_value(DownloadState::None).unwrap());
+                    } else {
+                        video_download = Some(val);
+                    }
+                }
+            }
+
+            video.insert(
+                "download".to_string(),
+                video_download.unwrap_or_else(|| to_value(DownloadState::None).unwrap()),
+            );
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for State {
@@ -1150,6 +1189,10 @@ impl MigratableStore for State {
 
         if version < 4 {
             Self::migrate_v3(data)?;
+        }
+
+        if version < 5 {
+            Self::migrate_v4(data)?;
         }
 
         data.insert("schema".to_string(), SCHEMA_VERSION.into());

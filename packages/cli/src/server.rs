@@ -380,14 +380,12 @@ impl Runnable for Recover {
             }
 
             for video in server.videos().await {
-                for part in video.parts().await {
-                    if part.is_downloaded().await {
-                        continue;
-                    }
+                if video.is_downloaded().await {
+                    continue;
+                }
 
-                    if let Err(e) = part.recover_download().await {
-                        warn!(error=?e, "Failed to relocate video part");
-                    }
+                if let Err(e) = video.recover_download().await {
+                    warn!(error=?e, "Failed to relocate video");
                 }
             }
         }
