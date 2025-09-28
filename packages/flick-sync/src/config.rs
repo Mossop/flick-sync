@@ -115,8 +115,6 @@ impl TranscodeProfile {
             bitrate: self.bitrate.unwrap_or(2000),
             width,
             height,
-            audio_boost: None,
-            burn_subtitles: false,
             containers: self
                 .containers
                 .clone()
@@ -132,6 +130,7 @@ impl TranscodeProfile {
                 .unwrap_or_else(|| vec![AudioCodec::Aac, AudioCodec::Mp3]),
             audio_limitations,
             subtitle_codecs: Vec::new(),
+            ..Default::default()
         }
     }
 }

@@ -1454,7 +1454,7 @@ impl Video {
             .open(&target)
             .await?;
 
-        if let Ok(Some(len)) = item.len().await {
+        if let Ok(Some(len)) = item.content_length().await {
             progress.length(len);
         }
 
@@ -1593,9 +1593,9 @@ impl Video {
             }
         }
 
-        let container = match queue_item.container().await? {
-            Some(c) => c,
-            None => {
+        let container = match queue_item.container().await {
+            Ok(c) => c,
+            Err(e) => {
                 let options = self.transcode_profile().await;
                 let container = options
                     .containers
@@ -1604,6 +1604,7 @@ impl Video {
                     .unwrap_or(ContainerFormat::Mp4);
 
                 warn!(
+                    error=?e,
                     ?container,
                     "No container specified by Plex. Guessing based on transcode profile"
                 );
