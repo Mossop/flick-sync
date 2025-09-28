@@ -221,7 +221,7 @@ export function Overlay({
             />
             <IconButton
               icon="rewind-10"
-              onPress={() => skip(-15000)}
+              onPress={() => skip(-10000)}
               size={40}
             />
             <IconButton
@@ -231,7 +231,7 @@ export function Overlay({
             />
             <IconButton
               icon="fast-forward-10"
-              onPress={() => skip(15000)}
+              onPress={() => skip(10000)}
               size={40}
             />
             <IconButton
