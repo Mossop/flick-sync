@@ -1637,11 +1637,11 @@ dependencies = [
 
 [[package]]
 name = "http-serde"
-version = "1.1.3"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f560b665ad9f1572cfcaf034f7fb84338a7ce945216d64a90fd81f046a3caee"
+checksum = "0f056c8559e3757392c8d091e796416e4649d8e49e88b8d76df6c002f05027fd"
 dependencies = [
- "http 0.2.12",
+ "http 1.3.1",
  "serde",
 ]
 
@@ -2271,9 +2271,9 @@ dependencies = [
 
 [[package]]
 name = "monostate"
-version = "0.1.17"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a2901b7478a273256ce419c446289eb3c883a790d0bf5ed2f363c0cc3988012"
+checksum = "a7b12ad0340d0817ba9e577eea7649bae0032ae985f197707f05e2610d4d173a"
 dependencies = [
  "monostate-impl",
  "serde",
@@ -2282,9 +2282,9 @@ dependencies = [
 
 [[package]]
 name = "monostate-impl"
-version = "0.1.17"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "328f7435b7f54322b33832f1e981ff192781f0d12473f12d062705a55015de8d"
+checksum = "16f00d5ea8bf717366e20bbdc17f3fe611b833ff9aa554fb614913b0dac54d77"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2696,12 +2696,12 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 [[package]]
 name = "plex-api"
 version = "0.0.11"
-source = "git+https://github.com/Mossop/plex-api.rs.git?branch=downloadqueue#8d4c20020a06fc9bfe415a18bac90490c60d07d3"
+source = "git+https://github.com/andrey-yantsen/plex-api.rs.git?rev=6ea44fbf368cc4cc378b110257b7a415f18f6497#6ea44fbf368cc4cc378b110257b7a415f18f6497"
 dependencies = [
  "content_disposition",
  "enum_dispatch",
  "futures",
- "http 0.2.12",
+ "http 1.3.1",
  "http-serde",
  "inflections",
  "isahc",
@@ -3317,9 +3317,9 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "secrecy"
-version = "0.8.0"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bd1c54ea06cfd2f6b63219704de0b9b4f72dcc2b8fdef820be6cd799780e91e"
+checksum = "e891af845473308773346dc847b2c23ee78fe442e0472ac50e22a18a93d3ae5a"
 dependencies = [
  "serde",
  "zeroize",

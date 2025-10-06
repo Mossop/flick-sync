@@ -17,7 +17,7 @@ use pathdiff::diff_paths;
 use pin_project::pin_project;
 use plex_api::{
     Server as PlexServer,
-    library::{self, Item, MediaItemWithTranscoding, MetadataItem},
+    library::{self, Item, MetadataItem, Transcodable},
     media_container::server::library::ContainerFormat,
     transcode::{DownloadQueue, QueueItemStatus, VideoTranscodeOptions},
 };
@@ -1509,7 +1509,7 @@ impl Video {
 
         let options = self.transcode_profile().await;
 
-        let queue_item = video.queue_download(queue, options).await?;
+        let queue_item = video.queue_download(options, Some(queue)).await?;
 
         self.update_state(|state| {
             state.download = DownloadState::Transcoding {
