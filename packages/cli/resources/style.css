@@ -3,6 +3,7 @@ html, body {
   width: 100vw;
   margin: 0;
   padding: 0;
+  overflow: hidden;
 }
 
 body {
@@ -41,6 +42,7 @@ body.sidebar {
   align-items: stretch;
   justify-content: stretch;
   flex: 1;
+  height: 100vh;
 }
 
 #sidebar {
