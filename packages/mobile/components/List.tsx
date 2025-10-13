@@ -191,11 +191,11 @@ function duration(item: ChildItem) {
   let secs = Math.floor(itemDuration(item) / 1000);
 
   let result = `${pad(secs % 60)}`;
-  if (secs > 60) {
+  if (secs >= 60) {
     let mins = Math.floor(secs / 60);
     result = `${pad(mins % 60)}:${result}`;
 
-    if (mins > 60) {
+    if (mins >= 60) {
       let hours = Math.floor(mins / 60);
       result = `${hours}:${result}`;
     }
