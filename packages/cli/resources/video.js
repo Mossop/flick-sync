@@ -168,7 +168,8 @@ export class VideoPlayer extends LitElement {
     season: { type: Object },
     episode: { type: Object },
     url: { type: String },
-    totalTime: { type: Number },
+    mimeType: { type: String },
+    duration: { type: Number },
   };
 
   constructor() {
@@ -207,7 +208,7 @@ export class VideoPlayer extends LitElement {
     this.updateTime(this.castPlayer.currentTime);
   };
 
-  updateCastSession(session) {
+  async updateCastSession(session) {
     if (
       session &&
       [
@@ -250,21 +251,26 @@ export class VideoPlayer extends LitElement {
 
       let castMedia = session.getMediaSession();
       let mediaInfo = castMedia?.media;
-      let videoUrl = new URL(document.documentURI);
+      let videoUrl = new URL(this.url, document.documentURI);
 
-      if (mediaInfo?.contentId == videoUrl.pathname) {
-        let url = new URL(this.url, document.documentURI);
-        if (mediaInfo.contentUrl == url.toString()) {
-          this.castControllerEventListener();
+      // Check if the current video is already playing
+      if (mediaInfo?.contentUrl == videoUrl.toString()) {
+        this.castControllerEventListener();
 
-          castMedia.getStatus(
-            null,
-            () => this.castControllerEventListener(),
-            (error) => {}
-          );
+        castMedia.getStatus(
+          null,
+          () => this.castControllerEventListener(),
+          (error) => {}
+        );
+      } else {
+        // Otherwise load it
+        let loadRequest = new chrome.cast.media.LoadRequest(
+          this.castMediaInfo()
+        );
+        loadRequest.currentTime = this.currentTime;
+        loadRequest.autoplay = this.isPlaying;
 
-          return;
-        }
+        await this.castSession.loadMedia(loadRequest);
       }
     } else {
       this.castPlayer = null;
@@ -272,9 +278,10 @@ export class VideoPlayer extends LitElement {
 
       this.isCasting = false;
       this.classList.remove("casting");
-    }
 
-    this.seek(this.currentTime);
+      await this.updateComplete;
+      this.seek(this.currentTime);
+    }
   }
 
   renderedVideo(element) {
@@ -406,17 +413,17 @@ export class VideoPlayer extends LitElement {
     this.onMediaStateChanged();
   }
 
-  castMediaInfo(media) {
+  castMediaInfo() {
     let videoUrl = new URL(document.documentURI);
-    let contentUrl = new URL(media.url, document.documentURI);
+    let contentUrl = new URL(this.url, document.documentURI);
 
     let mediaInfo = new chrome.cast.media.MediaInfo(
       videoUrl.pathname,
-      media.mimeType
+      this.mimeType
     );
 
     mediaInfo.contentUrl = contentUrl.toString();
-    mediaInfo.duration = media.duration / 1000;
+    mediaInfo.duration = this.duration / 1000;
 
     let metadata;
 
@@ -439,7 +446,7 @@ export class VideoPlayer extends LitElement {
   }
 
   async seek(targetTime) {
-    if (targetTime < 0 || targetTime >= this.totalTime) {
+    if (targetTime < 0 || targetTime >= this.duration) {
       return;
     }
 
@@ -463,7 +470,7 @@ export class VideoPlayer extends LitElement {
 
     let offset = event.clientX - elementX;
 
-    let targetTime = (this.totalTime * offset) / elementWidth;
+    let targetTime = (this.duration * offset) / elementWidth;
     this.seek(targetTime);
   }
 
@@ -475,8 +482,8 @@ export class VideoPlayer extends LitElement {
 
     let templates = [];
     for (let i = 0; i < ranges.length; i++) {
-      let width = (100 * (ranges.end(i) - ranges.start(i))) / this.totalTime;
-      let left = (100 * ranges.start(i)) / this.totalTime;
+      let width = (100 * (ranges.end(i) - ranges.start(i))) / this.duration;
+      let left = (100 * ranges.start(i)) / this.duration;
 
       templates.push(
         html`<div
@@ -553,7 +560,7 @@ export class VideoPlayer extends LitElement {
       ? "fullscreen-exit"
       : "arrows-fullscreen";
 
-    let playedPercent = (100 * this.currentTime) / this.totalTime;
+    let playedPercent = (100 * this.currentTime) / this.duration;
 
     let classes = {
       overlay: true,
@@ -588,7 +595,7 @@ export class VideoPlayer extends LitElement {
             <div class="mask"></div>
           </div>
           <div class="time end">
-            -${formatTime(this.totalTime - this.currentTime)}
+            -${formatTime(this.duration - this.currentTime)}
           </div>
           ${this.isCastAvailable
             ? html`<google-cast-launcher></google-cast-launcher>`
