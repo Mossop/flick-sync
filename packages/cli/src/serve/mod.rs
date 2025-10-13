@@ -382,6 +382,10 @@ struct ServiceData {
 
 impl Runnable for Serve {
     async fn run(self, flick_sync: FlickSync, _console: Console) -> Result {
+        let mut sighup = SignalStream::new(signal(SignalKind::hangup()).unwrap()).fuse();
+        let mut sigint = SignalStream::new(signal(SignalKind::interrupt()).unwrap()).fuse();
+        let mut sigterm = SignalStream::new(signal(SignalKind::terminate()).unwrap()).fuse();
+
         let port = self.port.unwrap_or(80);
 
         let (dlna_server, service_factory) = build_dlna(flick_sync.clone(), port).await?;
@@ -457,10 +461,6 @@ impl Runnable for Serve {
         let http_handle = http_server.handle();
 
         tokio::spawn(http_server);
-
-        let mut sighup = SignalStream::new(signal(SignalKind::hangup()).unwrap()).fuse();
-        let mut sigint = SignalStream::new(signal(SignalKind::interrupt()).unwrap()).fuse();
-        let mut sigterm = SignalStream::new(signal(SignalKind::terminate()).unwrap()).fuse();
 
         loop {
             select! {
