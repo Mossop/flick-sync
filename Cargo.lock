@@ -2696,6 +2696,8 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 [[package]]
 name = "plex-api"
 version = "0.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2e364725e55521e684303dc0102f1071ad99792431725c96dc6d7f318cffbfa"
 dependencies = [
  "content_disposition",
  "enum_dispatch",
