@@ -107,7 +107,6 @@ jobs:
         run: eas build --profile preview --platform android --non-interactive
 
       - name: Download build
-        working-directory: ./packages/mobile
         run: |
           curl -L -o flick-sync-android.apk `cd packages/mobile && eas build:list --non-interactive --git-commit-hash ${GITHUB_SHA} -p android -e preview --status=finished --json 2>/dev/null | jq -r '.[0].artifacts.applicationArchiveUrl'`
 
