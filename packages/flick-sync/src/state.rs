@@ -360,20 +360,20 @@ impl MovieDetail {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct EpisodeDetail {
     pub(crate) season: String,
-    pub(crate) index: usize,
+    pub(crate) index: Option<usize>,
 }
 
 impl EpisodeDetail {
     pub(crate) fn from(metadata: &Metadata) -> Self {
         EpisodeDetail {
             season: metadata.parent.parent_rating_key.clone().unwrap(),
-            index: metadata.index.unwrap() as usize,
+            index: metadata.index.map(|i| i as usize),
         }
     }
 
     pub(crate) fn update(&mut self, metadata: &Metadata) {
         self.season = metadata.parent.parent_rating_key.clone().unwrap();
-        self.index = metadata.index.unwrap() as usize;
+        self.index = metadata.index.map(|i| i as usize);
     }
 }
 

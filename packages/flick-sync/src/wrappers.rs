@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     fmt,
     hash::{Hash, Hasher},
     io::{ErrorKind, IoSlice},
@@ -456,13 +457,13 @@ impl Season {
 
     pub async fn episodes(&self) -> Vec<Episode> {
         self.with_server_state(|ss| {
-            let mut episode_states: Vec<(usize, &VideoState)> = ss
+            let mut episode_states: Vec<(Option<Date>, Option<usize>, &VideoState)> = ss
                 .videos
                 .values()
                 .filter_map(|vs| {
                     if let VideoDetail::Episode(ref detail) = vs.detail {
                         if detail.season == self.id {
-                            Some((detail.index, vs))
+                            Some((vs.air_date, detail.index, vs))
                         } else {
                             None
                         }
@@ -472,11 +473,21 @@ impl Season {
                 })
                 .collect();
 
-            episode_states.sort_by(|(ia, _), (ib, _)| ia.cmp(ib));
+            episode_states.sort_by(|(aa, ia, _), (ab, ib, _)| {
+                if let (Some(a), Some(b)) = (ia, ib) {
+                    return a.cmp(b);
+                }
+
+                if let (Some(a), Some(b)) = (aa, ab) {
+                    return a.cmp(b);
+                }
+
+                Ordering::Equal
+            });
 
             episode_states
                 .into_iter()
-                .map(|(_, vs)| Episode::wrap(&self.server, vs))
+                .map(|(_, _, vs)| Episode::wrap(&self.server, vs))
                 .collect()
         })
         .await
@@ -730,7 +741,7 @@ impl Episode {
         Video::Episode(self.clone())
     }
 
-    pub async fn index(&self) -> usize {
+    pub async fn index(&self) -> Option<usize> {
         self.with_state(|vs| vs.episode_state().index).await
     }
 
@@ -748,23 +759,20 @@ impl Episode {
 
     pub async fn next_episode(&self) -> Option<Episode> {
         let season = self.season().await;
-        if let Some(ep) = season
-            .episodes()
-            .await
-            .into_iter()
-            .nth(self.index().await + 1)
+        let mut episodes = season.episodes().await.into_iter();
+
+        if episodes.any(|ep| ep.id() == self.id())
+            && let Some(next) = episodes.next()
         {
-            return Some(ep);
+            return Some(next);
         }
 
-        let show = season.show().await;
-        if let Some(season) = show
-            .seasons()
-            .await
-            .into_iter()
-            .nth(season.index().await + 1)
+        let mut seasons = season.show().await.seasons().await.into_iter();
+
+        if seasons.any(|s| s.id() == season.id())
+            && let Some(next_season) = seasons.next()
         {
-            season.episodes().await.into_iter().next()
+            next_season.episodes().await.into_iter().next()
         } else {
             None
         }
@@ -806,11 +814,11 @@ impl Episode {
             writer.write(XmlEvent::characters(&season.to_string()))?;
             writer.write(XmlEvent::end_element())?;
 
-            writer.write(XmlEvent::start_element("episode"))?;
-            writer.write(XmlEvent::characters(
-                &state.episode_state().index.to_string(),
-            ))?;
-            writer.write(XmlEvent::end_element())?;
+            if let Some(index) = state.episode_state().index {
+                writer.write(XmlEvent::start_element("episode"))?;
+                writer.write(XmlEvent::characters(&index.to_string()))?;
+                writer.write(XmlEvent::end_element())?;
+            }
 
             writer.write(XmlEvent::end_element())?;
 
@@ -862,17 +870,31 @@ impl Episode {
             let name = match file_type {
                 FileType::Playlist => return None,
                 FileType::Video => {
-                    format!(
-                        "S{:02}E{:02} - {}.{extension}",
-                        season.index, ep_state.index, state.title
-                    )
+                    if let Some(index) = ep_state.index {
+                        format!(
+                            "S{:02}E{:02} - {}.{extension}",
+                            season.index, index, state.title
+                        )
+                    } else {
+                        format!(
+                            "S{:02} - {} - {}.{extension}",
+                            season.index, state.id, state.title
+                        )
+                    }
                 }
                 FileType::Thumbnail => {
                     if output_style == OutputStyle::Standardized {
-                        format!(
-                            "S{:02}E{:02} - {}.{extension}",
-                            season.index, ep_state.index, state.title
-                        )
+                        if let Some(index) = ep_state.index {
+                            format!(
+                                "S{:02}E{:02} - {}.{extension}",
+                                season.index, index, state.title
+                            )
+                        } else {
+                            format!(
+                                "S{:02} - {} - {}.{extension}",
+                                season.index, state.id, state.title
+                            )
+                        }
                     } else {
                         format!("{}.{extension}", self.id)
                     }
@@ -882,10 +904,17 @@ impl Episode {
                         return None;
                     }
 
-                    format!(
-                        "S{:02}E{:02} - {}.{extension}",
-                        season.index, ep_state.index, state.title
-                    )
+                    if let Some(index) = ep_state.index {
+                        format!(
+                            "S{:02}E{:02} - {}.{extension}",
+                            season.index, index, state.title
+                        )
+                    } else {
+                        format!(
+                            "S{:02} - {} - {}.{extension}",
+                            season.index, state.id, state.title
+                        )
+                    }
                 }
             };
 

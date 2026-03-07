@@ -761,7 +761,7 @@ pub(super) async fn video_page(
             format!("{url_base}thumbnail/{server_id}/show/{}", show.id()),
             Some(show.title().await),
             Some(season.index().await),
-            Some(ep.index().await),
+            ep.index().await,
         )
     } else {
         (
