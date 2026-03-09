@@ -29,7 +29,7 @@ export default function Collection({ route }: AppScreenProps<"collection">) {
       <List
         id={collection.id}
         container={container}
-        // @ts-ignore
+        // @ts-expect-error
         items={collection.contents}
       />
     </AppView>

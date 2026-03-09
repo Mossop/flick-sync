@@ -11,13 +11,9 @@ export function isDownloaded(
 }
 
 export enum ContainerType {
-  // eslint-disable-next-line @typescript-eslint/no-shadow
   MovieCollection,
-  // eslint-disable-next-line @typescript-eslint/no-shadow
   ShowCollection,
-  // eslint-disable-next-line @typescript-eslint/no-shadow
   Playlist,
-  // eslint-disable-next-line @typescript-eslint/no-shadow
   Show,
   Library,
 }

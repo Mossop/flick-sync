@@ -13,7 +13,7 @@ export default function LibraryContents({ library }: { library: Library }) {
       <List
         id={library.id}
         container={ContainerType.Library}
-        // @ts-ignore
+        // @ts-expect-error
         items={library.contents}
       />
     </AppView>

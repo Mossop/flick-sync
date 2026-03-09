@@ -1,8 +1,7 @@
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createMaterialBottomTabNavigator } from "@react-navigation/material-bottom-tabs";
-import { useEffect, useMemo } from "react";
-import * as NavigationBar from "expo-navigation-bar";
+import { useMemo } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { StoreProvider } from "./components/Store";
 import Notification from "./components/Notification";
@@ -48,7 +47,7 @@ function Library({ route }: AppScreenProps<"library">) {
             tabBarLabel: "Library",
           }}
         >
-          {() => <LibraryContent library={library!} />}
+          {() => <LibraryContent library={library} />}
         </LibraryNav.Screen>
         <LibraryNav.Screen
           name="collections"
@@ -57,7 +56,7 @@ function Library({ route }: AppScreenProps<"library">) {
             tabBarLabel: "Collections",
           }}
         >
-          {() => <LibraryCollections library={library!} />}
+          {() => <LibraryCollections library={library} />}
         </LibraryNav.Screen>
       </LibraryNav.Navigator>
     );
@@ -83,10 +82,6 @@ function App() {
 const RootStack = createNativeStackNavigator();
 
 export default function Root() {
-  useEffect(() => {
-    NavigationBar.setBehaviorAsync("overlay-swipe");
-  }, []);
-
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StoreProvider>
@@ -97,7 +92,7 @@ export default function Root() {
               screenOptions={{ headerShown: false }}
             >
               <RootStack.Screen name="app" component={App} />
-              {/* @ts-ignore */}
+              {/* @ts-expect-error */}
               <RootStack.Screen name="video" component={Video} />
             </RootStack.Navigator>
             <Notification />

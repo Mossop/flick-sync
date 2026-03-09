@@ -104,7 +104,7 @@ const styles = StyleSheet.create({
     height: "100%",
     flexDirection: "column",
     justifyContent: "space-between",
-    background: "red",
+    backgroundColor: "transparent",
   },
   posterThumb: {
     width: POSTER_WIDTH,
@@ -346,7 +346,6 @@ export function ListControls({
 
 enum ThumbnailType {
   Poster,
-  // eslint-disable-next-line @typescript-eslint/no-shadow
   Video,
 }
 
@@ -392,7 +391,7 @@ function ThumbnailOverlay({
     <View style={[styles.thumbOverlay, { paddingVertical, paddingHorizontal }]}>
       <View style={styles.unplayedBadge}>
         {item.playbackState.state == "unplayed" && (
-          <MaterialIcons name="stop-circle" size={16} color="#e5a00d" />
+          <MaterialIcons name="circle" size={16} color="#e5a00d" />
         )}
       </View>
       {item.playbackState.state == "inprogress" && (
@@ -708,7 +707,10 @@ export function List<T extends ChildItem>({
       }
 
       if (item instanceof Movie || item instanceof Episode) {
-        if (item.playPosition > START_SLOP) {
+        if (
+          item.playbackState.state == "inprogress" &&
+          item.playPosition > START_SLOP
+        ) {
           setStartingVideo([item, index]);
         } else {
           let willQueue = shouldQueue(container);
@@ -760,7 +762,6 @@ export function List<T extends ChildItem>({
   }, [listSettings.display, dimensions]);
 
   let renderItem = useCallback(
-    // eslint-disable-next-line react/no-unused-prop-types
     ({ item, index }: { item: T; index: number }) => {
       if (listSettings.display == Display.Grid) {
         return (

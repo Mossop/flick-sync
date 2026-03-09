@@ -1,8 +1,5 @@
-/* eslint-disable no-param-reassign */
 import {
-  Action,
-  Dispatch,
-  MiddlewareAPI,
+  Middleware,
   configureStore,
   createAction,
   createReducer,
@@ -12,12 +9,9 @@ import {
   useDispatch,
   useSelector as useReduxState,
 } from "react-redux";
-import { StorageAccessFramework, getInfoAsync } from "expo-file-system";
+import { StorageAccessFramework, getInfoAsync } from "expo-file-system/legacy";
 import * as SplashScreen from "expo-splash-screen";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import TrackPlayer, {
-  AppKilledPlaybackBehavior,
-} from "react-native-track-player";
 import { ReactNode, useCallback } from "react";
 import { PlaybackState, State } from "../state/base";
 import { ContainerType, StateDecoder } from "../state";
@@ -29,7 +23,6 @@ const CONTENT_ROOT = "content://com.android.externalstorage.documents/tree/";
 
 export enum Display {
   Grid = "grid",
-  // eslint-disable-next-line @typescript-eslint/no-shadow
   List = "list",
 }
 
@@ -63,7 +56,7 @@ export function useSelector<Selected = unknown>(
 }
 
 export function useAction<P>(
-  action: (payload: P) => Action,
+  action: (payload: P) => { type: string },
 ): (payload: P) => void {
   let dispatch = useDispatch();
   return useCallback(
@@ -188,15 +181,17 @@ const reducer = createReducer<StoreState>(
 class StatePersister {
   private stateToPersist: State | undefined = undefined;
 
-  private isPersisting: boolean = false;
+  private isPersisting = false;
 
-  constructor(private store: string, private persistedState: State) {}
+  constructor(
+    private store: string,
+    private persistedState: State,
+  ) {}
 
   public async persistState(state: State) {
     if (
       typeof state !== "object" ||
-      state === null ||
-      !state.schema ||
+      !state?.schema ||
       Object.keys(state.servers ?? {}).length === 0
     ) {
       // Refuse to persist empty or invalid state.
@@ -214,7 +209,7 @@ class StatePersister {
     try {
       while (this.persistedState !== this.stateToPersist) {
         let path = storagePath(this.store, STATE_FILE);
-        let info = await getInfoAsync(path, { size: true });
+        let info = await getInfoAsync(path);
 
         let writingState: State = this.stateToPersist;
         let data = JSON.stringify(writingState, undefined, 2);
@@ -242,10 +237,10 @@ class StatePersister {
   }
 }
 
-function statePersist(store: MiddlewareAPI<Dispatch<Action>, StoreState>) {
+const statePersist: Middleware<object, StoreState> = (store) => {
   let persister: StatePersister | null = null;
 
-  return (next: Dispatch<Action>) => (action: Action) => {
+  return (next) => (action) => {
     let { storeLocation: oldStoreLocation, state: oldState } = store.getState();
     next(action);
     let { storeLocation, state } = store.getState();
@@ -255,13 +250,13 @@ function statePersist(store: MiddlewareAPI<Dispatch<Action>, StoreState>) {
       persister = new StatePersister(storeLocation, state);
     } else if (state !== oldState) {
       console.log("Persisting new state");
-      persister.persistState(state);
+      persister.persistState(state).catch(console.error);
     }
   };
-}
+};
 
-function settingsPersist(store: MiddlewareAPI<Dispatch<Action>, StoreState>) {
-  return (next: Dispatch<Action>) => (action: Action) => {
+const settingsPersist: Middleware<object, StoreState> =
+  (store) => (next) => (action) => {
     let { storeLocation: oldStoreLocation, settings: oldSettings } =
       store.getState();
     next(action);
@@ -269,13 +264,13 @@ function settingsPersist(store: MiddlewareAPI<Dispatch<Action>, StoreState>) {
 
     if (oldStoreLocation === storeLocation && settings !== oldSettings) {
       console.log("Persisting new settings");
+
       AsyncStorage.setItem(
         SETTINGS_KEY + storeLocation,
         JSON.stringify(settings),
-      );
+      ).catch(console.error);
     }
   };
-}
 
 const store = configureStore({
   reducer,
@@ -288,7 +283,7 @@ async function loadSettings(storeLocation: string): Promise<SettingsState> {
     let settingsStr = await AsyncStorage.getItem(SETTINGS_KEY + storeLocation);
 
     if (settingsStr) {
-      return JSON.parse(settingsStr);
+      return JSON.parse(settingsStr) as SettingsState;
     }
   } catch (e) {
     console.error(e);
@@ -376,12 +371,9 @@ async function findStore(): Promise<[string, State]> {
     console.error(e);
   }
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
-      if (!storeLocation) {
-        storeLocation = await chooseStore();
-      }
+      storeLocation ??= await chooseStore();
 
       await AsyncStorage.setItem(STORE_KEY, storeLocation);
 
@@ -397,15 +389,7 @@ async function findStore(): Promise<[string, State]> {
 
 async function initStore() {
   // Keep the splash screen visible while we fetch resources
-  SplashScreen.preventAutoHideAsync();
-
-  await TrackPlayer.setupPlayer();
-  await TrackPlayer.updateOptions({
-    android: {
-      appKilledPlaybackBehavior:
-        AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification,
-    },
-  });
+  await SplashScreen.preventAutoHideAsync();
 
   try {
     let [storeLocation, state] = await findStore();
@@ -419,7 +403,7 @@ async function initStore() {
       }),
     );
   } finally {
-    SplashScreen.hideAsync();
+    await SplashScreen.hideAsync();
   }
 }
 
@@ -439,7 +423,7 @@ export async function pickNewStore() {
       }),
     );
   } catch (e) {
-    store.dispatch(reportError(e.toString()));
+    store.dispatch(reportError(String(e)));
   }
 }
 

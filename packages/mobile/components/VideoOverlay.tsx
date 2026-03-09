@@ -1,4 +1,10 @@
-import { DependencyList, useCallback, useRef, useState } from "react";
+import {
+  DependencyList,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { View, StyleSheet, Pressable } from "react-native";
 import { IconButton, Text } from "react-native-paper";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -57,11 +63,13 @@ const styles = StyleSheet.create({
 
 function usePrefixedCallbackBuilder(
   prefix: () => void,
-): <T extends Function>(cb: T, deps: DependencyList) => T {
+): <A extends unknown[], R>(
+  cb: (...args: A) => R,
+  deps: DependencyList,
+) => (...args: A) => R {
   return (cb, deps) =>
     // eslint-disable-next-line react-hooks/rules-of-hooks
     useCallback(
-      // @ts-ignore
       (...args) => {
         prefix();
         return cb(...args);
@@ -74,7 +82,10 @@ function usePrefixedCallbackBuilder(
 function useOverlayState(): [
   visible: boolean,
   toggle: () => void,
-  useOverlayAction: <T extends Function>(cb: T, deps: DependencyList) => T,
+  useOverlayAction: <A extends unknown[], R>(
+    cb: (...args: A) => R,
+    deps: DependencyList,
+  ) => (...args: A) => R,
 ] {
   let [visible, setVisible] = useState(true);
   let timeout = useRef<NodeJS.Timeout | null>(null);
@@ -90,9 +101,11 @@ function useOverlayState(): [
     }, duration ?? OVERLAY_TIMEOUT);
   };
 
-  if (!timeout.current && visible) {
-    initTimeout(OVERLAY_TIMEOUT);
-  }
+  useEffect(() => {
+    if (!timeout.current && visible) {
+      initTimeout(OVERLAY_TIMEOUT);
+    }
+  }, [visible]);
 
   let updateState = useCallback((state?: boolean) => {
     setVisible((isVisible) => {
@@ -147,7 +160,7 @@ export function Overlay({
   goPrevious,
   goNext,
 }: {
-  seek: (position: number) => Promise<void>;
+  seek: (position: number) => void;
   video: Video;
   setPlaying: (playing: boolean) => void;
   status: PlaybackStatus;
@@ -176,7 +189,7 @@ export function Overlay({
     navigation.pop();
   }, [navigation]);
 
-  let inQueue = goPrevious || goNext;
+  let inQueue = !!goPrevious || !!goNext;
 
   let previous = useOverlayAction(() => {
     if (goPrevious) {

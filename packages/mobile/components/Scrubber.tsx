@@ -3,12 +3,12 @@ import { LayoutChangeEvent, StyleSheet, View } from "react-native";
 import { Text, useTheme } from "react-native-paper";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
 } from "react-native-reanimated";
 import { PADDING } from "../modules/styles";
+import { scheduleOnRN } from "react-native-worklets";
 
 const BAR_HEIGHT = 6;
 const SCRUBBER_SIZE = BAR_HEIGHT * 3;
@@ -48,7 +48,7 @@ export interface ScrubberProps {
   position: number;
   totalDuration: number;
   onScrubbing: () => void;
-  onScrubbingComplete: (position: number) => Promise<void>;
+  onScrubbingComplete: (position: number) => void;
 }
 
 function pad(val: number): string {
@@ -109,8 +109,8 @@ export default function Scrubber({
   );
 
   let finishScrubbing = useCallback(
-    async (value: number) => {
-      await onScrubbingComplete(value);
+    (value: number) => {
+      onScrubbingComplete(value);
       selectedPosition.value = null;
     },
     [selectedPosition, onScrubbingComplete],
@@ -128,11 +128,11 @@ export default function Scrubber({
           selectedPosition.value = Math.round(
             (totalDuration * event.x) / fullWidth,
           );
-          runOnJS(onScrubbing)();
+          scheduleOnRN(onScrubbing);
         })
         .onEnd(() => {
           if (selectedPosition.value !== null) {
-            runOnJS(finishScrubbing)(selectedPosition.value);
+            scheduleOnRN(finishScrubbing, selectedPosition.value);
           }
         }),
     [fullWidth, totalDuration, onScrubbing, finishScrubbing, selectedPosition],
@@ -167,8 +167,8 @@ export default function Scrubber({
           ]}
         />
         <View style={styles.labels}>
-          <Time value={displayPosition.value} />
-          <Time value={totalDuration - displayPosition.value} />
+          <Time value={position} />
+          <Time value={totalDuration - position} />
         </View>
       </View>
     </GestureDetector>

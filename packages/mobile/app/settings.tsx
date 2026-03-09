@@ -34,12 +34,17 @@ function SettingBlock({
   );
 }
 
-export default memo(() => {
+export default memo(function Settings() {
   let storeLocation = useSelector((storeState) => storeState.storeLocation);
 
   return (
     <AppView title="Settings" style={styles.container}>
-      <SettingBlock title="Store" onPress={pickNewStore}>
+      <SettingBlock
+        title="Store"
+        onPress={() => {
+          pickNewStore().catch(console.error);
+        }}
+      >
         <View style={{ flexDirection: "row" }}>
           <Text style={{ flex: 1 }}>{storeLocation}</Text>
         </View>

@@ -5,19 +5,14 @@ const LOGO = IS_DEV ? "./assets/logo-dev" : "./assets/logo";
 
 export default {
   name: IS_DEV ? "Synced Flicks (Dev)" : "Synced Flicks",
-  slug: "flicksync",
+  slug: IS_DEV ? "flicksync-dev" : "flicksync",
   version,
   orientation: "default",
   icon: `${LOGO}/icon.png`,
   userInterfaceStyle: "automatic",
-  splash: {
-    image: `${LOGO}/splash.png`,
-    resizeMode: "contain",
-    backgroundColor: "#ffffff",
-  },
-  assetBundlePatterns: ["**/*"],
   ios: {
     supportsTablet: true,
+    bundleIdentifier: "com.oxymoronical.flicksync",
   },
   android: {
     adaptiveIcon: {
@@ -32,6 +27,16 @@ export default {
   web: {
     favicon: `${LOGO}/favicon.png`,
   },
+  plugins: [
+    [
+      "expo-splash-screen",
+      {
+        image: `${LOGO}/splash.png`,
+        backgroundColor: "#ffffff",
+        imageWidth: 200,
+      },
+    ],
+  ],
   extra: {
     eas: {
       projectId: "94a5b9ed-95e6-4aed-b4cb-a04f40174d21",

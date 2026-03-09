@@ -1,4 +1,6 @@
 import {
+  DefaultNavigatorOptions,
+  ParamListBase,
   StackActionHelpers,
   StackNavigationState,
   StackRouter,
@@ -13,7 +15,6 @@ import {
 } from "@react-navigation/native-stack";
 import { DrawerLayoutAndroid, View, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { NativeStackNavigatorProps } from "@react-navigation/native-stack/lib/typescript/src/types";
 import { ReactNode, createContext, useContext, useMemo, useRef } from "react";
 import { Drawer } from "react-native-paper";
 import {
@@ -23,6 +24,14 @@ import {
   usePlaylists,
 } from "../modules/util";
 import { Library, MovieLibrary, Playlist } from "../state";
+
+type NativeStackNavigatorProps = DefaultNavigatorOptions<
+  ParamListBase,
+  StackNavigationState<ParamListBase>,
+  NativeStackNavigationOptions,
+  NativeStackNavigationEventMap
+> &
+  StackRouterOptions;
 
 const styles = StyleSheet.create({
   drawer: {

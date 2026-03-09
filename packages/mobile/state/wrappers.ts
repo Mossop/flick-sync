@@ -1,4 +1,3 @@
-import { Dispatch } from "react";
 import {
   ShowState,
   SeasonState,
@@ -54,7 +53,6 @@ function showHasDownloads(show: Show): boolean {
 }
 
 export function isMovie(v: Video): v is Movie {
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   return v instanceof Movie;
 }
 
@@ -63,7 +61,6 @@ export function isEpisode(v: Video): v is Episode {
 }
 
 export function isMovieLibrary(l: Library): l is MovieLibrary {
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   return l instanceof MovieLibrary;
 }
 
@@ -72,7 +69,6 @@ export function isShowLibrary(l: Library): l is ShowLibrary {
 }
 
 export function isMovieCollection(c: Collection): c is MovieCollection {
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   return c instanceof MovieCollection;
 }
 
@@ -80,7 +76,7 @@ export function isShowCollection(c: Collection): c is ShowCollection {
   return !isMovieCollection(c);
 }
 
-type WrapperInterface<T, V = {}> = Replace<Readonly<T>, V>;
+type WrapperInterface<T, V = object> = Replace<Readonly<T>, V>;
 
 type IServer = Readonly<
   Omit<
@@ -195,7 +191,10 @@ abstract class StateWrapper<S> {
 }
 
 abstract class ServerItemWrapper<S> extends StateWrapper<S> {
-  public constructor(public readonly server: Server, state: S) {
+  public constructor(
+    public readonly server: Server,
+    state: S,
+  ) {
     super(state);
   }
 }
@@ -498,54 +497,47 @@ export type Video = Episode | Movie;
 export type Library = MovieLibrary | ShowLibrary;
 export type Collection = MovieCollection | ShowCollection;
 
-export function isVideo(item: any): item is Video {
+export function isVideo(item: unknown): item is Video {
   return item instanceof VideoWrapper;
 }
 
-export function isLibrary(item: any): item is Library {
+export function isLibrary(item: unknown): item is Library {
   return item instanceof LibraryWrapper;
 }
 
-export function isCollection(item: any): item is Collection {
+export function isCollection(item: unknown): item is Collection {
   return item instanceof CollectionWrapper;
 }
 
 function itemGetter<R>(
-  key: string,
-  factory: (server: any, state: any, setter: Dispatch<any>) => R,
+  key: keyof ServerState,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  factory: (server: Server, state: any) => R,
 ) {
-  return memo(function getter(this: any, id: string): R {
-    let items = this.state[key] as Record<string, any> | undefined;
-    let itemState = (items ?? {})[id];
+  return memo(function getter(this: Server, id: string): R {
+    let items = this.state[key] as Record<string, unknown> | undefined;
+    let itemState = items?.[id];
     if (!itemState) {
       throw new Error(`Unknown ${key} ${id}`);
     }
 
-    return factory(this, itemState, (newState) => {
-      this.setState({
-        ...this.state,
-        [key]: {
-          ...(this.state[key] ?? {}),
-          [id]: newState,
-        },
-      });
-    });
+    return factory(this, itemState);
   });
 }
 
 function listGetter<R>(
-  key: string,
+  key: keyof ServerState,
   itemLookup: (server: Server, id: string) => R,
   itemFilter: (item: R) => boolean = () => true,
 ): () => R[] {
   let result: R[] | null = null;
 
-  return function getter(this: any): R[] {
+  return function getter(this: Server): R[] {
     if (result !== null) {
       return result;
     }
 
-    let items = (this.state[key] ?? {}) as Record<string, any>;
+    let items = (this.state[key] ?? {}) as Record<string, unknown>;
     result = Object.keys(items).map((id) => itemLookup(this, id));
     if (itemFilter) {
       result = result.filter(itemFilter);
@@ -556,14 +548,16 @@ function listGetter<R>(
 }
 
 function clsFactory<S, R>(
-  Cls: new (server: Server, state: S, setState: Dispatch<S>) => R,
-): (server: Server, state: S, setState: Dispatch<S>) => R {
-  return (server: Server, state: S, setState: Dispatch<S>) =>
-    new Cls(server, state, setState);
+  Cls: new (server: Server, state: S) => R,
+): (server: Server, state: S) => R {
+  return (server: Server, state: S) => new Cls(server, state);
 }
 
 export class Server extends StateWrapper<ServerState> implements IServer {
-  public constructor(public readonly id: string, state: ServerState) {
+  public constructor(
+    public readonly id: string,
+    state: ServerState,
+  ) {
     super(state);
   }
 
@@ -600,17 +594,13 @@ export class Server extends StateWrapper<ServerState> implements IServer {
 
   public getVideo = itemGetter(
     "videos",
-    (
-      server: Server,
-      state: VideoState,
-      setState: Dispatch<VideoState>,
-    ): Video => {
+    (server: Server, state: VideoState): Video => {
       if ("library" in state.detail) {
-        // @ts-ignore
-        return new Movie(server, state, setState);
+        // @ts-expect-error
+        return new Movie(server, state);
       }
-      // @ts-ignore
-      return new Episode(server, state, setState);
+      // @ts-expect-error
+      return new Episode(server, state);
     },
   );
 

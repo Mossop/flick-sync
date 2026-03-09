@@ -110,7 +110,15 @@ export function useMapped<T>(
 
 export function namedIcon(icon: string) {
   return function Icon(props: TextProps) {
-    // @ts-ignore
+    // @ts-expect-error
     return <MaterialIcons name={icon} {...props} />;
   };
+}
+
+export function defer(fn: Promise<void> | (() => Promise<void>)) {
+  if (typeof fn == "function") {
+    fn().catch(console.error);
+  } else {
+    fn.catch(console.error);
+  }
 }

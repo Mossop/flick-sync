@@ -3,6 +3,8 @@
 /packages/mobile/.expo/
 /packages/mobile/dist/
 /packages/mobile/web-build/
+/packages/mobile/android/
+/packages/mobile/ios/
 /.lego/
 /.cargo/
 

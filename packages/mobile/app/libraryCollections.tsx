@@ -16,7 +16,7 @@ export default function CollectionList({ library }: { library: Library }) {
       <List
         id={`${library.id}/collections`}
         container={ContainerType.Library}
-        // @ts-ignore
+        // @ts-expect-error
         items={library.collections()}
       />
     </AppView>

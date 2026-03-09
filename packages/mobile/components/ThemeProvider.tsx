@@ -13,7 +13,6 @@ import {
   MD3LightTheme,
   Provider as PaperProvider,
 } from "react-native-paper";
-import * as StatusBar from "expo-status-bar";
 import * as NavigationBar from "expo-navigation-bar";
 
 type Scheme = "dark" | "light";
@@ -48,9 +47,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    StatusBar.setStatusBarBackgroundColor(paperTheme.colors.background, false);
-    NavigationBar.setBackgroundColorAsync(paperTheme.colors.background);
-    NavigationBar.setButtonStyleAsync(isDark ? "light" : "dark");
+    NavigationBar.setStyle(isDark ? "light" : "dark");
   }, [isDark, paperTheme]);
 
   return (
