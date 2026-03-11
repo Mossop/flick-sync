@@ -39,7 +39,7 @@ export default {
     [
       "expo-navigation-bar",
       {
-        enforceContrast: false,
+        enforceContrast: true,
         barStyle: "dark",
         visibility: "visible",
       },

@@ -2,6 +2,7 @@ import { Appbar } from "react-native-paper";
 import { StyleSheet, View, ViewProps } from "react-native";
 import { ReactNode } from "react";
 import { useAppDrawer } from "./Drawer";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 const styles = StyleSheet.create({
   base: {
@@ -29,7 +30,11 @@ export default function AppView({
         <Appbar.Content title={title} />
         {actions}
       </Appbar.Header>
-      <View style={[styles.base, style]} {...rest} />
+      <SafeAreaView
+        edges={["left", "right"]}
+        style={[styles.base, style]}
+        {...rest}
+      />
     </View>
   );
 }

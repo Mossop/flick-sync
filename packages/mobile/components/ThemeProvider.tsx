@@ -14,6 +14,7 @@ import {
   Provider as PaperProvider,
 } from "react-native-paper";
 import * as NavigationBar from "expo-navigation-bar";
+import * as StatusBar from "expo-status-bar";
 
 type Scheme = "dark" | "light";
 
@@ -48,6 +49,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     NavigationBar.setStyle(isDark ? "light" : "dark");
+    StatusBar.setStatusBarStyle(isDark ? "light" : "dark");
   }, [isDark]);
 
   return (

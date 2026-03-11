@@ -80,7 +80,7 @@ export default function Library({ route }: AppScreenProps<"library">) {
   if (library.collections().length > 0) {
     return (
       <LibraryNav.Navigator
-        screenOptions={{ animation: "fade", headerShown: false }}
+        screenOptions={{ animation: "shift", headerShown: false }}
         initialRouteName="contents"
         tabBar={NavigationBar}
       >
@@ -88,7 +88,7 @@ export default function Library({ route }: AppScreenProps<"library">) {
           name="contents"
           options={{
             tabBarIcon: () => (
-              <MaterialCommunityIcons name="bookshelf" size={26} />
+              <MaterialCommunityIcons name="bookshelf" size={22} />
             ),
             tabBarLabel: "Library",
           }}
@@ -99,7 +99,7 @@ export default function Library({ route }: AppScreenProps<"library">) {
           name="collections"
           options={{
             tabBarIcon: () => (
-              <MaterialCommunityIcons name="bookmark-box-multiple" size={26} />
+              <MaterialCommunityIcons name="bookmark-box-multiple" size={22} />
             ),
             tabBarLabel: "Collections",
           }}
