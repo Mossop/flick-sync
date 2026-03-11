@@ -46,8 +46,9 @@ const styles = StyleSheet.create({
 
 export interface ScrubberProps {
   position: number;
+  nextPosition?: number;
   totalDuration: number;
-  onScrubbing: () => void;
+  onScrubbing: (position: number) => void;
   onScrubbingComplete: (position: number) => void;
 }
 
@@ -86,6 +87,7 @@ function Time({ value }: { value: number }) {
 
 export default function Scrubber({
   position,
+  nextPosition,
   totalDuration,
   onScrubbing,
   onScrubbingComplete,
@@ -125,10 +127,9 @@ export default function Scrubber({
           );
         })
         .onUpdate((event) => {
-          selectedPosition.value = Math.round(
-            (totalDuration * event.x) / fullWidth,
-          );
-          scheduleOnRN(onScrubbing);
+          let nextPosition = Math.round((totalDuration * event.x) / fullWidth);
+          selectedPosition.value = nextPosition;
+          scheduleOnRN(onScrubbing, nextPosition);
         })
         .onEnd(() => {
           if (selectedPosition.value !== null) {
@@ -167,8 +168,8 @@ export default function Scrubber({
           ]}
         />
         <View style={styles.labels}>
-          <Time value={position} />
-          <Time value={totalDuration - position} />
+          <Time value={nextPosition ?? position} />
+          <Time value={totalDuration - (nextPosition ?? position)} />
         </View>
       </View>
     </GestureDetector>

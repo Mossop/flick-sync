@@ -168,6 +168,8 @@ export function Overlay({
   let navigation = useNavigation<NativeStackNavigationProp<AppRoutes>>();
   let [visible, updateState, useOverlayAction] = useOverlayState();
 
+  let [nextPosition, setNextPosition] = useState<number | undefined>();
+
   let togglePlayback = useOverlayAction(() => {
     setPlaying(!status.isPlaying);
   }, [setPlaying, status]);
@@ -201,7 +203,14 @@ export function Overlay({
     }
   }, [goNext]);
 
-  let onScrub = useOverlayAction(() => {}, []);
+  let onScrubbing = useOverlayAction(setNextPosition, []);
+  let onScrubbingComplete = useCallback(
+    (position: number) => {
+      setNextPosition(undefined);
+      seek(position);
+    },
+    [seek],
+  );
 
   return (
     <Pressable style={styles.overlayContainer} onPress={() => updateState()}>
@@ -260,10 +269,11 @@ export function Overlay({
             )}
           </View>
           <Scrubber
+            nextPosition={nextPosition}
             position={status.position}
             totalDuration={status.duration}
-            onScrubbing={onScrub}
-            onScrubbingComplete={seek}
+            onScrubbing={onScrubbing}
+            onScrubbingComplete={onScrubbingComplete}
           />
         </Animated.View>
       )}
