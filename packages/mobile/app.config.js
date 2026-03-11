@@ -44,6 +44,13 @@ export default {
         visibility: "visible",
       },
     ],
+    [
+      "expo-video",
+      {
+        supportsBackgroundPlayback: true,
+        supportsPictureInPicture: true,
+      },
+    ],
   ],
   extra: {
     eas: {

@@ -1,5 +1,5 @@
 import { StyleSheet, View } from "react-native";
-import { VideoView, useVideoPlayer } from "expo-video";
+import { VideoMetadata, VideoView, useVideoPlayer } from "expo-video";
 import { useEventListener } from "expo";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as StatusBar from "expo-status-bar";
@@ -69,7 +69,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     isPlaying: false,
   }));
 
-  let uri: string | null = null;
+  let uri: string | undefined = undefined;
   if (isDownloaded(video.download)) {
     uri = storagePath(video.download.path);
   } else {
@@ -77,7 +77,15 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     navigation.pop();
   }
 
-  let player = useVideoPlayer(uri, (p) => {
+  let metadata: VideoMetadata = {
+    title: video.title,
+    artwork:
+      video.thumbnail.state == "stored"
+        ? storagePath(video.thumbnail.path)
+        : undefined,
+  };
+
+  let player = useVideoPlayer({ uri, metadata }, (p) => {
     let position =
       video.playbackState.state == "played" || restart ? 0 : video.playPosition;
     console.log(
@@ -86,6 +94,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
 
     p.timeUpdateEventInterval = 1;
     p.keepScreenOnWhilePlaying = true;
+    p.showNowPlayingNotification = true;
     p.currentTime = position / 1000;
     p.play();
   });
