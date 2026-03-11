@@ -1,4 +1,4 @@
-import { StyleSheet } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { VideoView, useVideoPlayer } from "expo-video";
 import { useEventListener } from "expo";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -27,6 +27,10 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  inner: {
+    width: "100%",
+    height: "100%",
   },
   video: {
     width: "100%",
@@ -186,21 +190,23 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: "black" }]}>
-      <SchemeOverride scheme="dark" />
-      <VideoView
-        player={player}
-        style={styles.video}
-        contentFit="contain"
-        nativeControls={false}
-      />
-      <Overlay
-        goPrevious={previous}
-        goNext={next}
-        seek={seek}
-        status={playbackStatus}
-        setPlaying={setPlaying}
-        video={video}
-      />
+      <View style={styles.inner}>
+        <SchemeOverride scheme="dark" />
+        <VideoView
+          player={player}
+          style={styles.video}
+          contentFit="contain"
+          nativeControls={false}
+        />
+        <Overlay
+          goPrevious={previous}
+          goNext={next}
+          seek={seek}
+          status={playbackStatus}
+          setPlaying={setPlaying}
+          video={video}
+        />
+      </View>
     </SafeAreaView>
   );
 }
