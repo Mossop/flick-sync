@@ -1,69 +1,16 @@
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { createMaterialBottomTabNavigator } from "@react-navigation/material-bottom-tabs";
-import { useMemo } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { StoreProvider } from "./components/Store";
 import Notification from "./components/Notification";
 import Video from "./app/video";
-import createAppNavigator, {
-  AppScreenProps,
-  AppRoutes,
-} from "./components/AppNavigator";
+import createAppNavigator, { AppRoutes } from "./components/AppNavigator";
+import Library from "./app/library";
 import Settings from "./app/settings";
 import Playlist from "./app/playlist";
-import LibraryContent from "./app/libraryContents";
-import LibraryCollections from "./app/libraryCollections";
-import { useLibraries } from "./modules/util";
 import Collection from "./app/collection";
 import Show from "./app/show";
 import { ThemeProvider } from "./components/ThemeProvider";
-
-const LibraryNav = createMaterialBottomTabNavigator();
-
-function Library({ route }: AppScreenProps<"library">) {
-  let libraries = useLibraries();
-  let library = useMemo(
-    () =>
-      libraries.find(
-        (lib) =>
-          lib.server.id == route.params?.server &&
-          lib.id == route.params?.library,
-      ) ?? libraries[0],
-    [libraries, route.params],
-  );
-
-  if (!library) {
-    return null;
-  }
-
-  if (library.collections().length > 0) {
-    return (
-      <LibraryNav.Navigator initialRouteName="contents">
-        <LibraryNav.Screen
-          name="contents"
-          options={{
-            tabBarIcon: "bookshelf",
-            tabBarLabel: "Library",
-          }}
-        >
-          {() => <LibraryContent library={library} />}
-        </LibraryNav.Screen>
-        <LibraryNav.Screen
-          name="collections"
-          options={{
-            tabBarIcon: "bookmark-box-multiple",
-            tabBarLabel: "Collections",
-          }}
-        >
-          {() => <LibraryCollections library={library} />}
-        </LibraryNav.Screen>
-      </LibraryNav.Navigator>
-    );
-  }
-
-  return <LibraryContent library={library} />;
-}
 
 const AppNav = createAppNavigator<AppRoutes>();
 
