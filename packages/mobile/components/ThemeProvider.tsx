@@ -48,7 +48,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     NavigationBar.setStyle(isDark ? "light" : "dark");
-  }, [isDark, paperTheme]);
+  }, [isDark]);
 
   return (
     <ThemeContext.Provider value={setThemeOverride}>

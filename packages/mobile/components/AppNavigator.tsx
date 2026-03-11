@@ -13,7 +13,7 @@ import {
   NativeStackNavigationOptions,
   NativeStackView,
 } from "@react-navigation/native-stack";
-import { DrawerLayoutAndroid, View, StyleSheet } from "react-native";
+import { DrawerLayoutAndroid, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ReactNode, createContext, useContext, useMemo, useRef } from "react";
 import { Drawer } from "react-native-paper";
@@ -130,41 +130,39 @@ function DrawerContent({ navigation }: { navigation: Navigation }) {
   };
 
   return (
-    <View style={styles.drawer}>
-      <SafeAreaView edges={["top", "bottom", "left"]}>
-        {libraries.length > 0 && (
-          <Drawer.Section title="Libraries">
-            {libraries.map((library) => (
-              <Drawer.Item
-                key={library.id}
-                onPress={() => openLibrary(library)}
-                icon={library instanceof MovieLibrary ? "movie" : tvIcon}
-                label={library.title}
-              />
-            ))}
-          </Drawer.Section>
-        )}
+    <SafeAreaView edges={["top", "bottom", "left"]} style={styles.drawer}>
+      {libraries.length > 0 && (
+        <Drawer.Section title="Libraries">
+          {libraries.map((library) => (
+            <Drawer.Item
+              key={library.id}
+              onPress={() => openLibrary(library)}
+              icon={library instanceof MovieLibrary ? "movie" : tvIcon}
+              label={library.title}
+            />
+          ))}
+        </Drawer.Section>
+      )}
 
-        {playlists.length > 0 && (
-          <Drawer.Section title="Playlists">
-            {playlists.map((playlist) => (
-              <Drawer.Item
-                key={playlist.id}
-                onPress={() => openPlaylist(playlist)}
-                icon="playlist-play"
-                label={playlist.title}
-              />
-            ))}
-          </Drawer.Section>
-        )}
+      {playlists.length > 0 && (
+        <Drawer.Section title="Playlists">
+          {playlists.map((playlist) => (
+            <Drawer.Item
+              key={playlist.id}
+              onPress={() => openPlaylist(playlist)}
+              icon="playlist-play"
+              label={playlist.title}
+            />
+          ))}
+        </Drawer.Section>
+      )}
 
-        <Drawer.Item
-          onPress={openSettings}
-          icon={settingsIcon}
-          label="Settings"
-        />
-      </SafeAreaView>
-    </View>
+      <Drawer.Item
+        onPress={openSettings}
+        icon={settingsIcon}
+        label="Settings"
+      />
+    </SafeAreaView>
   );
 }
 

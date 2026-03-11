@@ -31,9 +31,17 @@ export default {
     [
       "expo-splash-screen",
       {
-        image: `${LOGO}/splash.png`,
+        image: `${LOGO}/adaptive-icon.png`,
         backgroundColor: "#ffffff",
         imageWidth: 200,
+      },
+    ],
+    [
+      "expo-navigation-bar",
+      {
+        enforceContrast: false,
+        barStyle: "dark",
+        visibility: "visible",
       },
     ],
   ],
