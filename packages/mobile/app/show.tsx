@@ -25,7 +25,12 @@ export default function Show({ route }: AppScreenProps<"show">) {
       title={show.title}
       actions={<ListControls id={show.id} container={ContainerType.Show} />}
     >
-      <List id={show.id} container={ContainerType.Show} items={episodes} />
+      <List
+        id={show.id}
+        container={ContainerType.Show}
+        items={episodes}
+        inset={true}
+      />
     </AppView>
   );
 }

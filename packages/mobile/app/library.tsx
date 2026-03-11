@@ -1,11 +1,65 @@
-import { createMaterialBottomTabNavigator } from "@react-navigation/material-bottom-tabs";
+import {
+  BottomTabBarProps,
+  createBottomTabNavigator,
+} from "@react-navigation/bottom-tabs";
+import { BottomNavigation } from "react-native-paper";
 import { useMemo } from "react";
 import { AppScreenProps } from "../components/AppNavigator";
 import LibraryContent from "./libraryContents";
 import LibraryCollections from "./libraryCollections";
 import { useLibraries } from "../modules/util";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { CommonActions } from "@react-navigation/native";
 
-const LibraryNav = createMaterialBottomTabNavigator();
+const LibraryNav = createBottomTabNavigator();
+
+function NavigationBar({
+  navigation,
+  state,
+  descriptors,
+  insets,
+}: BottomTabBarProps) {
+  return (
+    <BottomNavigation.Bar
+      navigationState={state}
+      safeAreaInsets={insets}
+      onTabPress={({ route, ...pressEvent }) => {
+        let event = navigation.emit({
+          type: "tabPress",
+          target: route.key,
+          canPreventDefault: true,
+        });
+
+        if (event.defaultPrevented) {
+          pressEvent.preventDefault();
+        } else {
+          navigation.dispatch({
+            ...CommonActions.navigate(route.name, route.params),
+            target: state.key,
+          });
+        }
+      }}
+      renderIcon={({ route, focused, color }) =>
+        descriptors[route.key].options.tabBarIcon?.({
+          focused,
+          color,
+          size: 24,
+        }) ?? null
+      }
+      getLabelText={({ route }) => {
+        let { options } = descriptors[route.key];
+        let label =
+          typeof options.tabBarLabel === "string"
+            ? options.tabBarLabel
+            : typeof options.title === "string"
+              ? options.title
+              : route.name;
+
+        return label;
+      }}
+    />
+  );
+}
 
 export default function Library({ route }: AppScreenProps<"library">) {
   let libraries = useLibraries();
@@ -25,11 +79,17 @@ export default function Library({ route }: AppScreenProps<"library">) {
 
   if (library.collections().length > 0) {
     return (
-      <LibraryNav.Navigator initialRouteName="contents">
+      <LibraryNav.Navigator
+        screenOptions={{ animation: "fade", headerShown: false }}
+        initialRouteName="contents"
+        tabBar={NavigationBar}
+      >
         <LibraryNav.Screen
           name="contents"
           options={{
-            tabBarIcon: "bookshelf",
+            tabBarIcon: () => (
+              <MaterialCommunityIcons name="bookshelf" size={26} />
+            ),
             tabBarLabel: "Library",
           }}
         >
@@ -38,7 +98,9 @@ export default function Library({ route }: AppScreenProps<"library">) {
         <LibraryNav.Screen
           name="collections"
           options={{
-            tabBarIcon: "bookmark-box-multiple",
+            tabBarIcon: () => (
+              <MaterialCommunityIcons name="bookmark-box-multiple" size={26} />
+            ),
             tabBarLabel: "Collections",
           }}
         >

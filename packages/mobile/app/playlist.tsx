@@ -28,6 +28,7 @@ export default function Playlist({ route }: AppScreenProps<"playlist">) {
         id={playlist.id}
         container={ContainerType.Playlist}
         items={playlist.videos}
+        inset={true}
       />
     </AppView>
   );

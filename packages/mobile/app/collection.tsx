@@ -31,6 +31,7 @@ export default function Collection({ route }: AppScreenProps<"collection">) {
         container={container}
         // @ts-expect-error
         items={collection.contents}
+        inset={true}
       />
     </AppView>
   );

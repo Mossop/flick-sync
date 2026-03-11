@@ -4,7 +4,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { StoreProvider } from "./components/Store";
 import Notification from "./components/Notification";
 import Video from "./app/video";
-import createAppNavigator, { AppRoutes } from "./components/AppNavigator";
+import createAppNavigator from "./components/AppNavigator";
 import Library from "./app/library";
 import Settings from "./app/settings";
 import Playlist from "./app/playlist";
@@ -12,7 +12,7 @@ import Collection from "./app/collection";
 import Show from "./app/show";
 import { ThemeProvider } from "./components/ThemeProvider";
 
-const AppNav = createAppNavigator<AppRoutes>();
+const AppNav = createAppNavigator();
 
 function App() {
   return (

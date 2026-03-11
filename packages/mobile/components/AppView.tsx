@@ -1,7 +1,7 @@
 import { Appbar } from "react-native-paper";
 import { StyleSheet, View, ViewProps } from "react-native";
 import { ReactNode } from "react";
-import { useAppDrawer } from "./AppNavigator";
+import { useAppDrawer } from "./Drawer";
 
 const styles = StyleSheet.create({
   base: {

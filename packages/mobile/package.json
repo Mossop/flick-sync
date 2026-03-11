@@ -6,9 +6,9 @@
     "@expo/vector-icons": "^15.0.2",
     "@pchmn/expo-material3-theme": "^1.4.0",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "@react-navigation/material-bottom-tabs": "6.2.15",
-    "@react-navigation/native": "6.0.2",
-    "@react-navigation/native-stack": "6.9.12",
+    "@react-navigation/bottom-tabs": "7.15.5",
+    "@react-navigation/native": "7.1.33",
+    "@react-navigation/native-stack": "7.14.4",
     "@reduxjs/toolkit": "^2.11.2",
     "expo": "^55.0.0",
     "expo-dev-client": "^55.0.13",
@@ -23,6 +23,7 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-native": "0.83.2",
+    "react-native-drawer-layout": "^4.2.2",
     "react-native-gesture-handler": "^2.30.0",
     "react-native-paper": "^5.6.0",
     "react-native-reanimated": "4.2.1",
@@ -35,16 +36,16 @@
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
-    "@mossop/config": "^2.1.0",
-    "@types/react": "^19.2.10",
-    "typescript-eslint": "^8.7.0",
-    "babel-preset-expo": "^55.0.10",
     "@eslint/js": "^9.11.1",
+    "@mossop/config": "^2.1.1",
+    "@types/react": "^19.2.10",
+    "babel-preset-expo": "^55.0.10",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-react": "^7.37.0",
     "eslint-plugin-react-hooks": "rc",
     "prettier": "^3.3.3",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.7.0"
   },
   "private": true
 }

@@ -1,20 +1,3 @@
 {
   "extends": "@mossop/config/react-native/tsconfig",
-
-  "compilerOptions": {
-    "lib": ["DOM", "ESNext"],
-    "module": "commonjs",
-    "moduleResolution": "node",
-    "target": "ESNext",
-    "jsx": "react-native",
-
-    "esModuleInterop": true,
-    "noEmit": true,
-    "resolveJsonModule": true,
-    "skipLibCheck": true
-  },
-
-  "include": [".*.js", "*.js", "**/*.ts", "**/*.tsx", "eslint.config.mjs"],
-
-  "exclude": ["node_modules"]
 }

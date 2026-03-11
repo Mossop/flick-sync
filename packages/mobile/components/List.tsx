@@ -50,6 +50,7 @@ import {
   useListSetting,
   useStoragePath,
 } from "./Store";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // Offer to start from the current position as long as it is larger than this.
 const START_SLOP = 15000;
@@ -662,18 +663,26 @@ function VideoStartModal({
   );
 }
 
+function NavBarInset() {
+  let { bottom } = useSafeAreaInsets();
+
+  return <View style={{ paddingBottom: bottom }} />;
+}
+
 export function List<T extends ChildItem>({
   id,
   container,
   items,
   style,
   onClick,
+  inset = false,
 }: {
   id: string;
   container: ContainerType;
   style?: StyleProp<ViewStyle>;
   items: readonly T[];
   onClick?: (item: T) => void;
+  inset?: boolean;
 }) {
   let listSettings = useListSetting(id, container);
   let sorted = useSorted(items, listSettings.ordering);
@@ -800,6 +809,7 @@ export function List<T extends ChildItem>({
           initialNumToRender={initialNumToRender}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
+          ListFooterComponent={inset ? NavBarInset : undefined}
         />
       )}
     </View>

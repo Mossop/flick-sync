@@ -11,33 +11,9 @@ import {
 import {
   NativeStackNavigationEventMap,
   NativeStackNavigationOptions,
-  NativeStackView,
 } from "@react-navigation/native-stack";
-import { DrawerLayoutAndroid, StyleSheet } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { ReactNode, createContext, useContext, useMemo, useRef } from "react";
-import { Drawer } from "react-native-paper";
-import {
-  ScreenProps,
-  namedIcon,
-  useLibraries,
-  usePlaylists,
-} from "../modules/util";
-import { Library, MovieLibrary, Playlist } from "../state";
-
-type NativeStackNavigatorProps = DefaultNavigatorOptions<
-  ParamListBase,
-  StackNavigationState<ParamListBase>,
-  NativeStackNavigationOptions,
-  NativeStackNavigationEventMap
-> &
-  StackRouterOptions;
-
-const styles = StyleSheet.create({
-  drawer: {
-    flex: 1,
-  },
-});
+import { ScreenProps } from "../modules/util";
+import DrawerView from "./Drawer";
 
 interface LibraryParams {
   server: string;
@@ -78,7 +54,7 @@ export interface AppRoutes {
 export type AppScreenProps<R extends keyof AppRoutes = keyof AppRoutes> =
   ScreenProps<AppRoutes, R>;
 
-type Navigation = ReturnType<
+export type AppNavigation = ReturnType<
   typeof useNavigationBuilder<
     StackNavigationState<AppRoutes>,
     StackRouterOptions,
@@ -88,156 +64,33 @@ type Navigation = ReturnType<
   >
 >["navigation"];
 
-interface AppDrawer {
-  openDrawer: () => void;
-  closeDrawer: () => void;
-}
+type NativeStackNavigatorProps = DefaultNavigatorOptions<
+  ParamListBase,
+  undefined,
+  StackNavigationState<ParamListBase>,
+  NativeStackNavigationOptions,
+  NativeStackNavigationEventMap,
+  AppNavigation
+>;
 
-const DrawerContext = createContext<AppDrawer>({
-  openDrawer: () => {},
-  closeDrawer: () => {},
-});
-export const useAppDrawer = () => useContext(DrawerContext);
-
-function DrawerContent({ navigation }: { navigation: Navigation }) {
-  let { closeDrawer } = useAppDrawer();
-  let libraries = useLibraries();
-  let playlists = usePlaylists();
-
-  let tvIcon = useMemo(() => namedIcon("tv"), []);
-  let settingsIcon = useMemo(() => namedIcon("settings"), []);
-
-  let openLibrary = (library: Library) => {
-    navigation.navigate("library", {
-      server: library.server.id,
-      library: library.id,
-      screen: "contents",
-    });
-    closeDrawer();
-  };
-
-  let openPlaylist = (playlist: Playlist) => {
-    navigation.navigate("playlist", {
-      server: playlist.server.id,
-      playlist: playlist.id,
-    });
-    closeDrawer();
-  };
-
-  let openSettings = () => {
-    navigation.navigate("settings");
-    closeDrawer();
-  };
-
-  return (
-    <SafeAreaView edges={["top", "bottom", "left"]} style={styles.drawer}>
-      {libraries.length > 0 && (
-        <Drawer.Section title="Libraries">
-          {libraries.map((library) => (
-            <Drawer.Item
-              key={library.id}
-              onPress={() => openLibrary(library)}
-              icon={library instanceof MovieLibrary ? "movie" : tvIcon}
-              label={library.title}
-            />
-          ))}
-        </Drawer.Section>
-      )}
-
-      {playlists.length > 0 && (
-        <Drawer.Section title="Playlists">
-          {playlists.map((playlist) => (
-            <Drawer.Item
-              key={playlist.id}
-              onPress={() => openPlaylist(playlist)}
-              icon="playlist-play"
-              label={playlist.title}
-            />
-          ))}
-        </Drawer.Section>
-      )}
-
-      <Drawer.Item
-        onPress={openSettings}
-        icon={settingsIcon}
-        label="Settings"
-      />
-    </SafeAreaView>
-  );
-}
-
-function AppNavigatorView({
-  navigation,
-  children,
-}: {
-  navigation: Navigation;
-  children: ReactNode;
-}) {
-  let drawer = useRef<DrawerLayoutAndroid>(null);
-  let appDrawer = useMemo(
-    () => ({
-      openDrawer: () => drawer.current?.openDrawer(),
-      closeDrawer: () => drawer.current?.closeDrawer(),
-    }),
-    [],
-  );
-
-  return (
-    <DrawerContext.Provider value={appDrawer}>
-      <DrawerLayoutAndroid
-        ref={drawer}
-        renderNavigationView={() => <DrawerContent navigation={navigation} />}
-        drawerWidth={300}
-      >
-        {children}
-      </DrawerLayoutAndroid>
-    </DrawerContext.Provider>
-  );
-}
-
-function AppNavigator({
-  id,
-  initialRouteName,
-  children,
-  screenListeners,
-  screenOptions,
-  ...rest
-}: NativeStackNavigatorProps) {
-  const { state, descriptors, navigation, NavigationContent } =
+function AppNavigator(props: NativeStackNavigatorProps) {
+  let { state, descriptors, navigation, NavigationContent } =
     useNavigationBuilder<
       StackNavigationState<AppRoutes>,
       StackRouterOptions,
       StackActionHelpers<AppRoutes>,
       NativeStackNavigationOptions,
       NativeStackNavigationEventMap
-    >(StackRouter, {
-      id,
-      initialRouteName,
-      children,
-      screenListeners,
-      screenOptions: {
-        ...screenOptions,
-        headerShown: false,
-      },
-    });
+    >(StackRouter, props);
+
+  let focusedRoute = state.routes[state.index];
+  let descriptor = descriptors[focusedRoute.key];
 
   return (
     <NavigationContent>
-      <AppNavigatorView navigation={navigation}>
-        <NativeStackView
-          {...rest}
-          state={state}
-          navigation={navigation}
-          descriptors={descriptors}
-        />
-      </AppNavigatorView>
+      <DrawerView navigation={navigation}>{descriptor.render()}</DrawerView>
     </NavigationContent>
   );
 }
 
-export default createNavigatorFactory<
-  StackNavigationState<AppRoutes>,
-  NativeStackNavigationOptions,
-  NativeStackNavigationEventMap,
-  typeof AppNavigator
->(AppNavigator);
+export default createNavigatorFactory(AppNavigator);
