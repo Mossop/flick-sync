@@ -268,6 +268,17 @@ export abstract class CollectionWrapper
     return this.state.lastUpdated;
   }
 
+  private duration: number | undefined = undefined;
+
+  public get totalDuration(): number {
+    this.duration ??= this.contents.reduce(
+      (total, item) => total + item.totalDuration,
+      0,
+    );
+
+    return this.duration;
+  }
+
   public abstract get library(): Library;
 
   public abstract get contents(): readonly (Show | Movie)[];
@@ -316,6 +327,17 @@ export class Playlist
     return this.state.title;
   }
 
+  private duration: number | undefined = undefined;
+
+  public get totalDuration(): number {
+    this.duration ??= this.videos.reduce(
+      (total, video) => total + video.totalDuration,
+      0,
+    );
+
+    return this.duration;
+  }
+
   public get videos(): readonly Video[] {
     return this.state.videos
       .map((id) => this.server.getVideo(id))
@@ -344,6 +366,17 @@ export class Show extends ServerItemWrapper<ShowState> implements IShow {
     return this.state.thumbnail;
   }
 
+  private duration: number | undefined = undefined;
+
+  public get totalDuration(): number {
+    this.duration ??= this.seasons.reduce(
+      (total, season) => total + season.totalDuration,
+      0,
+    );
+
+    return this.duration;
+  }
+
   public get library(): ShowLibrary {
     return this.server.getLibrary(this.state.library) as ShowLibrary;
   }
@@ -367,6 +400,17 @@ export class Season extends ServerItemWrapper<SeasonState> implements ISeason {
 
   public get index(): number {
     return this.state.index;
+  }
+
+  private duration: number | undefined = undefined;
+
+  public get totalDuration(): number {
+    this.duration ??= this.episodes.reduce(
+      (total, episode) => total + episode.totalDuration,
+      0,
+    );
+
+    return this.duration;
   }
 
   public get library(): ShowLibrary {

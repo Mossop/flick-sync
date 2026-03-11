@@ -153,43 +153,8 @@ function shouldQueue(container: ContainerType): boolean {
   }
 }
 
-function itemDuration(item: ChildItem | Season): number {
-  if (item instanceof Episode) {
-    return item.totalDuration;
-  }
-  if (item instanceof Movie) {
-    return item.totalDuration;
-  }
-  if (item instanceof Show) {
-    return item.seasons.reduce(
-      (total, season) => total + itemDuration(season),
-      0,
-    );
-  }
-  if (item instanceof Season) {
-    return item.episodes.reduce(
-      (total, episode) => total + itemDuration(episode),
-      0,
-    );
-  }
-  if (item instanceof ShowCollection) {
-    return item.contents.reduce((total, show) => total + itemDuration(show), 0);
-  }
-  if (item instanceof MovieCollection) {
-    return item.contents.reduce(
-      (total, movie) => total + itemDuration(movie),
-      0,
-    );
-  }
-  if (item instanceof Playlist) {
-    return item.videos.reduce((total, video) => total + itemDuration(video), 0);
-  }
-
-  return 0;
-}
-
 function duration(item: ChildItem) {
-  let secs = Math.floor(itemDuration(item) / 1000);
+  let secs = Math.floor(item.totalDuration / 1000);
 
   let result = `${pad(secs % 60)}`;
   if (secs >= 60) {
@@ -216,6 +181,13 @@ function useSorted<T extends ChildItem>(
 
     if (ordering == Ordering.Title) {
       return byTitle(items);
+    }
+
+    if (ordering == Ordering.Duration) {
+      let result = [...items];
+      result.sort((a, b) => a.totalDuration - b.totalDuration);
+
+      return result;
     }
 
     if (ordering == Ordering.AirDate) {
@@ -331,6 +303,12 @@ export function ListControls({
         <OrderingMenuItem
           ordering={Ordering.Title}
           title="Title"
+          currentOrdering={listSettings.ordering}
+          setOrdering={setOrdering}
+        />
+        <OrderingMenuItem
+          ordering={Ordering.Duration}
+          title="Duration"
           currentOrdering={listSettings.ordering}
           setOrdering={setOrdering}
         />

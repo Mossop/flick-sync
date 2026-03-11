@@ -29,6 +29,7 @@ export enum Display {
 export enum Ordering {
   Index = "index",
   Title = "title",
+  Duration = "duration",
   AirDate = "airdate",
 }
 
