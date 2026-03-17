@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     hash::Hash,
     io,
+    path::Path,
     pin::Pin,
     result,
     task::{Context, Poll},
@@ -9,7 +10,8 @@ use std::{
 
 use pin_project::pin_project;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use tokio::io::AsyncWrite;
+use serde_json::to_string_pretty;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 pub(crate) trait ListItem<T> {
     fn id(&self) -> T;
@@ -49,6 +51,29 @@ where
 {
     let list: Vec<&V> = map.values().collect();
     list.serialize(serializer)
+}
+
+pub(crate) async fn safe_write<S: Serialize>(
+    path: impl AsRef<Path>,
+    data: &S,
+) -> anyhow::Result<()> {
+    let st = to_string_pretty(&data)?;
+    let path = path.as_ref();
+    let Some(file_name) = path.file_name() else {
+        return Ok(tokio::fs::write(path, st).await?);
+    };
+
+    let mut temp_path = path.to_owned();
+    let mut file_name = file_name.to_owned();
+    file_name.push(".temp");
+    temp_path.set_file_name(file_name);
+
+    let mut file = tokio::fs::File::create(&temp_path).await?;
+    file.write_all(st.as_ref()).await?;
+    file.sync_all().await?;
+    drop(file);
+
+    Ok(tokio::fs::rename(temp_path, path).await?)
 }
 
 pub(crate) fn safe<S: AsRef<str>>(str: S) -> String {

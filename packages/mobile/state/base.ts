@@ -113,3 +113,7 @@ export interface State {
   clientId: string;
   servers?: Record<string, ServerState>;
 }
+
+export interface PlaybackUpdates {
+  servers: Record<string, Record<string, PlaybackState>>;
+}

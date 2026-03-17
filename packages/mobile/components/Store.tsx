@@ -9,16 +9,23 @@ import {
   useDispatch,
   useSelector as useReduxState,
 } from "react-redux";
-import { StorageAccessFramework, getInfoAsync } from "expo-file-system/legacy";
+import {
+  FileInfo,
+  StorageAccessFramework,
+  getInfoAsync,
+} from "expo-file-system/legacy";
 import * as SplashScreen from "expo-splash-screen";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ReactNode, useCallback } from "react";
-import { PlaybackState, State } from "../state/base";
+import { PlaybackState, PlaybackUpdates, State } from "../state/base";
 import { ContainerType, StateDecoder } from "../state";
+import { PlaybackUpdatesDecoder } from "../state/decoders";
 
 const STORE_KEY = "store";
 const SETTINGS_KEY = "settings#";
 const STATE_FILE = ".flicksync.state.json";
+const STATE_BACKUP_FILE = ".flicksync.state.json.backup";
+const PLAYBACK_FILE = ".flicksync.playback.json";
 const CONTENT_ROOT = "content://com.android.externalstorage.documents/tree/";
 
 export enum Display {
@@ -179,28 +186,46 @@ const reducer = createReducer<StoreState>(
   },
 );
 
+function extractPlaybackUpdates(state: State): PlaybackUpdates {
+  let servers: Record<string, Record<string, PlaybackState>> = {};
+
+  for (let [serverId, server] of Object.entries(state.servers ?? {})) {
+    let videos: Record<string, PlaybackState> = {};
+
+    for (let [videoId, video] of Object.entries(server.videos ?? {})) {
+      videos[videoId] = video.playbackState;
+    }
+
+    if (Object.keys(videos).length > 0) {
+      servers[serverId] = videos;
+    }
+  }
+  return { servers };
+}
+
+async function safeInfo(path: string): Promise<FileInfo | undefined> {
+  try {
+    return await getInfoAsync(path);
+  } catch (e) {
+    console.warn(`Failed to get file metadata for ${path}`, e);
+    return undefined;
+  }
+}
+
 class StatePersister {
-  private stateToPersist: State | undefined = undefined;
+  private playbackToPersist: PlaybackUpdates | undefined = undefined;
 
   private isPersisting = false;
 
-  constructor(
-    private store: string,
-    private persistedState: State,
-  ) {}
+  constructor(private store: string) {}
 
-  public async persistState(state: State) {
-    if (
-      typeof state !== "object" ||
-      !state?.schema ||
-      Object.keys(state.servers ?? {}).length === 0
-    ) {
-      // Refuse to persist empty or invalid state.
-      console.warn("Refusing to persist empty or invalid state", state);
+  public async persistPlayback(state: State) {
+    if (Object.keys(state.servers ?? {}).length === 0) {
+      console.warn("Refusing to persist playback for empty state");
       return;
     }
 
-    this.stateToPersist = state;
+    this.playbackToPersist = extractPlaybackUpdates(state);
 
     if (this.isPersisting) {
       return;
@@ -208,17 +233,19 @@ class StatePersister {
 
     this.isPersisting = true;
     try {
-      while (this.persistedState !== this.stateToPersist) {
-        let path = storagePath(this.store, STATE_FILE);
-        let info = await getInfoAsync(path);
+      while (this.playbackToPersist !== undefined) {
+        let path = storagePath(this.store, PLAYBACK_FILE);
+        let info = await safeInfo(path);
 
-        let writingState: State = this.stateToPersist;
-        let data = JSON.stringify(writingState, undefined, 2);
+        let writingUpdates = this.playbackToPersist;
+        this.playbackToPersist = undefined;
 
-        if (!info.exists) {
+        let data = JSON.stringify(writingUpdates, undefined, 2);
+
+        if (!info?.exists) {
           await StorageAccessFramework.createFileAsync(
             this.store,
-            STATE_FILE.substring(0, STATE_FILE.length - 5),
+            PLAYBACK_FILE.substring(0, PLAYBACK_FILE.length - 5),
             "application/json",
           );
         } else if (data.length < info.size) {
@@ -228,10 +255,9 @@ class StatePersister {
         }
 
         await StorageAccessFramework.writeAsStringAsync(path, data);
-        this.persistedState = writingState;
       }
     } catch (e) {
-      console.error("Failed to persist state", e);
+      console.error("Failed to persist playback", e);
     } finally {
       this.isPersisting = false;
     }
@@ -242,16 +268,16 @@ const statePersist: Middleware<object, StoreState> = (store) => {
   let persister: StatePersister | null = null;
 
   return (next) => (action) => {
-    let { storeLocation: oldStoreLocation, state: oldState } = store.getState();
+    let { storeLocation: oldStoreLocation } = store.getState();
     next(action);
     let { storeLocation, state } = store.getState();
 
     if (!persister || storeLocation !== oldStoreLocation) {
       console.log(`Creating new state persister for ${storeLocation}`);
-      persister = new StatePersister(storeLocation, state);
-    } else if (state !== oldState) {
-      console.log("Persisting new state");
-      persister.persistState(state).catch(console.error);
+      persister = new StatePersister(storeLocation);
+    } else if (setPlaybackState.match(action)) {
+      console.log("Persisting playback state");
+      persister.persistPlayback(state).catch(console.error);
     }
   };
 };
@@ -320,30 +346,66 @@ async function chooseStore(): Promise<string> {
   }
 }
 
-async function loadMediaState(storeLocation: string): Promise<State> {
-  console.log(`Loading media state from ${storeLocation}`);
+async function applyPlaybackStates(storeLocation: string, state: State) {
+  // Merge any pending playback updates written since the last Rust sync.
   try {
-    let stateStr = await StorageAccessFramework.readAsStringAsync(
-      storagePath(storeLocation, STATE_FILE),
+    let playbackStr = await StorageAccessFramework.readAsStringAsync(
+      storagePath(storeLocation, PLAYBACK_FILE),
     );
 
-    let state: State = JSON.parse(stateStr);
-    let result = StateDecoder.decode(state);
+    let json = JSON.parse(playbackStr);
+    let result = PlaybackUpdatesDecoder.decode(json);
     if (!result.isOk()) {
       throw new Error(`Invalid state: ${result.error}`);
     }
 
-    let servers = Object.values(state.servers ?? {});
-    let videos = servers.flatMap((server) =>
-      Object.values(server.videos ?? {}),
-    );
-    console.log(
-      `Loaded state with ${servers.length} servers and ${videos.length} videos.`,
-    );
+    let updates = result.value;
 
-    return state;
-  } catch (e) {
-    console.error("State read failed", e);
+    for (let [serverId, videos] of Object.entries(updates.servers ?? {})) {
+      for (let [videoId, playbackState] of Object.entries(videos)) {
+        let video = state.servers?.[serverId]?.videos?.[videoId];
+        if (video) {
+          video.playbackState = playbackState;
+        }
+      }
+    }
+    console.log("Merged pending playback updates");
+  } catch {
+    // Playback file missing or unreadable — not an error.
+  }
+}
+
+async function loadMediaState(storeLocation: string): Promise<State> {
+  console.log(`Loading media state from ${storeLocation}`);
+
+  for (const file of [STATE_FILE, STATE_BACKUP_FILE]) {
+    try {
+      let stateStr = await StorageAccessFramework.readAsStringAsync(
+        storagePath(storeLocation, file),
+      );
+
+      let json: State = JSON.parse(stateStr);
+      let result = StateDecoder.decode(json);
+      if (!result.isOk()) {
+        throw new Error(`Invalid state: ${result.error}`);
+      }
+
+      let state = result.value;
+
+      let servers = Object.values(state.servers ?? {});
+      let videos = servers.flatMap((server) =>
+        Object.values(server.videos ?? {}),
+      );
+      console.log(
+        `Loaded state from ${file} with ${servers.length} servers and ${videos.length} videos.`,
+      );
+
+      await applyPlaybackStates(storeLocation, state);
+
+      return state;
+    } catch (e) {
+      console.error(`State read failed from ${file}`, e);
+    }
   }
 
   return { clientId: "", servers: {} };

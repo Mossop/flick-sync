@@ -1,10 +1,9 @@
 #![deny(unreachable_pub)]
 use std::{
     collections::{HashMap, HashSet},
-    io::{self, ErrorKind},
+    io::ErrorKind,
     ops::Deref,
     path::{Path, PathBuf},
-    result,
     sync::Arc,
 };
 
@@ -24,17 +23,16 @@ use plex_api::{
     HttpClient, HttpClientBuilder, media_container::server::library::ContainerFormat,
     transcode::VideoTranscodeOptions,
 };
-use serde_json::to_string_pretty;
-use state::{ServerState, State};
+use state::{PlaybackUpdates, ServerState, State};
 use time::OffsetDateTime;
 use tokio::{
-    fs::{read_dir, remove_dir_all, remove_file, rename, write},
+    fs::{read_dir, read_to_string, remove_dir_all, remove_file},
     sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, Semaphore},
 };
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
-use crate::{config::H264Profile, schema::MigratableStore};
+use crate::{config::H264Profile, schema::MigratableStore, util::safe_write};
 pub use crate::{
     config::{OutputStyle, ServerConnection},
     server::{DownloadProgress, ItemType, Progress, Server, SyncItemInfo},
@@ -47,6 +45,7 @@ pub type Result<T = ()> = anyhow::Result<T>;
 
 pub const STATE_FILE: &str = ".flicksync.state.json";
 pub const CONFIG_FILE: &str = "flicksync.json";
+pub const PLAYBACK_FILE: &str = ".flicksync.playback.json";
 
 pub(crate) const DEFAULT_PROFILE: &str = "720p";
 
@@ -89,24 +88,6 @@ lazy_static! {
     };
 }
 
-async fn safe_write(
-    path: impl AsRef<Path>,
-    data: impl AsRef<[u8]>,
-) -> result::Result<(), io::Error> {
-    let mut temp_file = path.as_ref().to_owned();
-    let Some(file_name) = temp_file.file_name() else {
-        return write(path, data).await;
-    };
-
-    let mut file_name = file_name.to_owned();
-    file_name.push(".temp");
-    temp_file.set_file_name(file_name);
-
-    write(&temp_file, data).await?;
-
-    rename(temp_file, path).await
-}
-
 struct Inner {
     config: RwLock<Config>,
     state: RwLock<State>,
@@ -136,15 +117,13 @@ impl Inner {
     }
 
     async fn persist_config(&self, config: &RwLockWriteGuard<'_, Config>) -> Result {
-        let str = to_string_pretty(&config.deref())?;
-        safe_write(self.path.join(CONFIG_FILE), str).await?;
+        safe_write(self.path.join(CONFIG_FILE), &config.deref()).await?;
 
         Ok(())
     }
 
     async fn persist_state(&self, state: &RwLockWriteGuard<'_, State>) -> Result {
-        let str = to_string_pretty(&state.deref())?;
-        safe_write(self.path.join(STATE_FILE), str).await?;
+        safe_write(self.path.join(STATE_FILE), &state.deref()).await?;
 
         Ok(())
     }
@@ -178,7 +157,40 @@ impl FlickSync {
 
     pub async fn new(path: &Path) -> Result<Self> {
         let config = Config::read_or_default(&path.join(CONFIG_FILE)).await?;
-        let state = State::read_or_default(&path.join(STATE_FILE)).await?;
+        let mut state = State::read_or_default(&path.join(STATE_FILE)).await?;
+
+        // Merge any pending playback updates written by Android.
+        let playback_path = path.join(PLAYBACK_FILE);
+        match read_to_string(&playback_path).await {
+            Ok(str) => match serde_json::from_str::<PlaybackUpdates>(&str) {
+                Ok(updates) => {
+                    let mut changed = false;
+                    for (server_id, videos) in updates.servers {
+                        if let Some(server_state) = state.servers.get_mut(&server_id) {
+                            for (video_id, playback_state) in videos {
+                                if let Some(video) = server_state.videos.get_mut(&video_id) {
+                                    video.playback_state = playback_state;
+                                    changed = true;
+                                }
+                            }
+                        }
+                    }
+
+                    if changed {
+                        safe_write(path.join(STATE_FILE), &state).await?;
+                    }
+
+                    if let Err(e) = remove_file(&playback_path).await
+                        && e.kind() != ErrorKind::NotFound
+                    {
+                        warn!(error = ?e, "Failed to delete playback file");
+                    }
+                }
+                Err(e) => warn!(error = ?e, "Failed to parse playback file"),
+            },
+            Err(e) if e.kind() == ErrorKind::NotFound => {}
+            Err(e) => warn!(error = ?e, "Failed to read playback file"),
+        }
 
         Ok(Self {
             inner: Arc::new(Inner {
@@ -358,7 +370,10 @@ impl FlickSync {
             match reader.next_entry().await {
                 Ok(Some(entry)) => {
                     if let Some(str) = entry.file_name().to_str()
-                        && (str == STATE_FILE || str == CONFIG_FILE || servers.contains(str))
+                        && (str == STATE_FILE
+                            || str == CONFIG_FILE
+                            || str == ".flicksync.state.json.backup"
+                            || servers.contains(str))
                     {
                         continue;
                     }

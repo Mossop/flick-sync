@@ -1,16 +1,17 @@
 use std::{
-    io::ErrorKind,
     iter::{empty, once},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{DeserializeOwned, Error as _, Unexpected},
 };
-use serde_json::{Map, Value, from_str, from_value, to_string_pretty};
-use tokio::fs::{read_to_string, write};
-use tracing::error;
+use serde_json::{Map, Value, from_str, from_value};
+use tokio::fs::read_to_string;
+use tracing::{error, warn};
+
+use crate::util::safe_write;
 
 pub(crate) type JsonObject = Map<String, Value>;
 
@@ -47,55 +48,75 @@ impl<const V: u64> Serialize for SchemaVersion<V> {
 pub(crate) trait MigratableStore: Serialize + DeserializeOwned + Default {
     fn migrate(data: &mut JsonObject) -> anyhow::Result<bool>;
 
+    fn write_backup() -> bool {
+        false
+    }
+
+    /// Reads and parses `path`, applying any pending migrations. Returns `None` (with error
+    /// logged) on parse/migration/deserialisation failure, or silently `None` on I/O error
+    /// (so callers can try fallback paths without noise on expected-missing files).
+    async fn try_read(path: &Path) -> Option<(Self, bool)> {
+        let str = read_to_string(path).await.ok()?;
+        let mut obj = match from_str::<JsonObject>(&str) {
+            Ok(obj) => obj,
+            Err(e) => {
+                error!(path = %path.display(), error = ?e, "Failed to parse state");
+                return None;
+            }
+        };
+
+        let migrated = match Self::migrate(&mut obj) {
+            Ok(m) => m,
+            Err(e) => {
+                error!(path = %path.display(), error = ?e, "Failed to migrate state");
+                return None;
+            }
+        };
+
+        match from_value::<Self>(serde_json::Value::Object(obj)) {
+            Ok(val) => Some((val, migrated)),
+            Err(e) => {
+                error!(path = %path.display(), error = ?e, "Failed to deserialize state");
+                None
+            }
+        }
+    }
+
     async fn read_or_default(path: &Path) -> anyhow::Result<Self> {
-        let str = match read_to_string(path).await {
-            Ok(s) => s,
-            Err(e) => {
-                if e.kind() == ErrorKind::NotFound {
-                    let val = Self::default();
-                    let str = to_string_pretty(&val)?;
-                    write(path, str).await?;
-                    return Ok(val);
-                } else {
-                    error!(error = ?e);
-                    return Ok(Default::default());
+        let backup = backup_path(path);
+
+        let (store, needs_write) = match Self::try_read(path).await {
+            Some(result) => result,
+            None => match Self::try_read(&backup).await {
+                Some((state, _)) => {
+                    warn!(path = %path.display(), "Recovered state from backup");
+                    (state, true)
                 }
-            }
+                None => (Default::default(), true),
+            },
         };
 
-        let (obj, migrated) = match from_str::<JsonObject>(&str) {
-            Ok(mut obj) => {
-                let migrated = match Self::migrate(&mut obj) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        error!(error = ?e);
-                        return Ok(Default::default());
-                    }
-                };
+        if needs_write {
+            safe_write(path, &store).await?;
+        }
 
-                (obj, migrated)
+        if Self::write_backup() {
+            // Write backup after successful load (non-fatal).
+            if let Err(e) = safe_write(&backup, &store).await {
+                error!(error = ?e, "Failed to write state backup");
             }
-            Err(e) => {
-                error!(error = ?e);
-                return Ok(Default::default());
-            }
-        };
-
-        let store = match from_value::<Self>(serde_json::Value::Object(obj)) {
-            Ok(s) => s,
-            Err(e) => {
-                error!(error = ?e);
-                return Ok(Default::default());
-            }
-        };
-
-        if migrated {
-            let str = to_string_pretty(&store)?;
-            write(path, str).await?;
         }
 
         Ok(store)
     }
+}
+
+fn backup_path(path: &Path) -> PathBuf {
+    let mut backup = path.to_owned();
+    let mut name = backup.file_name().unwrap_or_default().to_owned();
+    name.push(".backup");
+    backup.set_file_name(name);
+    backup
 }
 
 struct OptionIterator<T> {

@@ -245,3 +245,8 @@ export const StateDecoder = JsonDecoder.object<State>(
   },
   "State",
 );
+
+export const PlaybackUpdatesDecoder = JsonDecoder.dictionary(
+  JsonDecoder.dictionary(PlaybackStateDecoder, "PlaybackStateDictionary"),
+  "PlaybackUpdatesDictionary",
+);

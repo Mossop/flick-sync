@@ -910,6 +910,12 @@ impl VideoState {
     }
 }
 
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PlaybackUpdates {
+    pub(crate) servers: HashMap<String, HashMap<String, PlaybackState>>,
+}
+
 #[derive(Deserialize, Default, Serialize, Clone, Debug)]
 #[typeshare]
 #[serde(rename_all = "camelCase")]
@@ -1158,6 +1164,10 @@ impl Default for State {
 }
 
 impl MigratableStore for State {
+    fn write_backup() -> bool {
+        true
+    }
+
     fn migrate(data: &mut JsonObject) -> Result<bool> {
         let version = match data.get("schema") {
             None => 0,
