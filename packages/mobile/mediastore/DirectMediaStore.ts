@@ -177,12 +177,15 @@ async function loadMediaState(storeLocation: string): Promise<State> {
 }
 
 export class DirectMediaStore extends MediaStore {
-  #state: State;
+  #mediaState: MediaState;
   #persister: StatePersister;
 
-  constructor(location: string, state: State) {
+  constructor(
+    private readonly state: State,
+    location: string,
+  ) {
     super(location);
-    this.#state = state;
+    this.#mediaState = new MediaState(state);
     this.#persister = new StatePersister(location);
   }
 
@@ -194,7 +197,7 @@ export class DirectMediaStore extends MediaStore {
     }
 
     let state = await loadMediaState(storeLocation);
-    return new DirectMediaStore(storeLocation, state);
+    return new DirectMediaStore(state, storeLocation);
   }
 
   static async pickNewStore(): Promise<DirectMediaStore> {
@@ -211,18 +214,18 @@ export class DirectMediaStore extends MediaStore {
   }
 
   getServers(): Promise<Server[]> {
-    return Promise.resolve(new MediaState(this.#state).servers());
+    return Promise.resolve(this.#mediaState.servers());
   }
 
   getLibraries(): Promise<Library[]> {
-    let servers = new MediaState(this.#state).servers();
+    let servers = this.#mediaState.servers();
     let libraries = servers.flatMap((s) => s.libraries());
     libraries.sort((a, b) => a.title.localeCompare(b.title));
     return Promise.resolve(libraries);
   }
 
   getPlaylists(): Promise<Playlist[]> {
-    let servers = new MediaState(this.#state).servers();
+    let servers = this.#mediaState.servers();
     let playlists = servers.flatMap((s) => s.playlists());
     playlists.sort((a, b) => a.title.localeCompare(b.title));
     return Promise.resolve(playlists);
@@ -230,33 +233,31 @@ export class DirectMediaStore extends MediaStore {
 
   getLibrary(serverId: string, libraryId: string): Promise<Library> {
     return Promise.resolve(
-      new MediaState(this.#state).getServer(serverId).getLibrary(libraryId),
+      this.#mediaState.getServer(serverId).getLibrary(libraryId),
     );
   }
 
   getCollection(serverId: string, collectionId: string): Promise<Collection> {
     return Promise.resolve(
-      new MediaState(this.#state)
-        .getServer(serverId)
-        .getCollection(collectionId),
+      this.#mediaState.getServer(serverId).getCollection(collectionId),
     );
   }
 
   getShow(serverId: string, showId: string): Promise<Show> {
     return Promise.resolve(
-      new MediaState(this.#state).getServer(serverId).getShow(showId),
+      this.#mediaState.getServer(serverId).getShow(showId),
     );
   }
 
   getPlaylist(serverId: string, playlistId: string): Promise<Playlist> {
     return Promise.resolve(
-      new MediaState(this.#state).getServer(serverId).getPlaylist(playlistId),
+      this.#mediaState.getServer(serverId).getPlaylist(playlistId),
     );
   }
 
   getVideo(serverId: string, videoId: string): Promise<Video> {
     return Promise.resolve(
-      new MediaState(this.#state).getServer(serverId).getVideo(videoId),
+      this.#mediaState.getServer(serverId).getVideo(videoId),
     );
   }
 
@@ -265,19 +266,23 @@ export class DirectMediaStore extends MediaStore {
   }
 
   async setPlaybackState(
-    serverId: string,
-    videoId: string,
+    video: Video,
     playbackState: PlaybackState,
   ): Promise<void> {
-    let server = this.#state.servers?.[serverId];
-    if (!server) return;
-    let video = server.videos?.[videoId];
-    if (!video) return;
+    let serverState = this.state.servers?.[video.library.server.id];
+    if (!serverState) {
+      return;
+    }
+
+    let videoState = serverState.videos?.[video.id];
+    if (!videoState) {
+      return;
+    }
 
     // Mutate in place so existing wrappers see the updated state
-    video.playbackState = playbackState;
+    videoState.playbackState = playbackState;
 
     console.log("Persisting playback state");
-    await this.#persister.persistPlayback(this.#state);
+    await this.#persister.persistPlayback(this.state);
   }
 }

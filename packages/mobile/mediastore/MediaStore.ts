@@ -31,9 +31,8 @@ export abstract class MediaStore {
 
   // Playback persistence
   abstract setPlaybackState(
-    serverId: string,
-    videoId: string,
-    state: PlaybackState,
+    video: Video,
+    playbackState: PlaybackState,
   ): Promise<void>;
 
   static async loadStore(storeLocation: string): Promise<MediaStore | null> {

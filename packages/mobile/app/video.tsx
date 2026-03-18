@@ -46,9 +46,9 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
 
   let setPlayState = useCallback(
     (state: PlaybackState) => {
-      defer(mediaStore.setPlaybackState(server, queue[index], state));
+      defer(mediaStore.setPlaybackState(video, state));
     },
-    [mediaStore, server, queue, index],
+    [mediaStore, video],
   );
   let setPlayPosition = useCallback(
     (position: number) => {

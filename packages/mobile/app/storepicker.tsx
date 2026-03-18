@@ -37,7 +37,7 @@ export default memo(function MediaStorePicker() {
           onChoose().catch(console.error);
         }}
       >
-        Choose Store
+        Choose Local Store
       </Button>
       {error && <Text style={styles.error}>{error}</Text>}
     </View>

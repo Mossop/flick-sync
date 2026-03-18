@@ -1,7 +1,7 @@
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { ActivityIndicator, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 import { Suspense } from "react";
 import * as SplashScreen from "expo-splash-screen";
 import { StoreProvider, useSelector } from "./components/Store";
@@ -15,6 +15,7 @@ import Playlist from "./app/playlist";
 import Collection from "./app/collection";
 import Show from "./app/show";
 import { ThemeProvider } from "./components/ThemeProvider";
+import { ActivityIndicator } from "react-native-paper";
 
 SplashScreen.preventAutoHideAsync().catch(console.error);
 

@@ -1,6 +1,6 @@
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Drawer } from "react-native-paper";
-import { ActivityIndicator, StyleSheet } from "react-native";
+import { ActivityIndicator, Drawer } from "react-native-paper";
+import { StyleSheet } from "react-native";
 import {
   createContext,
   useContext,
