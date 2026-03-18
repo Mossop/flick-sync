@@ -971,6 +971,19 @@ pub(super) async fn sync_list(
     render(template)
 }
 
+#[get("/state.json")]
+pub(super) async fn state(ThinData(service_data): ThinData<ServiceData>) -> HttpResponse {
+    match service_data.flick_sync.state_json().await {
+        Ok(json) => HttpResponse::Ok()
+            .content_type("application/json")
+            .body(json),
+        Err(e) => {
+            error!(error=%e, "Failed to generate state JSON");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
 #[get("/")]
 pub(super) async fn index_page(
     ThinData(service_data): ThinData<ServiceData>,

@@ -912,8 +912,8 @@ impl VideoState {
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct PlaybackUpdates {
-    pub(crate) servers: HashMap<String, HashMap<String, PlaybackState>>,
+pub struct PlaybackUpdates {
+    pub servers: HashMap<String, HashMap<String, PlaybackState>>,
 }
 
 #[derive(Deserialize, Default, Serialize, Clone, Debug)]

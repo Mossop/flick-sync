@@ -29,6 +29,7 @@ use uuid::Uuid;
 
 use crate::{TaskHandle, ns, rt};
 
+
 pub(crate) const SSDP_IPV4: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
 pub(crate) const SSDP_IPV6: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xC);
 const SSDP_PORT: u16 = 1900;
@@ -484,14 +485,22 @@ struct SsdpTask {
     uuid: Uuid,
     server: String,
     http_port: u16,
+    /// Additional service types to announce, with their locations.
+    additional_types: Vec<(String, String)>,
 }
 
 impl SsdpTask {
-    fn new(uuid: Uuid, server_version: &str, http_port: u16) -> Self {
+    fn new(
+        uuid: Uuid,
+        server_version: &str,
+        http_port: u16,
+        additional_types: Vec<(String, String)>,
+    ) -> Self {
         Self {
             uuid,
             server: format!("{}/0.0 UPnP/1.1 {}", consts::OS, server_version),
             http_port,
+            additional_types,
         }
     }
 
@@ -519,11 +528,21 @@ impl SsdpTask {
         }
     }
 
+    fn resolve_location(&self, interface: &Interface, location: Option<&str>) -> String {
+        let loc = location.unwrap_or("/upnp/device.xml");
+        if loc.contains("://") {
+            loc.to_string()
+        } else {
+            format!("http://{}:{}{}", interface.address(), self.http_port, loc)
+        }
+    }
+
     fn notify_message(
         &self,
         interface: &Interface,
         usn: &str,
         notification_type: &str,
+        location: Option<&str>,
     ) -> SsdpMessage {
         let host = if interface.is_ipv4() {
             SSDP_IPV4.to_string()
@@ -536,11 +555,7 @@ impl SsdpTask {
             notification_type: notification_type.to_owned(),
             unique_service_name: usn.to_owned(),
             availability: "ssdp:alive".to_string(),
-            location: Some(format!(
-                "http://{}:{}/upnp/device.xml",
-                interface.address(),
-                self.http_port
-            )),
+            location: Some(self.resolve_location(interface, location)),
             server: self.server.clone(),
         }
     }
@@ -562,24 +577,36 @@ impl SsdpTask {
 
         let usn_base = format!("uuid:{}", self.uuid.as_hyphenated());
 
-        let messages = vec![
-            self.notify_message(interface, &usn_base, &usn_base),
+        let mut messages = vec![
+            self.notify_message(interface, &usn_base, &usn_base, None),
             self.notify_message(
                 interface,
                 &format!("{}::{}", usn_base, ns::UPNP_ROOT),
                 ns::UPNP_ROOT,
+                None,
             ),
             self.notify_message(
                 interface,
                 &format!("{}::{}", usn_base, ns::UPNP_MEDIASERVER),
                 ns::UPNP_MEDIASERVER,
+                None,
             ),
             self.notify_message(
                 interface,
                 &format!("{}::{}", usn_base, ns::UPNP_CONTENTDIRECTORY),
                 ns::UPNP_CONTENTDIRECTORY,
+                None,
             ),
         ];
+
+        for (service_type, location) in &self.additional_types {
+            messages.push(self.notify_message(
+                interface,
+                &format!("{}::{}", usn_base, service_type),
+                service_type,
+                Some(location.as_str()),
+            ));
+        }
 
         debug!(local_address = %interface.address(), count = messages.len(), "Sending SSDP announcements");
 
@@ -605,13 +632,10 @@ impl SsdpTask {
         local_interface: &Interface,
         usn: &str,
         search_target: &str,
+        location: Option<&str>,
     ) -> SsdpMessage {
         SsdpMessage::SearchResponse {
-            location: format!(
-                "http://{}:{}/upnp/device.xml",
-                local_interface.address(),
-                self.http_port
-            ),
+            location: self.resolve_location(local_interface, location),
             server: self.server.clone(),
             search_target: search_target.to_owned(),
             unique_service_name: usn.to_owned(),
@@ -629,21 +653,24 @@ impl SsdpTask {
 
         match search_target {
             ns::UPNP_ROOT => {
-                messages.push(self.response_message(local_interface, &usn_base, &usn_base));
+                messages.push(self.response_message(local_interface, &usn_base, &usn_base, None));
                 messages.push(self.response_message(
                     local_interface,
                     &format!("{}::{}", usn_base, ns::UPNP_ROOT),
                     ns::UPNP_ROOT,
+                    None,
                 ));
                 messages.push(self.response_message(
                     local_interface,
                     &format!("{}::{}", usn_base, ns::UPNP_MEDIASERVER),
                     ns::UPNP_MEDIASERVER,
+                    None,
                 ));
                 messages.push(self.response_message(
                     local_interface,
                     &format!("{}::{}", usn_base, ns::UPNP_CONTENTDIRECTORY),
                     ns::UPNP_CONTENTDIRECTORY,
+                    None,
                 ));
             }
             ns::UPNP_MEDIASERVER | ns::UPNP_CONTENTDIRECTORY => {
@@ -651,13 +678,27 @@ impl SsdpTask {
                     local_interface,
                     &format!("{usn_base}::{search_target}"),
                     search_target,
+                    None,
                 ));
             }
             _ => {}
         }
 
         if search_target.to_lowercase() == usn_base {
-            messages.push(self.response_message(local_interface, &usn_base, &usn_base));
+            messages.push(self.response_message(local_interface, &usn_base, &usn_base, None));
+        }
+
+        if let Some((_, location)) = self
+            .additional_types
+            .iter()
+            .find(|(t, _)| t == search_target)
+        {
+            messages.push(self.response_message(
+                local_interface,
+                &format!("{usn_base}::{search_target}"),
+                search_target,
+                Some(location.as_str()),
+            ));
         }
 
         if messages.is_empty() {
@@ -821,8 +862,13 @@ pub(crate) struct Ssdp {
 }
 
 impl Ssdp {
-    pub(crate) fn new(uuid: Uuid, server_version: &str, http_port: u16) -> Self {
-        let task = SsdpTask::new(uuid, server_version, http_port);
+    pub(crate) fn new(
+        uuid: Uuid,
+        server_version: &str,
+        http_port: u16,
+        additional_types: Vec<(String, String)>,
+    ) -> Self {
+        let task = SsdpTask::new(uuid, server_version, http_port, additional_types);
         let restart_notify = Arc::new(Notify::new());
 
         Self {

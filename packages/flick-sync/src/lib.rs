@@ -23,7 +23,7 @@ use plex_api::{
     HttpClient, HttpClientBuilder, media_container::server::library::ContainerFormat,
     transcode::VideoTranscodeOptions,
 };
-use state::{PlaybackUpdates, ServerState, State};
+use state::{ServerState, State};
 use time::OffsetDateTime;
 use tokio::{
     fs::{read_dir, read_to_string, remove_dir_all, remove_file},
@@ -36,7 +36,7 @@ use crate::{config::H264Profile, schema::MigratableStore, util::safe_write};
 pub use crate::{
     config::{OutputStyle, ServerConnection},
     server::{DownloadProgress, ItemType, Progress, Server, SyncItemInfo},
-    state::{LibraryType, PlaybackState},
+    state::{LibraryType, PlaybackState, PlaybackUpdates},
     sync::{LockedFile, LockedFileAsyncRead, LockedFileRead, Timeout},
     wrappers::*,
 };
@@ -421,5 +421,39 @@ impl FlickSync {
 
     pub async fn client(&self) -> HttpClient {
         self.inner.client().await
+    }
+
+    /// Returns the full state as a pretty-printed JSON string with tokens stripped.
+    pub async fn state_json(&self) -> Result<String> {
+        let state = self.inner.state.read().await;
+        let mut value = serde_json::to_value(&*state)?;
+
+        if let Some(servers) = value.get_mut("servers").and_then(|s| s.as_object_mut()) {
+            for server in servers.values_mut() {
+                if let Some(obj) = server.as_object_mut() {
+                    obj.remove("token");
+                }
+            }
+        }
+
+        Ok(serde_json::to_string_pretty(&value)?)
+    }
+
+    /// Applies playback state updates, merging them into the current state and persisting.
+    pub async fn apply_playback_updates(&self, updates: PlaybackUpdates) -> Result {
+        let mut state = self.inner.state.write().await;
+
+        for (server_id, videos) in updates.servers {
+            if let Some(server_state) = state.servers.get_mut(&server_id) {
+                for (video_id, playback_state) in videos {
+                    if let Some(video) = server_state.videos.get_mut(&video_id) {
+                        video.playback_state = playback_state;
+                    }
+                }
+            }
+        }
+
+        self.inner.persist_state(&state).await?;
+        Ok(())
     }
 }

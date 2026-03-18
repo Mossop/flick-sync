@@ -420,6 +420,7 @@ impl Runnable for Serve {
                 .app_data(ThinData(service_data.clone()))
                 .service(service_factory.clone())
                 .wrap(from_fn(middleware::middleware))
+                .service(services::state)
                 .service(services::events)
                 .service(services::resources)
                 .service(services::thumbnail_image)

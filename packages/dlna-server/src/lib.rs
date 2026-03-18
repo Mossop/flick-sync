@@ -20,6 +20,15 @@ use crate::{
 /// The default port to use for HTTP communication
 const DEFAULT_HTTP_PORT: u16 = 1980;
 
+/// A custom service to advertise in SSDP announcements.
+#[derive(Clone)]
+pub struct CustomService {
+    pub service_type: String,
+    /// The location of this service. May be an absolute URL or a path relative to the DLNA
+    /// server (e.g. `/flicksync/state.json`). Used as the LOCATION in SSDP announcements.
+    pub location: String,
+}
+
 #[cfg_attr(feature = "rt-async", path = "rt/async_std.rs")]
 #[cfg_attr(feature = "rt-tokio", path = "rt/tokio.rs")]
 mod rt;
@@ -121,6 +130,7 @@ impl DlnaServer {
             http_port: DEFAULT_HTTP_PORT,
             icons: Vec::new(),
             handler,
+            custom_services: Vec::new(),
         }
     }
 
@@ -147,6 +157,7 @@ pub struct DlnaServerBuilder<H: DlnaRequestHandler> {
     http_port: u16,
     icons: Vec<Icon>,
     handler: H,
+    custom_services: Vec<CustomService>,
 }
 
 impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
@@ -155,6 +166,12 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
     /// uses a http port other than 1980 you must configure it on this builder first or Upnp
     /// discovery will fail.
     pub async fn build_service(self) -> anyhow::Result<(DlnaServer, DlnaServiceFactory<H>)> {
+        let additional_types: Vec<(String, String)> = self
+            .custom_services
+            .iter()
+            .map(|s| (s.service_type.clone(), s.location.clone()))
+            .collect();
+
         let service_factory = DlnaServiceFactory::new(HttpAppData {
             uuid: self.uuid,
             server_name: self.server_name,
@@ -164,7 +181,12 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
 
         Ok((
             DlnaServer {
-                ssdp_handle: Ssdp::new(self.uuid, &self.server_version, self.http_port),
+                ssdp_handle: Ssdp::new(
+                    self.uuid,
+                    &self.server_version,
+                    self.http_port,
+                    additional_types,
+                ),
                 web_handle: None,
             },
             service_factory,
@@ -217,6 +239,12 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
     /// resolutions and mimetypes.
     pub fn icon(mut self, icon: Icon) -> Self {
         self.icons.push(icon);
+        self
+    }
+
+    /// Adds a custom service to advertise in SSDP announcements and the device description.
+    pub fn custom_service(mut self, svc: CustomService) -> Self {
+        self.custom_services.push(svc);
         self
     }
 }

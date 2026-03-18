@@ -8,8 +8,8 @@ use std::{
 
 use async_trait::async_trait;
 use dlna_server::{
-    Container, DlnaRequestHandler, DlnaServer, DlnaServiceFactory, Icon, Item, Object, Resource,
-    StreamResponse, UpnpError,
+    Container, CustomService, DlnaRequestHandler, DlnaServer, DlnaServiceFactory, Icon, Item,
+    Object, Resource, StreamResponse, UpnpError,
 };
 use flick_sync::{
     Collection, FlickSync, Library, LockedFile, MovieCollection, MovieLibrary, Playlist, Season,
@@ -1012,6 +1012,10 @@ pub(crate) async fn build_dlna(
             env!("CARGO_PKG_VERSION_MINOR")
         ))
         .server_name("Synced Flicks")
+        .custom_service(CustomService {
+            service_type: "urn:flicksync:service:StateSync:1".to_string(),
+            location: "/".to_string(),
+        })
         .icon(Icon {
             id: "resource/logo-32.png".to_string(),
             mime_type: mime::IMAGE_PNG,

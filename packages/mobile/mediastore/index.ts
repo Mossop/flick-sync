@@ -10,5 +10,4 @@ export {
   useShow,
   usePlaylist,
   useVideo,
-  useResolveUri,
 } from "./hooks";

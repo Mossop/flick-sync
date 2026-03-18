@@ -49,7 +49,7 @@ import {
   useAction,
   useListSetting,
 } from "./Store";
-import { useResolveUri } from "../mediastore";
+import { useMediaStore } from "../mediastore";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // Offer to start from the current position as long as it is larger than this.
@@ -383,7 +383,7 @@ function ThumbnailOverlay({
 }
 
 function Thumbnail({ item, type }: { item: ChildItem; type: ThumbnailType }) {
-  let storagePath = useResolveUri();
+  let mediaStore = useMediaStore();
   let [dimensions, setDimensions] = useState<{
     width: number;
     height: number;
@@ -391,7 +391,7 @@ function Thumbnail({ item, type }: { item: ChildItem; type: ThumbnailType }) {
 
   let uri =
     !(item instanceof Playlist) && item.thumbnail.state == "stored"
-      ? storagePath(item.thumbnail.path)
+      ? mediaStore.thumbnailUri(item)
       : undefined;
 
   useEffect(() => {

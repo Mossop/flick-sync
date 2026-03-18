@@ -5,7 +5,7 @@ export type RelatedFileState =
 export type DownloadState =
   | { state: "none" }
   | { state: "downloading"; path: string }
-  | { state: "transcoding"; path: string }
+  | { state: "transcoding" }
   | { state: "downloaded"; path: string }
   | { state: "transcoded"; path: string };
 

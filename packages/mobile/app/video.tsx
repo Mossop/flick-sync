@@ -11,10 +11,9 @@ import { OrientationLock } from "expo-screen-orientation";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { AppRoutes, AppScreenProps } from "../components/AppNavigator";
 import { SchemeOverride } from "../components/ThemeProvider";
-import { isDownloaded } from "../state";
 import { defer } from "../modules/util";
 import { reportError, useAction } from "../components/Store";
-import { useMediaStore, useVideo, useResolveUri } from "../mediastore";
+import { useMediaStore, useVideo } from "../mediastore";
 import { PlaybackState } from "../state/base";
 import { Overlay, PlaybackStatus } from "../components/VideoOverlay";
 
@@ -38,7 +37,6 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let navigation = useNavigation<NativeStackNavigationProp<AppRoutes>>();
   let mediaStore = useMediaStore();
   let dispatchSetError = useAction(reportError);
-  let resolveUri = useResolveUri();
 
   let { server, queue, index } = route.params;
 
@@ -65,20 +63,15 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     isPlaying: false,
   }));
 
-  let uri: string | undefined = undefined;
-  if (isDownloaded(video.download)) {
-    uri = resolveUri(video.download.path);
-  } else {
+  let uri: string | undefined = mediaStore.videoUri(video);
+  if (!uri) {
     dispatchSetError("Unexpected non-downloaded video");
     navigation.pop();
   }
 
   let metadata: VideoMetadata = {
     title: video.title,
-    artwork:
-      video.thumbnail.state == "stored"
-        ? resolveUri(video.thumbnail.path)
-        : undefined,
+    artwork: mediaStore.thumbnailUri(video),
   };
 
   let player = useVideoPlayer({ uri, metadata }, (p) => {

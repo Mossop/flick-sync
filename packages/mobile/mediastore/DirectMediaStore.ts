@@ -4,18 +4,10 @@ import {
   getInfoAsync,
 } from "expo-file-system/legacy";
 import { PlaybackState, PlaybackUpdates, State } from "../state/base";
-import { StateDecoder } from "../state";
+import { isDownloaded, StateDecoder } from "../state";
 import { PlaybackUpdatesDecoder } from "../state/decoders";
-import {
-  Server,
-  Library,
-  Collection,
-  Show,
-  Playlist,
-  Video,
-  MediaState,
-} from "../state/wrappers";
-import { MediaStore } from "./MediaStore";
+import { Collection, Show, Video } from "../state/wrappers";
+import { StateBasedMediaStore } from "./MediaStore";
 
 const STATE_FILE = ".flicksync.state.json";
 const STATE_BACKUP_FILE = ".flicksync.state.json.backup";
@@ -176,16 +168,11 @@ async function loadMediaState(storeLocation: string): Promise<State> {
   throw errorToThrow!;
 }
 
-export class DirectMediaStore extends MediaStore {
-  #mediaState: MediaState;
+export class DirectMediaStore extends StateBasedMediaStore {
   #persister: StatePersister;
 
-  constructor(
-    private readonly state: State,
-    location: string,
-  ) {
-    super(location);
-    this.#mediaState = new MediaState(state);
+  constructor(state: State, location: string) {
+    super(state, location);
     this.#persister = new StatePersister(location);
   }
 
@@ -213,74 +200,27 @@ export class DirectMediaStore extends MediaStore {
     return DirectMediaStore.init(permission.directoryUri);
   }
 
-  getServers(): Promise<Server[]> {
-    return Promise.resolve(this.#mediaState.servers());
+  thumbnailUri(item: Video | Show | Collection): string | undefined {
+    if (item.thumbnail.state !== "stored") {
+      return undefined;
+    }
+
+    return storagePath(this.location, item.thumbnail.path);
   }
 
-  getLibraries(): Promise<Library[]> {
-    let servers = this.#mediaState.servers();
-    let libraries = servers.flatMap((s) => s.libraries());
-    libraries.sort((a, b) => a.title.localeCompare(b.title));
-    return Promise.resolve(libraries);
-  }
+  videoUri(video: Video): string | undefined {
+    if (!isDownloaded(video.download)) {
+      return undefined;
+    }
 
-  getPlaylists(): Promise<Playlist[]> {
-    let servers = this.#mediaState.servers();
-    let playlists = servers.flatMap((s) => s.playlists());
-    playlists.sort((a, b) => a.title.localeCompare(b.title));
-    return Promise.resolve(playlists);
-  }
-
-  getLibrary(serverId: string, libraryId: string): Promise<Library> {
-    return Promise.resolve(
-      this.#mediaState.getServer(serverId).getLibrary(libraryId),
-    );
-  }
-
-  getCollection(serverId: string, collectionId: string): Promise<Collection> {
-    return Promise.resolve(
-      this.#mediaState.getServer(serverId).getCollection(collectionId),
-    );
-  }
-
-  getShow(serverId: string, showId: string): Promise<Show> {
-    return Promise.resolve(
-      this.#mediaState.getServer(serverId).getShow(showId),
-    );
-  }
-
-  getPlaylist(serverId: string, playlistId: string): Promise<Playlist> {
-    return Promise.resolve(
-      this.#mediaState.getServer(serverId).getPlaylist(playlistId),
-    );
-  }
-
-  getVideo(serverId: string, videoId: string): Promise<Video> {
-    return Promise.resolve(
-      this.#mediaState.getServer(serverId).getVideo(videoId),
-    );
-  }
-
-  resolveUri(path: string): string {
-    return storagePath(this.location, path);
+    return storagePath(this.location, video.download.path);
   }
 
   async setPlaybackState(
     video: Video,
     playbackState: PlaybackState,
   ): Promise<void> {
-    let serverState = this.state.servers?.[video.library.server.id];
-    if (!serverState) {
-      return;
-    }
-
-    let videoState = serverState.videos?.[video.id];
-    if (!videoState) {
-      return;
-    }
-
-    // Mutate in place so existing wrappers see the updated state
-    videoState.playbackState = playbackState;
+    await super.setPlaybackState(video, playbackState);
 
     console.log("Persisting playback state");
     await this.#persister.persistPlayback(this.state);

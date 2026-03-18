@@ -83,8 +83,3 @@ export function useVideo(serverId: string, videoId: string): Video {
   );
   return use(promise);
 }
-
-export function useResolveUri(): (path: string) => string {
-  let store = useMediaStore();
-  return useMemo(() => (path: string) => store.resolveUri(path), [store]);
-}

@@ -56,7 +56,6 @@ const DownloadStateDecoder = JsonDecoder.oneOf<DownloadState>(
     JsonDecoder.object(
       {
         state: JsonDecoder.isExactly("transcoding"),
-        path: JsonDecoder.string,
       },
       "transcoding",
     ),
