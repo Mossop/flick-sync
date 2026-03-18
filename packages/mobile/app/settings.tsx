@@ -1,9 +1,16 @@
 import { StyleSheet, View } from "react-native";
 import { Text, TouchableRipple } from "react-native-paper";
-import { ReactNode, memo } from "react";
+import { ReactNode, memo, useCallback } from "react";
 import AppView from "../components/AppView";
 import { PADDING } from "../modules/styles";
-import { pickNewStore, useSelector } from "../components/Store";
+import {
+  reportError,
+  setStoreLocation,
+  useAction,
+  useSelector,
+  loadSettings,
+} from "../components/Store";
+import { useMediaStore } from "../store";
 
 const styles = StyleSheet.create({
   container: {
@@ -36,13 +43,26 @@ function SettingBlock({
 
 export default memo(function Settings() {
   let storeLocation = useSelector((storeState) => storeState.storeLocation);
+  let mediaStore = useMediaStore();
+  let dispatchSetStoreLocation = useAction(setStoreLocation);
+  let dispatchReportError = useAction(reportError);
+
+  let onPickNew = useCallback(async () => {
+    try {
+      await mediaStore.pickNew();
+      let settings = await loadSettings(mediaStore.location);
+      dispatchSetStoreLocation({ location: mediaStore.location, settings });
+    } catch (e) {
+      dispatchReportError(String(e));
+    }
+  }, [mediaStore, dispatchSetStoreLocation, dispatchReportError]);
 
   return (
     <AppView title="Settings" style={styles.container}>
       <SettingBlock
         title="Store"
         onPress={() => {
-          pickNewStore().catch(console.error);
+          onPickNew().catch(console.error);
         }}
       >
         <View style={{ flexDirection: "row" }}>

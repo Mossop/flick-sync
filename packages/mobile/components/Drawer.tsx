@@ -1,9 +1,17 @@
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Drawer } from "react-native-paper";
-import { StyleSheet } from "react-native";
-import { createContext, useContext, ReactNode, useMemo, useState } from "react";
+import { ActivityIndicator, StyleSheet } from "react-native";
+import {
+  createContext,
+  useContext,
+  ReactNode,
+  useMemo,
+  useState,
+  Suspense,
+} from "react";
 import { Drawer as DrawerLayout } from "react-native-drawer-layout";
-import { namedIcon, useLibraries, usePlaylists } from "../modules/util";
+import { namedIcon } from "../modules/util";
+import { useLibraries, usePlaylists } from "../store";
 import { Library, MovieLibrary, Playlist } from "../state";
 import { AppNavigation } from "./AppNavigator";
 
@@ -115,7 +123,11 @@ export default function DrawerView({
         open={open}
         onOpen={() => setOpen(true)}
         onClose={() => setOpen(false)}
-        renderDrawerContent={() => <DrawerContent navigation={navigation} />}
+        renderDrawerContent={() => (
+          <Suspense fallback={<ActivityIndicator style={styles.drawer} />}>
+            <DrawerContent navigation={navigation} />
+          </Suspense>
+        )}
       >
         {children}
       </DrawerLayout>

@@ -48,8 +48,8 @@ import {
   setListSettings,
   useAction,
   useListSetting,
-  useStoragePath,
 } from "./Store";
+import { useResolveUri } from "../store";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // Offer to start from the current position as long as it is larger than this.
@@ -383,7 +383,7 @@ function ThumbnailOverlay({
 }
 
 function Thumbnail({ item, type }: { item: ChildItem; type: ThumbnailType }) {
-  let storagePath = useStoragePath();
+  let storagePath = useResolveUri();
   let [dimensions, setDimensions] = useState<{
     width: number;
     height: number;

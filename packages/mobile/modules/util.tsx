@@ -6,9 +6,7 @@ import {
 } from "@react-navigation/native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { TextProps } from "react-native";
-import { createSelector } from "@reduxjs/toolkit";
-import { Episode, Library, MediaState, Movie, Playlist, Show } from "../state";
-import { StoreState, useSelector } from "../components/Store";
+import { Episode, Movie, Show } from "../state";
 
 export interface ScreenProps<
   Params extends ParamListBase = ParamListBase,
@@ -16,42 +14,6 @@ export interface ScreenProps<
 > {
   route: RouteProp<Params, Screen>;
   navigation: NavigationProp<Params, Screen>;
-}
-
-const selectState = (storeState: StoreState) => storeState.state;
-const selectMediaState = createSelector(
-  selectState,
-  (state) => new MediaState(state),
-);
-
-export const useMediaState = () => useSelector(selectMediaState);
-
-export function useLibraries(): Library[] {
-  let mediaState = useMediaState();
-
-  return useMemo(() => {
-    let libraries = mediaState
-      .servers()
-      .flatMap((server) => server.libraries());
-
-    libraries.sort((a, b) => a.title.localeCompare(b.title));
-
-    return libraries;
-  }, [mediaState]);
-}
-
-export function usePlaylists(): Playlist[] {
-  let mediaState = useMediaState();
-
-  return useMemo(() => {
-    let playlists = mediaState
-      .servers()
-      .flatMap((server) => server.playlists());
-
-    playlists.sort((a, b) => a.title.localeCompare(b.title));
-
-    return playlists;
-  }, [mediaState]);
 }
 
 export function pad(val: number) {

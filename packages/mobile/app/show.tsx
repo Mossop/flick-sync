@@ -1,19 +1,17 @@
 import { useMemo } from "react";
 import AppView from "../components/AppView";
-import { useMediaState, byIndex } from "../modules/util";
+import { byIndex } from "../modules/util";
 import { AppScreenProps } from "../components/AppNavigator";
 import { List, ListControls } from "../components/List";
 import { ContainerType } from "../state";
+import { useShow } from "../store";
 
 export default function Show({ route }: AppScreenProps<"show">) {
-  let mediaState = useMediaState();
   if (!route.params) {
-    throw new Error("Missing params for playlist route");
+    throw new Error("Missing params for show route");
   }
 
-  let show = mediaState
-    .getServer(route.params.server)
-    .getShow(route.params.show);
+  let show = useShow(route.params.server, route.params.show);
 
   let episodes = useMemo(
     () => byIndex(show.seasons.flatMap((ss) => ss.episodes)),

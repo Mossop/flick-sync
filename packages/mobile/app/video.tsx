@@ -12,13 +12,9 @@ import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { AppRoutes, AppScreenProps } from "../components/AppNavigator";
 import { SchemeOverride } from "../components/ThemeProvider";
 import { isDownloaded } from "../state";
-import { defer, useMediaState } from "../modules/util";
-import {
-  reportError,
-  setPlaybackState,
-  useAction,
-  useStoragePath,
-} from "../components/Store";
+import { defer } from "../modules/util";
+import { reportError, useAction } from "../components/Store";
+import { useMediaStore, useVideo, useResolveUri } from "../store";
 import { PlaybackState } from "../state/base";
 import { Overlay, PlaybackStatus } from "../components/VideoOverlay";
 
@@ -40,18 +36,19 @@ const styles = StyleSheet.create({
 
 export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let navigation = useNavigation<NativeStackNavigationProp<AppRoutes>>();
-  let mediaState = useMediaState();
+  let mediaStore = useMediaStore();
   let dispatchSetError = useAction(reportError);
-  let storagePath = useStoragePath();
+  let resolveUri = useResolveUri();
 
   let { server, queue, index } = route.params;
 
-  let dispatchSetPlaybackState = useAction(setPlaybackState);
+  let video = useVideo(server, queue[index]);
+
   let setPlayState = useCallback(
     (state: PlaybackState) => {
-      dispatchSetPlaybackState([server, queue[index], state]);
+      defer(mediaStore.setPlaybackState(server, queue[index], state));
     },
-    [dispatchSetPlaybackState, server, queue, index],
+    [mediaStore, server, queue, index],
   );
   let setPlayPosition = useCallback(
     (position: number) => {
@@ -60,7 +57,6 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     [setPlayState],
   );
 
-  let video = mediaState.getServer(server).getVideo(queue[index]);
   let { restart } = route.params;
 
   let [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>(() => ({
@@ -71,7 +67,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
 
   let uri: string | undefined = undefined;
   if (isDownloaded(video.download)) {
-    uri = storagePath(video.download.path);
+    uri = resolveUri(video.download.path);
   } else {
     dispatchSetError("Unexpected non-downloaded video");
     navigation.pop();
@@ -81,7 +77,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     title: video.title,
     artwork:
       video.thumbnail.state == "stored"
-        ? storagePath(video.thumbnail.path)
+        ? resolveUri(video.thumbnail.path)
         : undefined,
   };
 
