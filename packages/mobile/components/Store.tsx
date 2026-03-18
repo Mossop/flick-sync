@@ -9,9 +9,11 @@ import {
   useDispatch,
   useSelector as useReduxState,
 } from "react-redux";
+import * as SplashScreen from "expo-splash-screen";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { ReactNode, useCallback } from "react";
+import { ReactNode, use, useCallback } from "react";
 import { ContainerType } from "../state";
+import { MediaStore } from "../mediastore/MediaStore";
 
 const SETTINGS_KEY = "settings#";
 
@@ -37,6 +39,7 @@ export interface SettingsState {
 }
 
 export interface StoreState {
+  mediaStore: MediaStore | null;
   storeLocation: string;
   settings: SettingsState;
   notificationMessage?: string;
@@ -101,10 +104,12 @@ export function useListSetting(
   return settings.listSettings[id] ?? defaultSetting(container);
 }
 
-export const setStoreLocation = createAction<{
+export const setMediaStore = createAction<{
+  store: MediaStore;
   location: string;
   settings: SettingsState;
-}>("setStoreLocation");
+}>("setMediaStore");
+export const clearMediaStore = createAction("clearMediaStore");
 export const reportError = createAction<string>("reportError");
 export const clearError = createAction("clearError");
 export const setListSettings =
@@ -112,14 +117,20 @@ export const setListSettings =
 
 const reducer = createReducer<StoreState>(
   {
+    mediaStore: null,
     storeLocation: "",
     settings: { listSettings: {} },
   },
   (builder) => {
     builder
-      .addCase(setStoreLocation, (state, { payload }) => {
+      .addCase(setMediaStore, (state, { payload }) => {
+        state.mediaStore = payload.store;
         state.storeLocation = payload.location;
         state.settings = payload.settings;
+      })
+      .addCase(clearMediaStore, (state) => {
+        state.mediaStore = null;
+        state.storeLocation = "";
       })
       .addCase(reportError, (state, { payload }) => {
         state.notificationMessage = payload;
@@ -153,7 +164,12 @@ const settingsPersist: Middleware<object, StoreState> =
 const store = configureStore({
   reducer,
   middleware: (getDefaultMiddleware) =>
-    getDefaultMiddleware().concat(settingsPersist),
+    getDefaultMiddleware({
+      serializableCheck: {
+        ignoredPaths: ["mediaStore"],
+        ignoredActions: ["setMediaStore"],
+      },
+    }).concat(settingsPersist),
 });
 
 export async function loadSettings(
@@ -174,6 +190,30 @@ export async function loadSettings(
   };
 }
 
+async function initStore() {
+  try {
+    let mediaStore = await MediaStore.loadCurrentStore();
+    if (mediaStore) {
+      let settings = await loadSettings(mediaStore.location);
+      store.dispatch(
+        setMediaStore({
+          store: mediaStore,
+          location: mediaStore.location,
+          settings,
+        }),
+      );
+    }
+  } catch (e) {
+    store.dispatch(reportError(String(e)));
+  }
+
+  await SplashScreen.hideAsync();
+}
+
+const initPromise = initStore();
+
 export function StoreProvider({ children }: { children: ReactNode }) {
+  use(initPromise);
+
   return <Provider store={store}>{children}</Provider>;
 }

@@ -3,9 +3,10 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { ActivityIndicator, StyleSheet } from "react-native";
 import { Suspense } from "react";
-import { StoreProvider } from "./components/Store";
-import { MediaStoreProvider } from "./store";
+import * as SplashScreen from "expo-splash-screen";
+import { StoreProvider, useSelector } from "./components/Store";
 import Notification from "./components/Notification";
+import MediaStorePicker from "./app/storepicker";
 import Video from "./app/video";
 import createAppNavigator from "./components/AppNavigator";
 import Library from "./app/library";
@@ -14,6 +15,8 @@ import Playlist from "./app/playlist";
 import Collection from "./app/collection";
 import Show from "./app/show";
 import { ThemeProvider } from "./components/ThemeProvider";
+
+SplashScreen.preventAutoHideAsync().catch(console.error);
 
 const AppNav = createAppNavigator();
 
@@ -39,28 +42,40 @@ function App() {
 
 const RootStack = createNativeStackNavigator();
 
+function MediaStoreLoader() {
+  let mediaStore = useSelector((s) => s.mediaStore);
+
+  if (!mediaStore) {
+    return <MediaStorePicker />;
+  }
+
+  return (
+    <>
+      <RootStack.Navigator
+        initialRouteName="app"
+        screenOptions={{ headerShown: false }}
+      >
+        <RootStack.Screen name="app" component={App} />
+        {/* @ts-expect-error */}
+        <RootStack.Screen name="video" component={Video} />
+      </RootStack.Navigator>
+      <Notification />
+    </>
+  );
+}
+
 export default function Root() {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <StoreProvider>
-        <MediaStoreProvider>
-          <NavigationContainer>
-            <ThemeProvider>
-              <Suspense fallback={<ActivityIndicator style={styles.loading} />}>
-                <RootStack.Navigator
-                  initialRouteName="app"
-                  screenOptions={{ headerShown: false }}
-                >
-                  <RootStack.Screen name="app" component={App} />
-                  {/* @ts-expect-error */}
-                  <RootStack.Screen name="video" component={Video} />
-                </RootStack.Navigator>
-              </Suspense>
-              <Notification />
-            </ThemeProvider>
-          </NavigationContainer>
-        </MediaStoreProvider>
-      </StoreProvider>
-    </GestureHandlerRootView>
+    <StoreProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <NavigationContainer>
+          <ThemeProvider>
+            <Suspense fallback={<ActivityIndicator style={styles.loading} />}>
+              <MediaStoreLoader />
+            </Suspense>
+          </ThemeProvider>
+        </NavigationContainer>
+      </GestureHandlerRootView>
+    </StoreProvider>
   );
 }

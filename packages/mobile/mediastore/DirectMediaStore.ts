@@ -3,7 +3,6 @@ import {
   StorageAccessFramework,
   getInfoAsync,
 } from "expo-file-system/legacy";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { PlaybackState, PlaybackUpdates, State } from "../state/base";
 import { StateDecoder } from "../state";
 import { PlaybackUpdatesDecoder } from "../state/decoders";
@@ -18,7 +17,6 @@ import {
 } from "../state/wrappers";
 import { MediaStore } from "./MediaStore";
 
-const STORE_KEY = "store";
 const STATE_FILE = ".flicksync.state.json";
 const STATE_BACKUP_FILE = ".flicksync.state.json.backup";
 const PLAYBACK_FILE = ".flicksync.playback.json";
@@ -111,31 +109,6 @@ class StatePersister {
   }
 }
 
-async function chooseStore(): Promise<string> {
-  let permission =
-    await StorageAccessFramework.requestDirectoryPermissionsAsync(null);
-
-  if (!permission.granted) {
-    throw new Error("Permission denied");
-  }
-
-  console.log(`Got permission for ${permission.directoryUri}`);
-
-  try {
-    let info = await getInfoAsync(
-      storagePath(permission.directoryUri, STATE_FILE),
-    );
-
-    if (info.exists && !info.isDirectory) {
-      return permission.directoryUri;
-    }
-
-    throw new Error(`Store is not a file`);
-  } catch (e) {
-    throw new Error(`Failed to access store: ${e}`);
-  }
-}
-
 async function applyPlaybackStates(storeLocation: string, state: State) {
   // Merge any pending playback updates written since the last Rust sync.
   try {
@@ -168,6 +141,8 @@ async function applyPlaybackStates(storeLocation: string, state: State) {
 async function loadMediaState(storeLocation: string): Promise<State> {
   console.log(`Loading media state from ${storeLocation}`);
 
+  let errorToThrow: Error | null = null;
+
   for (const file of [STATE_FILE, STATE_BACKUP_FILE]) {
     try {
       let stateStr = await StorageAccessFramework.readAsStringAsync(
@@ -194,74 +169,51 @@ async function loadMediaState(storeLocation: string): Promise<State> {
 
       return state;
     } catch (e) {
-      console.error(`State read failed from ${file}`, e);
+      errorToThrow ??= new Error(`State read failed from ${file}: ${e}`);
     }
   }
 
-  return { clientId: "", servers: {} };
-}
-
-async function findStore(): Promise<[string, State]> {
-  let storeLocation: string | null = null;
-
-  try {
-    storeLocation = await AsyncStorage.getItem(STORE_KEY);
-
-    if (storeLocation) {
-      try {
-        let info = await getInfoAsync(storagePath(storeLocation, STATE_FILE));
-
-        if (!info.exists || info.isDirectory) {
-          console.warn(`Previous state store is no longer a file.`);
-          storeLocation = null;
-        }
-      } catch (e) {
-        console.warn(`Failed to access previous store: ${e}`);
-        storeLocation = null;
-      }
-    }
-  } catch (e) {
-    console.error(e);
-  }
-
-  while (true) {
-    try {
-      storeLocation ??= await chooseStore();
-
-      await AsyncStorage.setItem(STORE_KEY, storeLocation);
-
-      let state = await loadMediaState(storeLocation);
-
-      return [storeLocation, state];
-    } catch (e) {
-      console.error(e);
-      storeLocation = null;
-    }
-  }
+  throw errorToThrow!;
 }
 
 export class DirectMediaStore extends MediaStore {
-  #state: State = { clientId: "" };
-  #location = "";
-  #persister: StatePersister | null = null;
+  #state: State;
+  #location: string;
+  #persister: StatePersister;
+
+  constructor(location: string, state: State) {
+    super();
+    this.#location = location;
+    this.#state = state;
+    this.#persister = new StatePersister(location);
+  }
+
+  static async init(storeLocation: string): Promise<DirectMediaStore> {
+    let info = await safeInfo(storagePath(storeLocation, STATE_FILE));
+
+    if (!info?.exists || info.isDirectory) {
+      throw new Error(`Store state is no longer a file.`);
+    }
+
+    let state = await loadMediaState(storeLocation);
+    return new DirectMediaStore(storeLocation, state);
+  }
+
+  static async pickNewStore(): Promise<DirectMediaStore> {
+    let permission =
+      await StorageAccessFramework.requestDirectoryPermissionsAsync(null);
+
+    if (!permission.granted) {
+      throw new Error("Permission denied");
+    }
+
+    console.log(`Got permission for ${permission.directoryUri}`);
+
+    return DirectMediaStore.init(permission.directoryUri);
+  }
 
   get location(): string {
     return this.#location;
-  }
-
-  async init(): Promise<void> {
-    let [loc, state] = await findStore();
-    this.#location = loc;
-    this.#state = state;
-    this.#persister = new StatePersister(loc);
-  }
-
-  async pickNew(): Promise<void> {
-    let loc = await chooseStore();
-    await AsyncStorage.setItem(STORE_KEY, loc);
-    this.#state = await loadMediaState(loc);
-    this.#location = loc;
-    this.#persister = new StatePersister(loc);
   }
 
   getServers(): Promise<Server[]> {
@@ -331,9 +283,7 @@ export class DirectMediaStore extends MediaStore {
     // Mutate in place so existing wrappers see the updated state
     video.playbackState = playbackState;
 
-    if (this.#persister) {
-      console.log("Persisting playback state");
-      await this.#persister.persistPlayback(this.#state);
-    }
+    console.log("Persisting playback state");
+    await this.#persister.persistPlayback(this.#state);
   }
 }

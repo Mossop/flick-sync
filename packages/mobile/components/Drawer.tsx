@@ -11,7 +11,7 @@ import {
 } from "react";
 import { Drawer as DrawerLayout } from "react-native-drawer-layout";
 import { namedIcon } from "../modules/util";
-import { useLibraries, usePlaylists } from "../store";
+import { useLibraries, usePlaylists } from "../mediastore";
 import { Library, MovieLibrary, Playlist } from "../state";
 import { AppNavigation } from "./AppNavigator";
 

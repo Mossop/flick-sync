@@ -14,7 +14,7 @@ import { SchemeOverride } from "../components/ThemeProvider";
 import { isDownloaded } from "../state";
 import { defer } from "../modules/util";
 import { reportError, useAction } from "../components/Store";
-import { useMediaStore, useVideo, useResolveUri } from "../store";
+import { useMediaStore, useVideo, useResolveUri } from "../mediastore";
 import { PlaybackState } from "../state/base";
 import { Overlay, PlaybackStatus } from "../components/VideoOverlay";
 

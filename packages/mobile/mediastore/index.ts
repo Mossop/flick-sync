@@ -1,7 +1,7 @@
 export { MediaStore } from "./MediaStore";
 export { DirectMediaStore } from "./DirectMediaStore";
-export { MediaStoreProvider, useMediaStore } from "./MediaStoreProvider";
 export {
+  useMediaStore,
   useServers,
   useLibraries,
   usePlaylists,

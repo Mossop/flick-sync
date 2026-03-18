@@ -49,7 +49,7 @@ import {
   useAction,
   useListSetting,
 } from "./Store";
-import { useResolveUri } from "../store";
+import { useResolveUri } from "../mediastore";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // Offer to start from the current position as long as it is larger than this.

@@ -7,7 +7,7 @@ import { useMemo } from "react";
 import { AppScreenProps } from "../components/AppNavigator";
 import LibraryContent from "./libraryContents";
 import LibraryCollections from "./libraryCollections";
-import { useLibraries } from "../store";
+import { useLibraries } from "../mediastore";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { CommonActions } from "@react-navigation/native";
 

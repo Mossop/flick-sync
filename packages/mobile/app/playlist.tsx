@@ -2,7 +2,7 @@ import AppView from "../components/AppView";
 import { AppScreenProps } from "../components/AppNavigator";
 import { List, ListControls } from "../components/List";
 import { ContainerType } from "../state";
-import { usePlaylist } from "../store";
+import { usePlaylist } from "../mediastore";
 
 export default function Playlist({ route }: AppScreenProps<"playlist">) {
   if (!route.params) {

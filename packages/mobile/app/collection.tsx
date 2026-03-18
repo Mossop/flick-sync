@@ -2,7 +2,7 @@ import AppView from "../components/AppView";
 import { ContainerType, isMovieCollection } from "../state";
 import { AppScreenProps } from "../components/AppNavigator";
 import { List, ListControls } from "../components/List";
-import { useCollection } from "../store";
+import { useCollection } from "../mediastore";
 
 export default function Collection({ route }: AppScreenProps<"collection">) {
   if (!route.params) {

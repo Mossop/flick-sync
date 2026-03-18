@@ -4,7 +4,7 @@ import { byIndex } from "../modules/util";
 import { AppScreenProps } from "../components/AppNavigator";
 import { List, ListControls } from "../components/List";
 import { ContainerType } from "../state";
-import { useShow } from "../store";
+import { useShow } from "../mediastore";
 
 export default function Show({ route }: AppScreenProps<"show">) {
   if (!route.params) {

@@ -1,5 +1,6 @@
 import { use, useMemo } from "react";
-import { useMediaStore } from "./MediaStoreProvider";
+import { useSelector } from "../components/Store";
+import { MediaStore } from "./MediaStore";
 import {
   Library,
   Collection,
@@ -8,6 +9,14 @@ import {
   Video,
   Server,
 } from "../state/wrappers";
+
+export function useMediaStore(): MediaStore {
+  let store = useSelector((state) => state.mediaStore);
+  if (!store) {
+    throw new Error("useMediaStore called without an active media store");
+  }
+  return store;
+}
 
 export function useServers(): Server[] {
   let store = useMediaStore();
