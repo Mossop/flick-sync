@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { PlaybackState } from "../state/base";
 import {
   Server,
@@ -9,11 +8,8 @@ import {
   Video,
 } from "../state/wrappers";
 
-const STORE_KEY = "store";
-
 export abstract class MediaStore {
-  // Store identity (for settings keying & display)
-  abstract get location(): string;
+  protected constructor(public readonly location: string) {}
 
   // Navigation / data access (granular, async)
   abstract getServers(): Promise<Server[]>;
@@ -40,19 +36,7 @@ export abstract class MediaStore {
     state: PlaybackState,
   ): Promise<void>;
 
-  static async setCurrentStore(store: MediaStore) {
-    await AsyncStorage.setItem(STORE_KEY, store.location);
-  }
-
-  static async loadCurrentStore(): Promise<MediaStore | null> {
-    let storeLocation: string | null = null;
-
-    storeLocation = await AsyncStorage.getItem(STORE_KEY);
-
-    if (!storeLocation) {
-      return null;
-    }
-
+  static async loadStore(storeLocation: string): Promise<MediaStore | null> {
     const { DirectMediaStore } = await import("./DirectMediaStore");
 
     return DirectMediaStore.init(storeLocation);

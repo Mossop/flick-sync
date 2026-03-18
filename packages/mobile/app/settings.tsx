@@ -36,7 +36,9 @@ function SettingBlock({
 }
 
 export default memo(function Settings() {
-  let storeLocation = useSelector((storeState) => storeState.storeLocation);
+  let storeLocation = useSelector(
+    (storeState) => storeState.mediaStore?.location,
+  );
   let dispatch = useDispatch();
 
   return (

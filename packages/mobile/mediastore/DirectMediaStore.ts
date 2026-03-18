@@ -178,12 +178,10 @@ async function loadMediaState(storeLocation: string): Promise<State> {
 
 export class DirectMediaStore extends MediaStore {
   #state: State;
-  #location: string;
   #persister: StatePersister;
 
   constructor(location: string, state: State) {
-    super();
-    this.#location = location;
+    super(location);
     this.#state = state;
     this.#persister = new StatePersister(location);
   }
@@ -210,10 +208,6 @@ export class DirectMediaStore extends MediaStore {
     console.log(`Got permission for ${permission.directoryUri}`);
 
     return DirectMediaStore.init(permission.directoryUri);
-  }
-
-  get location(): string {
-    return this.#location;
   }
 
   getServers(): Promise<Server[]> {
@@ -267,7 +261,7 @@ export class DirectMediaStore extends MediaStore {
   }
 
   resolveUri(path: string): string {
-    return storagePath(this.#location, path);
+    return storagePath(this.location, path);
   }
 
   async setPlaybackState(

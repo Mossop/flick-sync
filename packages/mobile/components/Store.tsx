@@ -15,6 +15,7 @@ import { ReactNode, use, useCallback } from "react";
 import { ContainerType } from "../state";
 import { MediaStore } from "../mediastore/MediaStore";
 
+const STORE_KEY = "store";
 const SETTINGS_KEY = "settings#";
 
 export enum Display {
@@ -40,7 +41,6 @@ export interface SettingsState {
 
 export interface StoreState {
   mediaStore: MediaStore | null;
-  storeLocation: string;
   settings: SettingsState;
   notificationMessage?: string;
 }
@@ -104,9 +104,8 @@ export function useListSetting(
   return settings.listSettings[id] ?? defaultSetting(container);
 }
 
-export const setMediaStore = createAction<{
-  store: MediaStore;
-  location: string;
+const setMediaStore = createAction<{
+  mediaStore: MediaStore;
   settings: SettingsState;
 }>("setMediaStore");
 export const clearMediaStore = createAction("clearMediaStore");
@@ -118,19 +117,16 @@ export const setListSettings =
 const reducer = createReducer<StoreState>(
   {
     mediaStore: null,
-    storeLocation: "",
     settings: { listSettings: {} },
   },
   (builder) => {
     builder
       .addCase(setMediaStore, (state, { payload }) => {
-        state.mediaStore = payload.store;
-        state.storeLocation = payload.location;
+        state.mediaStore = payload.mediaStore;
         state.settings = payload.settings;
       })
       .addCase(clearMediaStore, (state) => {
         state.mediaStore = null;
-        state.storeLocation = "";
       })
       .addCase(reportError, (state, { payload }) => {
         state.notificationMessage = payload;
@@ -146,17 +142,20 @@ const reducer = createReducer<StoreState>(
 
 const settingsPersist: Middleware<object, StoreState> =
   (store) => (next) => (action) => {
-    let { storeLocation: oldStoreLocation, settings: oldSettings } =
-      store.getState();
+    let { mediaStore: oldStore, settings: oldSettings } = store.getState();
     next(action);
-    let { storeLocation, settings } = store.getState();
+    let { mediaStore: newStore, settings: newSettings } = store.getState();
 
-    if (oldStoreLocation === storeLocation && settings !== oldSettings) {
+    if (oldStore !== newStore) {
+      AsyncStorage.setItem(STORE_KEY, newStore?.location ?? "").catch(
+        console.error,
+      );
+    } else if (newStore && oldSettings !== newSettings) {
       console.log("Persisting new settings");
 
       AsyncStorage.setItem(
-        SETTINGS_KEY + storeLocation,
-        JSON.stringify(settings),
+        SETTINGS_KEY + newStore.location,
+        JSON.stringify(newSettings),
       ).catch(console.error);
     }
   };
@@ -172,9 +171,7 @@ const store = configureStore({
     }).concat(settingsPersist),
 });
 
-export async function loadSettings(
-  storeLocation: string,
-): Promise<SettingsState> {
+async function loadSettings(storeLocation: string): Promise<SettingsState> {
   try {
     let settingsStr = await AsyncStorage.getItem(SETTINGS_KEY + storeLocation);
 
@@ -190,24 +187,28 @@ export async function loadSettings(
   };
 }
 
+export async function updateMediaStore(mediaStore: MediaStore) {
+  await AsyncStorage.setItem(STORE_KEY, mediaStore.location);
+  let settings = await loadSettings(mediaStore.location);
+  store.dispatch(setMediaStore({ mediaStore, settings }));
+}
+
 async function initStore() {
   try {
-    let mediaStore = await MediaStore.loadCurrentStore();
+    let storeLocation = await AsyncStorage.getItem(STORE_KEY);
+    if (!storeLocation) {
+      return;
+    }
+
+    let mediaStore = await MediaStore.loadStore(storeLocation);
     if (mediaStore) {
-      let settings = await loadSettings(mediaStore.location);
-      store.dispatch(
-        setMediaStore({
-          store: mediaStore,
-          location: mediaStore.location,
-          settings,
-        }),
-      );
+      await updateMediaStore(mediaStore);
     }
   } catch (e) {
     store.dispatch(reportError(String(e)));
+  } finally {
+    await SplashScreen.hideAsync();
   }
-
-  await SplashScreen.hideAsync();
 }
 
 const initPromise = initStore();
