@@ -16,6 +16,7 @@ import Collection from "./app/collection";
 import Show from "./app/show";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { ActivityIndicator } from "react-native-paper";
+import SsdpServiceProvider from "./mediastore/SsdpService";
 
 SplashScreen.preventAutoHideAsync().catch(console.error);
 
@@ -68,15 +69,17 @@ function MediaStoreLoader() {
 export default function Root() {
   return (
     <StoreProvider>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <NavigationContainer>
-          <ThemeProvider>
-            <Suspense fallback={<ActivityIndicator style={styles.loading} />}>
-              <MediaStoreLoader />
-            </Suspense>
-          </ThemeProvider>
-        </NavigationContainer>
-      </GestureHandlerRootView>
+      <SsdpServiceProvider>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <NavigationContainer>
+            <ThemeProvider>
+              <Suspense fallback={<ActivityIndicator style={styles.loading} />}>
+                <MediaStoreLoader />
+              </Suspense>
+            </ThemeProvider>
+          </NavigationContainer>
+        </GestureHandlerRootView>
+      </SsdpServiceProvider>
     </StoreProvider>
   );
 }

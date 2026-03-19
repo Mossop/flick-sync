@@ -1,17 +1,8 @@
 import { isDownloaded, StateDecoder } from "../state";
 import { Collection, Episode, Movie, Show, Video } from "../state/wrappers";
 import { StateBasedMediaStore } from "./MediaStore";
-import { ssdpDiscover } from "./ssdp";
 
 export class UpnpMediaStore extends StateBasedMediaStore {
-  static async listStores(): Promise<UpnpMediaStore[]> {
-    let urls = await ssdpDiscover();
-
-    let promises = urls.map((url) => UpnpMediaStore.init(url));
-    let stores = await Promise.all(promises);
-    return stores;
-  }
-
   static async init(storeLocation: URL | string): Promise<UpnpMediaStore> {
     let response = await fetch(new URL("state.json", storeLocation));
     if (!response.ok) {

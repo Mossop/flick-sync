@@ -43,6 +43,7 @@ export interface StoreState {
   mediaStore: MediaStore | null;
   settings: SettingsState;
   notificationMessage?: string;
+  discoveredServers: string[];
 }
 
 export function useSelector<Selected = unknown>(
@@ -113,11 +114,15 @@ export const reportError = createAction<string>("reportError");
 export const clearError = createAction("clearError");
 export const setListSettings =
   createAction<[id: string, settings: ListSetting]>("setListSettings");
+export const setDiscoveredServers = createAction<string[]>(
+  "setDiscoveredServers",
+);
 
 const reducer = createReducer<StoreState>(
   {
     mediaStore: null,
     settings: { listSettings: {} },
+    discoveredServers: [],
   },
   (builder) => {
     builder
@@ -136,6 +141,9 @@ const reducer = createReducer<StoreState>(
       })
       .addCase(setListSettings, (state, { payload: [id, settings] }) => {
         state.settings.listSettings[id] = settings;
+      })
+      .addCase(setDiscoveredServers, (state, { payload }) => {
+        state.discoveredServers = payload;
       });
   },
 );

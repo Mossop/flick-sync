@@ -1,9 +1,9 @@
 import { StyleSheet, View } from "react-native";
-import { ActivityIndicator, Button, List, Text } from "react-native-paper";
-import { useState, useCallback, memo, use, useMemo, Suspense } from "react";
+import { ActivityIndicator, Button, List } from "react-native-paper";
+import { useState, useCallback, memo, use, Suspense } from "react";
 import { DirectMediaStore, MediaStore } from "../mediastore";
 import { UpnpMediaStore } from "../mediastore/UpnpMediaStore";
-import { updateMediaStore } from "../components/Store";
+import { updateMediaStore, useSelector } from "../components/Store";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const styles = StyleSheet.create({
@@ -24,36 +24,31 @@ const styles = StyleSheet.create({
   },
 });
 
-function RemoteStoreList({
-  storeListPromise,
+function RemoteStoreItem({
+  storePromise,
 }: {
-  storeListPromise: Promise<MediaStore[]>;
+  storePromise: Promise<MediaStore | null>;
 }) {
-  let stores = use(storeListPromise);
+  let store = use(storePromise);
 
-  let selectStore = useCallback((store: MediaStore) => {
-    updateMediaStore(store).catch(console.error);
-  }, []);
+  if (!store) {
+    return null;
+  }
 
   return (
-    <View style={styles.serverList}>
-      {stores.map((store: MediaStore) => (
-        <List.Item
-          key={store.location}
-          title={store.location}
-          onPress={() => {
-            selectStore(store);
-          }}
-        />
-      ))}
-    </View>
+    <List.Item
+      key={store.location}
+      title={store.location}
+      onPress={() => {
+        updateMediaStore(store).catch(console.error);
+      }}
+    />
   );
 }
 
 export default memo(function MediaStorePicker() {
   let [error, setError] = useState<string | null>(null);
-
-  let listRemoteStores = useMemo(() => UpnpMediaStore.listStores(), []);
+  let discoveredServers = useSelector((s) => s.discoveredServers);
 
   let onChooseLocal = useCallback(async () => {
     setError(null);
@@ -67,7 +62,7 @@ export default memo(function MediaStorePicker() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {error && <Text style={styles.error}>{error}</Text>}
+      {error && <List.Item title={error} />}
       <Button
         mode="contained"
         onPress={() => {
@@ -76,9 +71,19 @@ export default memo(function MediaStorePicker() {
       >
         Choose Local Store
       </Button>
-      <Suspense fallback={<ActivityIndicator style={styles.loading} />}>
-        <RemoteStoreList storeListPromise={listRemoteStores} />
-      </Suspense>
+      <View style={styles.serverList}>
+        {discoveredServers.length == 0 ? (
+          <ActivityIndicator style={styles.loading} />
+        ) : (
+          discoveredServers.map((url) => (
+            <Suspense key={url} fallback={null}>
+              <RemoteStoreItem
+                storePromise={UpnpMediaStore.init(url).catch(() => null)}
+              />
+            </Suspense>
+          ))
+        )}
+      </View>
     </SafeAreaView>
   );
 });

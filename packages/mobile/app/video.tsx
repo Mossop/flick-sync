@@ -14,6 +14,7 @@ import { SchemeOverride } from "../components/ThemeProvider";
 import { defer } from "../modules/util";
 import { reportError, useAction } from "../components/Store";
 import { useMediaStore, useVideo } from "../mediastore";
+import { useSsdp } from "../mediastore/SsdpService";
 import { PlaybackState } from "../state/base";
 import { Overlay, PlaybackStatus } from "../components/VideoOverlay";
 
@@ -52,6 +53,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let navigation = useNavigation<NativeStackNavigationProp<AppRoutes>>();
   let mediaStore = useMediaStore();
   let dispatchSetError = useAction(reportError);
+  let { suspend, resume } = useSsdp();
 
   let { server, queue, index } = route.params;
 
@@ -116,6 +118,13 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     },
     [video, player],
   );
+
+  useEffect(() => {
+    suspend();
+    return () => {
+      resume();
+    };
+  }, [suspend, resume]);
 
   useEffect(() => {
     console.log("mount");
