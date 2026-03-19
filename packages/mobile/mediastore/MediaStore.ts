@@ -112,20 +112,25 @@ export abstract class StateBasedMediaStore extends MediaStore {
     );
   }
 
-  setPlaybackState(video: Video, playbackState: PlaybackState): Promise<void> {
+  abstract persistPlaybackState(_video: Video): Promise<void>;
+
+  async setPlaybackState(
+    video: Video,
+    playbackState: PlaybackState,
+  ): Promise<void> {
     let serverState = this.state.servers?.[video.library.server.id];
     if (!serverState) {
-      return Promise.resolve();
+      return;
     }
 
     let videoState = serverState.videos?.[video.id];
     if (!videoState) {
-      return Promise.resolve();
+      return;
     }
 
     // Mutate in place so existing wrappers see the updated state
     videoState.playbackState = playbackState;
 
-    return Promise.resolve();
+    await this.persistPlaybackState(video);
   }
 }

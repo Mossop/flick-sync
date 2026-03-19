@@ -216,13 +216,10 @@ export class DirectMediaStore extends StateBasedMediaStore {
     return storagePath(this.location, video.download.path);
   }
 
-  async setPlaybackState(
-    video: Video,
-    playbackState: PlaybackState,
-  ): Promise<void> {
-    await super.setPlaybackState(video, playbackState);
-
-    console.log("Persisting playback state");
+  async persistPlaybackState(video: Video) {
+    console.log(
+      `Persisting playback state for ${video.id} to ${video.playPosition}`,
+    );
     await this.#persister.persistPlayback(this.state);
   }
 }

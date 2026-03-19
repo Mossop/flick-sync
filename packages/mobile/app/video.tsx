@@ -3,7 +3,7 @@ import { VideoMetadata, VideoView, useVideoPlayer } from "expo-video";
 import { useEventListener } from "expo";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as StatusBar from "expo-status-bar";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as NavigationBar from "expo-navigation-bar";
 import { useNavigation } from "@react-navigation/native";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -16,6 +16,8 @@ import { reportError, useAction } from "../components/Store";
 import { useMediaStore, useVideo } from "../mediastore";
 import { PlaybackState } from "../state/base";
 import { Overlay, PlaybackStatus } from "../components/VideoOverlay";
+
+export const PLAYBACK_UPDATE_INTERVAL = 5000;
 
 const styles = StyleSheet.create({
   container: {
@@ -33,6 +35,19 @@ const styles = StyleSheet.create({
   },
 });
 
+function needsPersist(
+  oldState: PlaybackState,
+  newState: PlaybackState,
+): boolean {
+  if (newState.state == "inprogress" && oldState.state == "inprogress") {
+    return (
+      Math.abs(newState.position - oldState.position) > PLAYBACK_UPDATE_INTERVAL
+    );
+  }
+
+  return oldState.state != newState.state;
+}
+
 export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let navigation = useNavigation<NativeStackNavigationProp<AppRoutes>>();
   let mediaStore = useMediaStore();
@@ -42,23 +57,28 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
 
   let video = useVideo(server, queue[index]);
 
+  let startPosition =
+    video.playbackState.state == "played" || route.params.restart
+      ? 0
+      : video.playPosition;
+  let startState: PlaybackState =
+    video.playbackState.state == "played" || route.params.restart
+      ? { state: "unplayed" }
+      : video.playbackState;
+
+  let currentState = useRef<PlaybackState>(startState);
+  let lastUpdate = useRef<PlaybackState>(startState);
+
   let setPlayState = useCallback(
     (state: PlaybackState) => {
       defer(mediaStore.setPlaybackState(video, state));
+      lastUpdate.current = state;
     },
     [mediaStore, video],
   );
-  let setPlayPosition = useCallback(
-    (position: number) => {
-      setPlayState({ state: "inprogress", position });
-    },
-    [setPlayState],
-  );
-
-  let { restart } = route.params;
 
   let [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>(() => ({
-    position: restart ? 0 : video.playPosition,
+    position: startPosition,
     duration: video.totalDuration,
     isPlaying: false,
   }));
@@ -75,16 +95,14 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   };
 
   let player = useVideoPlayer({ uri, metadata }, (p) => {
-    let position =
-      video.playbackState.state == "played" || restart ? 0 : video.playPosition;
     console.log(
-      `Initializing video playback of ${uri} at position ${position}`,
+      `Initializing video playback of ${uri} at position ${startPosition}`,
     );
 
     p.timeUpdateEventInterval = 1;
     p.keepScreenOnWhilePlaying = true;
     p.showNowPlayingNotification = true;
-    p.currentTime = position / 1000;
+    p.currentTime = startPosition / 1000;
     p.play();
   });
 
@@ -119,15 +137,23 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      setPlayState(currentState.current);
+    };
+  }, [setPlayState]);
+
   useEventListener(player, "timeUpdate", ({ currentTime }) => {
-    let currentPosition = currentTime * 1000;
+    let position = currentTime * 1000;
+    currentState.current = { state: "inprogress", position };
+
     setPlaybackStatus((prev) => ({
       ...prev,
-      position: currentPosition,
+      position: position,
     }));
 
-    if (Math.abs(currentPosition - video.playPosition) > 5000) {
-      setPlayPosition(currentPosition);
+    if (needsPersist(currentState.current, lastUpdate.current)) {
+      setPlayState(currentState.current);
     }
   });
 
@@ -136,13 +162,16 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
       ...prev,
       isPlaying,
     }));
+
+    setPlayState(currentState.current);
   });
 
   useEventListener(player, "playToEnd", () => {
     if (index + 1 >= queue.length) {
       navigation.pop();
     } else {
-      setPlayState({ state: "played" });
+      currentState.current = { state: "played" };
+      setPlayState(currentState.current);
       navigation.setParams({
         index: index + 1,
         restart: true,

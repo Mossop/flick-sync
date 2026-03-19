@@ -1,4 +1,3 @@
-import { PlaybackState } from "../state/base";
 import { isDownloaded, StateDecoder } from "../state";
 import { Collection, Episode, Movie, Show, Video } from "../state/wrappers";
 import { StateBasedMediaStore } from "./MediaStore";
@@ -61,11 +60,10 @@ export class UpnpMediaStore extends StateBasedMediaStore {
     return this.resolveUri(`stream/${video.server.id}/${video.id}`).toString();
   }
 
-  async setPlaybackState(
-    video: Video,
-    playbackState: PlaybackState,
-  ): Promise<void> {
-    await super.setPlaybackState(video, playbackState);
+  async persistPlaybackState(video: Video) {
+    console.log(
+      `Persisting playback state for ${video.id} to ${video.playPosition}`,
+    );
 
     let updateUrl = this.resolveUri(
       `/playback/${video.server.id}/${video.library.id}/video/${video.id}`,
