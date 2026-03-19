@@ -16,6 +16,7 @@ const SSDP_ADDRESS = "239.255.255.250";
 const SSDP_PORT = 1900;
 const FLICKSYNC_SERVICE_TYPE = "urn:flicksync:service:StateSync:1";
 const SEARCH_INTERVAL_MS = 30_000;
+const ACTIVE_SEARCH_INTERVAL_MS = 5_000;
 const EXPIRY_INTERVAL_MS = 5_000;
 const EXPIRY_MS = 2 * 60 * 1000;
 
@@ -52,15 +53,14 @@ interface SsdpEvents {
 
 class SsdpService extends EventEmitter<SsdpEvents> {
   private socket: ReturnType<typeof UdpSocket.createSocket>;
+  private lastSearch: number;
   private searchInterval: NodeJS.Timeout;
   private expiryInterval: NodeJS.Timeout;
-  private serverMap: Map<string, number>;
 
-  constructor() {
+  constructor(private readonly serverMap: Map<string, number>) {
     super();
 
-    this.serverMap = new Map();
-
+    this.lastSearch = Date.now();
     this.socket = UdpSocket.createSocket({ type: "udp4" });
 
     this.socket.on("error", (e: unknown) => {
@@ -108,8 +108,6 @@ class SsdpService extends EventEmitter<SsdpEvents> {
     if (wasAbsent) {
       console.log(`Found new remote store at ${url}`);
       this.emit("servers", [...this.serverMap.keys()]);
-    } else {
-      console.log(`Saw existing remote store at ${url}`);
     }
   }
 
@@ -130,8 +128,27 @@ class SsdpService extends EventEmitter<SsdpEvents> {
     }
   }
 
+  setSearchInterval(ms: number) {
+    clearInterval(this.searchInterval);
+
+    let since = Date.now() - this.lastSearch;
+
+    if (since > ms) {
+      this.sendSearch();
+
+      this.searchInterval = setInterval(() => this.sendSearch(), ms);
+    } else {
+      this.searchInterval = setTimeout(() => {
+        this.sendSearch();
+
+        this.searchInterval = setInterval(() => this.sendSearch(), ms);
+      }, ms - since);
+    }
+  }
+
   sendSearch() {
     console.log("Sending new search request");
+
     let message = new TextEncoder().encode(MSEARCH);
     this.socket.send(
       message,
@@ -145,6 +162,8 @@ class SsdpService extends EventEmitter<SsdpEvents> {
         }
       },
     );
+
+    this.lastSearch = Date.now();
   }
 
   destroy() {
@@ -162,15 +181,26 @@ class SsdpService extends EventEmitter<SsdpEvents> {
 interface SsdpContextValue {
   suspend: () => void;
   resume: () => void;
+  setSearchInterval: (ms: number) => void;
 }
 
 const SsdpContext = createContext<SsdpContextValue>({
   suspend: () => {},
   resume: () => {},
+  setSearchInterval: () => {},
 });
 
 export function useSsdp(): SsdpContextValue {
   return useContext(SsdpContext);
+}
+
+export function useActiveSearch() {
+  let { setSearchInterval } = useSsdp();
+
+  useEffect(() => {
+    setSearchInterval(ACTIVE_SEARCH_INTERVAL_MS);
+    return () => setSearchInterval(SEARCH_INTERVAL_MS);
+  }, [setSearchInterval]);
 }
 
 export default function SsdpServiceProvider({
@@ -179,7 +209,9 @@ export default function SsdpServiceProvider({
   children: ReactNode;
 }) {
   let dispatch = useDispatch();
+  let serverMap = useRef<Map<string, number>>(new Map());
   let service = useRef<SsdpService | null>(null);
+  let manuallySuspended = useRef(false);
 
   let updateServers = useCallback(
     (servers: string[]) => {
@@ -188,14 +220,14 @@ export default function SsdpServiceProvider({
     [dispatch],
   );
 
-  let resume = useCallback(() => {
+  let start = useCallback(() => {
     if (!service.current) {
-      service.current = new SsdpService();
+      service.current = new SsdpService(serverMap.current);
       service.current.addListener("servers", updateServers);
     }
   }, [updateServers]);
 
-  let suspend = useCallback(() => {
+  let stop = useCallback(() => {
     if (service.current) {
       service.current.removeListener("servers", updateServers);
       service.current.destroy();
@@ -203,25 +235,41 @@ export default function SsdpServiceProvider({
     }
   }, [updateServers]);
 
+  let resume = useCallback(() => {
+    manuallySuspended.current = false;
+    start();
+  }, [start]);
+
+  let suspend = useCallback(() => {
+    manuallySuspended.current = true;
+    stop();
+  }, [stop]);
+
+  let setSearchInterval = useCallback((ms: number) => {
+    service.current?.setSearchInterval(ms);
+  }, []);
+
   useEffect(() => {
-    resume();
+    start();
 
     let sub = AppState.addEventListener("change", (state) => {
       if (state == "active") {
-        resume();
+        if (!manuallySuspended.current) {
+          start();
+        }
       } else {
-        suspend();
+        stop();
       }
     });
 
     return () => {
       sub.remove();
-      suspend();
+      stop();
     };
-  }, [resume, suspend]);
+  }, [start, stop]);
 
   return (
-    <SsdpContext.Provider value={{ suspend, resume }}>
+    <SsdpContext.Provider value={{ suspend, resume, setSearchInterval }}>
       {children}
     </SsdpContext.Provider>
   );

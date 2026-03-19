@@ -4,6 +4,7 @@ import { useState, useCallback, memo, use, Suspense } from "react";
 import { DirectMediaStore, MediaStore } from "../mediastore";
 import { UpnpMediaStore } from "../mediastore/UpnpMediaStore";
 import { updateMediaStore, useSelector } from "../components/Store";
+import { useActiveSearch } from "../mediastore/SsdpService";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const styles = StyleSheet.create({
@@ -47,6 +48,7 @@ function RemoteStoreItem({
 }
 
 export default memo(function MediaStorePicker() {
+  useActiveSearch();
   let [error, setError] = useState<string | null>(null);
   let discoveredServers = useSelector((s) => s.discoveredServers);
 
