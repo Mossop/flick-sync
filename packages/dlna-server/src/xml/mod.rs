@@ -198,6 +198,7 @@ impl<R: Read> XmlReader<R> {
                     content += &text;
                 }
                 reader::XmlEvent::Comment(_) => {}
+                reader::XmlEvent::Doctype { .. } => return Err("Unexpected XML state".into()),
             }
         }
 

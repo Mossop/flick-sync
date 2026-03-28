@@ -24,13 +24,13 @@ tokio = { version = "1.29.1", features = [
   "time",
   "process",
 ] }
-xml = "0.8.20"
+xml = "1.2.1"
 tempfile = "3.17.1"
 pathdiff = "0.2.3"
 tokio-util = "0.7.13"
 scoped-futures = "0.1.4"
 mime = "0.3.17"
-file-format = { version = "0.27.0", features = [
+file-format = { version = "0.29.0", features = [
   "reader-asf",
   "reader-ebml",
   "reader-mp4",

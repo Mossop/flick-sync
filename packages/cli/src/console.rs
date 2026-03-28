@@ -217,7 +217,11 @@ impl Console {
         })
     }
 
-    pub fn select<P: Into<String>, S: ToString>(&self, prompt: P, items: &[S]) -> usize {
+    pub fn select<P, S>(&self, prompt: P, items: &[S]) -> usize
+    where
+        P: Into<String>,
+        for<'a> &'a S: ToString,
+    {
         self.with_term(|term| {
             Select::new()
                 .with_prompt(prompt)

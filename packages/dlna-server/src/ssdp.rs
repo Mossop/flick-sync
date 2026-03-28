@@ -14,7 +14,7 @@ use std::{
 use anyhow::bail;
 use bytes::{Buf, BytesMut};
 use futures::{Stream, StreamExt};
-use getifaddrs::{InterfaceFlags, getifaddrs};
+use getifaddrs::{Address, InterfaceFlags, getifaddrs};
 use http::{HeaderMap, HeaderName, HeaderValue};
 use pin_project::pin_project;
 use socket_pktinfo::PktInfoUdpSocket;
@@ -28,7 +28,6 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::Uuid;
 
 use crate::{TaskHandle, ns, rt};
-
 
 pub(crate) const SSDP_IPV4: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
 pub(crate) const SSDP_IPV6: Ipv6Addr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0xC);
@@ -421,13 +420,13 @@ impl Interface {
         let multicast = iface.flags.contains(InterfaceFlags::MULTICAST);
 
         match (iface.address, iface.index) {
-            (IpAddr::V4(address), Some(index)) => Some(Interface::V4 {
-                address,
+            (Address::V4(address), Some(index)) => Some(Interface::V4 {
+                address: address.address,
                 index,
                 multicast,
             }),
-            (IpAddr::V6(address), Some(index)) => Some(Interface::V6 {
-                address,
+            (Address::V6(address), Some(index)) => Some(Interface::V6 {
+                address: address.address,
                 index,
                 multicast,
             }),

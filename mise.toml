@@ -2,6 +2,7 @@
 node = "22"
 "cargo:cross" = "latest"
 "npm:eas-cli" = "latest"
+"cargo:cargo-outdated" = "latest"
 
 [tasks."build:pizero"]
 env = { CROSS_CONTAINER_OPTS = "--platform linux/amd64" }
