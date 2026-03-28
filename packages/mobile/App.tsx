@@ -52,17 +52,14 @@ function MediaStoreLoader() {
   }
 
   return (
-    <>
-      <RootStack.Navigator
-        initialRouteName="app"
-        screenOptions={{ headerShown: false }}
-      >
-        <RootStack.Screen name="app" component={App} />
-        {/* @ts-expect-error */}
-        <RootStack.Screen name="video" component={Video} />
-      </RootStack.Navigator>
-      <Notification />
-    </>
+    <RootStack.Navigator
+      initialRouteName="app"
+      screenOptions={{ headerShown: false }}
+    >
+      <RootStack.Screen name="app" component={App} />
+      {/* @ts-expect-error */}
+      <RootStack.Screen name="video" component={Video} />
+    </RootStack.Navigator>
   );
 }
 
@@ -75,6 +72,7 @@ export default function Root() {
             <ThemeProvider>
               <Suspense fallback={<ActivityIndicator style={styles.loading} />}>
                 <MediaStoreLoader />
+                <Notification />
               </Suspense>
             </ThemeProvider>
           </NavigationContainer>
