@@ -25,7 +25,7 @@ const DEFAULT_HTTP_PORT: u16 = 1980;
 pub struct CustomService {
     pub service_type: String,
     /// The location of this service. May be an absolute URL or a path relative to the DLNA
-    /// server (e.g. `/flicksync/state.json`). Used as the LOCATION in SSDP announcements.
+    /// server (e.g. `/state.json`). Used as the LOCATION in SSDP announcements.
     pub location: String,
 }
 
@@ -126,6 +126,8 @@ impl DlnaServer {
         DlnaServerBuilder {
             uuid: Uuid::new_v4(),
             server_name: "Dlna".to_string(),
+            manufacturer: None,
+            manufacturer_url: None,
             server_version,
             http_port: DEFAULT_HTTP_PORT,
             icons: Vec::new(),
@@ -154,6 +156,8 @@ pub struct DlnaServerBuilder<H: DlnaRequestHandler> {
     uuid: Uuid,
     server_version: String,
     server_name: String,
+    manufacturer: Option<String>,
+    manufacturer_url: Option<String>,
     http_port: u16,
     icons: Vec<Icon>,
     handler: H,
@@ -175,6 +179,8 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
         let service_factory = DlnaServiceFactory::new(HttpAppData {
             uuid: self.uuid,
             server_name: self.server_name,
+            manufacturer: self.manufacturer,
+            manufacturer_url: self.manufacturer_url,
             handler: self.handler,
             icons: self.icons,
         });
@@ -211,14 +217,26 @@ impl<H: DlnaRequestHandler> DlnaServerBuilder<H> {
 
     /// Sets a specific server version. Should match the form `Name/<major>.<minor>`. Defaults to
     /// `RustDlna/<pkg major>.<pkg minor>`
-    pub fn server_version(mut self, version: &str) -> Self {
-        self.server_version = version.to_owned();
+    pub fn server_version<S: ToString>(mut self, version: S) -> Self {
+        self.server_version = version.to_string();
         self
     }
 
     /// Sets a base name for the server.
-    pub fn server_name(mut self, name: &str) -> Self {
-        self.server_name = name.to_owned();
+    pub fn server_name<S: ToString>(mut self, name: S) -> Self {
+        self.server_name = name.to_string();
+        self
+    }
+
+    /// Sets a manufacturer for the server.
+    pub fn manufacturer<S: ToString>(mut self, manufacturer: S) -> Self {
+        self.manufacturer = Some(manufacturer.to_string());
+        self
+    }
+
+    /// Sets a manufacturer URL for the server.
+    pub fn manufacturer_url<S: ToString>(mut self, manufacturer_url: S) -> Self {
+        self.manufacturer_url = Some(manufacturer_url.to_string());
         self
     }
 

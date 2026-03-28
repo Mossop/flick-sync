@@ -400,6 +400,8 @@ pub(crate) async fn middleware<H: DlnaRequestHandler>(
 pub(crate) struct HttpAppData<H: DlnaRequestHandler> {
     pub(crate) uuid: Uuid,
     pub(crate) server_name: String,
+    pub(crate) manufacturer: Option<String>,
+    pub(crate) manufacturer_url: Option<String>,
     pub(crate) handler: H,
     pub(crate) icons: Vec<upnp::Icon>,
 }
@@ -425,6 +427,8 @@ pub(crate) async fn device_root<H: DlnaRequestHandler>(
         uuid: app_data.uuid,
         server_name: app_data.server_name.clone(),
         icons: app_data.icons.clone(),
+        manufacturer: app_data.manufacturer.clone(),
+        manufacturer_url: app_data.manufacturer_url.clone(),
     })
 }
 

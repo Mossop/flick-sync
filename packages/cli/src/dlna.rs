@@ -1006,12 +1006,14 @@ pub(crate) async fn build_dlna(
     DlnaServer::builder(handler)
         .uuid(uuid)
         .http_port(port)
-        .server_version(&format!(
+        .server_version(format!(
             "FlickSync/{}.{}",
             env!("CARGO_PKG_VERSION_MAJOR"),
             env!("CARGO_PKG_VERSION_MINOR")
         ))
         .server_name("Synced Flicks")
+        .manufacturer("Dave Townsend".to_string())
+        .manufacturer_url("https://github.com/Mossop/flick-sync")
         .custom_service(CustomService {
             service_type: "urn:flicksync:service:StateSync:1".to_string(),
             location: "/".to_string(),

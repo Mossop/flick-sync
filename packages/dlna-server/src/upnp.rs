@@ -279,6 +279,8 @@ pub(crate) struct Root {
     pub(crate) uuid: Uuid,
     pub(crate) server_name: String,
     pub(crate) icons: Vec<Icon>,
+    pub(crate) manufacturer: Option<String>,
+    pub(crate) manufacturer_url: Option<String>,
 }
 
 impl<W: Write> ToXml<W> for Root {
@@ -311,10 +313,12 @@ impl<W: Write> ToXml<W> for Root {
                     writer
                         .element("deviceType")
                         .text("urn:schemas-upnp-org:device:MediaServer:1")?;
-                    writer.element("manufacturer").text("Dave Townsend")?;
-                    writer
-                        .element("manufacturerURL")
-                        .text("https://github.com/Mossop/flick-sync")?;
+                    if let Some(manufacturer) = &self.manufacturer {
+                        writer.element("manufacturer").text(manufacturer)?;
+                    }
+                    if let Some(manufacturer_url) = &self.manufacturer_url {
+                        writer.element("manufacturerURL").text(manufacturer_url)?;
+                    }
                     writer.element("modelName").text(&self.server_name)?;
                     writer
                         .element("modelDescription")
