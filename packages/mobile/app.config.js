@@ -51,6 +51,14 @@ export default {
         supportsPictureInPicture: true,
       },
     ],
+    [
+      "expo-build-properties",
+      {
+        android: {
+          usesCleartextTraffic: true,
+        },
+      },
+    ],
   ],
   extra: {
     eas: {
