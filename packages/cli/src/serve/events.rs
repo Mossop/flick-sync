@@ -219,7 +219,11 @@ pub(super) enum Event {
     SyncChange,
     SyncEnd,
     Log(SyncLogItem),
-    Progress(Vec<SyncProgressBar>),
+    Progress {
+        complete_jobs: u64,
+        total_jobs: u64,
+        bars: Vec<SyncProgressBar>,
+    },
     ThumbnailUpdate(Thumbnail),
 }
 
@@ -229,7 +233,7 @@ impl Event {
             Self::SyncStart | Self::SyncEnd => "sync-status".to_owned(),
             Self::Log(_) => "sync-log".to_owned(),
             Self::SyncChange => "sync-change".to_owned(),
-            Self::Progress(_) => "sync-progress".to_owned(),
+            Self::Progress { .. } => "sync-progress".to_owned(),
             Self::ThumbnailUpdate(thumb) => format!("thumbnail-{}", thumb.id),
         }
     }
@@ -263,10 +267,26 @@ impl Event {
                 template.render()
             }
             Self::Log(message) => message.template().await.render(),
-            Self::Progress(bars) => {
+            Self::Progress {
+                complete_jobs,
+                total_jobs,
+                bars,
+                ..
+            } => {
                 let mut lines = Vec::new();
+
                 for bar in bars {
                     lines.push(bar.template().await.render()?)
+                }
+
+                if complete_jobs < total_jobs {
+                    lines.push(
+                        SyncProgressTemplate {
+                            completed: *complete_jobs,
+                            total: *total_jobs,
+                        }
+                        .render()?,
+                    );
                 }
 
                 Ok(lines.join("\n"))
@@ -406,6 +426,13 @@ impl SyncLogItem {
             },
         }
     }
+}
+
+#[derive(Template)]
+#[template(path = "syncprogress.html")]
+pub(crate) struct SyncProgressTemplate {
+    completed: u64,
+    total: u64,
 }
 
 #[derive(Template)]

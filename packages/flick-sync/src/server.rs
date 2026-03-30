@@ -65,24 +65,28 @@ pub trait Progress: Unpin + Sized + Send + Sync {
     fn failed(self, #[expect(unused)] error: anyhow::Error) {}
 }
 
-pub trait DownloadProgress: Clone {
-    fn transcode_started(
-        &self,
-        video: &wrappers::Video,
-    ) -> impl Future<Output = impl Progress + Clone + 'static>;
+pub trait DownloadProgress: Sized {
+    fn transcode_started(&self) -> impl Future<Output = impl Progress + Clone + 'static>;
 
-    fn download_started(
-        &self,
-        video: &wrappers::Video,
-    ) -> impl Future<Output = impl Progress + Clone + 'static>;
+    fn download_started(&self) -> impl Future<Output = impl Progress + Clone + 'static>;
 
-    fn download_failed(
-        &self,
-        #[expect(unused)] video: &wrappers::Video,
-        #[expect(unused)] error: anyhow::Error,
-    ) -> impl Future<Output = ()> {
+    fn download_failed(self, #[expect(unused)] error: anyhow::Error) -> impl Future<Output = ()> {
         ready(())
     }
+
+    fn finished(self) -> impl Future<Output = ()> {
+        ready(())
+    }
+}
+
+pub trait SyncProgress {
+    type DP: DownloadProgress;
+
+    fn jobs(&mut self, #[expect(unused)] count: usize) -> impl Future<Output = ()> {
+        ready(())
+    }
+
+    fn download_progress(&mut self, video: &wrappers::Video) -> impl Future<Output = Self::DP>;
 }
 
 pub struct SyncItemInfo {
@@ -908,10 +912,10 @@ impl Server {
     }
 
     /// Attempts to transcode and download all missing items.
-    #[instrument(level = "trace", skip(self, progress), fields(server = self.id))]
-    pub async fn download<D>(&self, progress: D) -> Result<bool>
+    #[instrument(level = "trace", skip(self, sync_progress), fields(server = self.id))]
+    pub async fn download<SP>(&self, mut sync_progress: SP) -> Result<bool>
     where
-        D: DownloadProgress,
+        SP: SyncProgress,
     {
         let plex_server = match self.connect().await {
             Ok(ps) => ps,
@@ -927,10 +931,13 @@ impl Server {
             match video.transfer_state().await {
                 TransferState::Downloaded => {}
                 _ => {
-                    jobs.push(video.download(plex_server.clone(), progress.clone()));
+                    let download_progress = sync_progress.download_progress(&video).await;
+                    jobs.push(video.download(plex_server.clone(), download_progress));
                 }
             }
         }
+
+        sync_progress.jobs(jobs.len()).await;
 
         Ok(join_all(jobs).await.into_iter().all(|r| r))
     }

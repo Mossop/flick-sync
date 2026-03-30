@@ -35,7 +35,7 @@ use uuid::Uuid;
 use crate::{config::H264Profile, schema::MigratableStore, util::safe_write};
 pub use crate::{
     config::{OutputStyle, ServerConnection},
-    server::{DownloadProgress, ItemType, Progress, Server, SyncItemInfo},
+    server::{DownloadProgress, ItemType, Progress, Server, SyncItemInfo, SyncProgress},
     state::{LibraryType, PlaybackState, PlaybackUpdates},
     sync::{LockedFile, LockedFileAsyncRead, LockedFileRead, Timeout},
     wrappers::*,

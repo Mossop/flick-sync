@@ -14,7 +14,7 @@ use actix_web::{
     App, HttpServer, dev::Extensions, middleware::from_fn, rt::net::TcpStream, web::ThinData,
 };
 use clap::{Args, builder::FalseyValueParser};
-use flick_sync::{DownloadProgress, FlickSync, Progress, Server, Video};
+use flick_sync::{DownloadProgress, FlickSync, Progress, Server, SyncProgress, Video};
 use futures::{FutureExt, StreamExt, select};
 use rustls::{
     ServerConfig,
@@ -57,10 +57,12 @@ pub struct Serve {
 struct SyncStatus {
     is_syncing: bool,
     log: VecDeque<SyncLogItem>,
+    complete_jobs: u64,
+    total_jobs: u64,
     progress: HashMap<String, SyncProgressBar>,
 }
 
-struct SyncProgress {
+struct SyncItemProgress {
     is_download: bool,
     video: Video,
     task: SyncTask,
@@ -69,7 +71,7 @@ struct SyncProgress {
     ref_count: Arc<AtomicUsize>,
 }
 
-impl SyncProgress {
+impl SyncItemProgress {
     fn new(task: SyncTask, video: Video, is_download: bool) -> Self {
         let this = Self {
             task,
@@ -86,7 +88,7 @@ impl SyncProgress {
     }
 }
 
-impl Clone for SyncProgress {
+impl Clone for SyncItemProgress {
     fn clone(&self) -> Self {
         self.ref_count.fetch_add(1, Ordering::SeqCst);
 
@@ -101,7 +103,7 @@ impl Clone for SyncProgress {
     }
 }
 
-impl Drop for SyncProgress {
+impl Drop for SyncItemProgress {
     fn drop(&mut self) {
         if self.ref_count.fetch_sub(1, Ordering::SeqCst) == 1 {
             self.task.remove_progress(self);
@@ -109,7 +111,7 @@ impl Drop for SyncProgress {
     }
 }
 
-impl Progress for SyncProgress {
+impl Progress for SyncItemProgress {
     fn progress(&mut self, position: u64) {
         if let Some(length) = self.length {
             let current = (100 * self.position) / length;
@@ -158,6 +160,40 @@ impl Progress for SyncProgress {
     }
 }
 
+struct SyncTaskDownload {
+    task: SyncTask,
+    video: Video,
+}
+
+impl DownloadProgress for SyncTaskDownload {
+    async fn transcode_started(&self) -> impl Progress + Clone + 'static {
+        self.task
+            .log(SyncLogMessage::TranscodeStarted(self.video.clone()));
+
+        SyncItemProgress::new(self.task.clone(), self.video.clone(), false)
+    }
+
+    async fn download_started(&self) -> impl Progress + Clone + 'static {
+        self.task
+            .log(SyncLogMessage::DownloadStarted(self.video.clone()));
+
+        SyncItemProgress::new(self.task.clone(), self.video.clone(), true)
+    }
+
+    async fn download_failed(self, error: anyhow::Error) {
+        self.task.job_complete();
+
+        self.task.log(SyncLogMessage::DownloadFailed((
+            self.video.clone(),
+            error.to_string(),
+        )));
+    }
+
+    async fn finished(self) {
+        self.task.job_complete();
+    }
+}
+
 #[derive(Clone)]
 struct SyncTask {
     event_sender: broadcast::Sender<Event>,
@@ -172,7 +208,7 @@ impl SyncTask {
         }
     }
 
-    fn progress_key(progress: &SyncProgress) -> String {
+    fn progress_key(progress: &SyncItemProgress) -> String {
         format!(
             "{}:{}",
             progress.video.id(),
@@ -180,20 +216,25 @@ impl SyncTask {
         )
     }
 
-    fn update_bars<'a, I: Iterator<Item = &'a SyncProgressBar>>(&self, bars: I) {
-        self.send_event(Event::Progress(
-            bars.filter_map(|b| {
-                if b.length.is_some() {
-                    Some(b.clone())
-                } else {
-                    None
-                }
-            })
-            .collect(),
-        ));
+    fn update_bars(&self, status: &SyncStatus) {
+        self.send_event(Event::Progress {
+            complete_jobs: status.complete_jobs,
+            total_jobs: status.total_jobs,
+            bars: status
+                .progress
+                .values()
+                .filter_map(|b| {
+                    if b.length.is_some() {
+                        Some(b.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+        });
     }
 
-    fn add_progress(&self, progress: &SyncProgress) {
+    fn add_progress(&self, progress: &SyncItemProgress) {
         let mut status = self.status.lock().unwrap();
 
         status.progress.insert(
@@ -206,28 +247,28 @@ impl SyncTask {
             },
         );
 
-        self.update_bars(status.progress.values());
+        self.update_bars(&status);
     }
 
-    fn update_length(&self, progress: &SyncProgress, length: u64) {
+    fn update_length(&self, progress: &SyncItemProgress, length: u64) {
         let mut status = self.status.lock().unwrap();
 
         if let Some(bar) = status.progress.get_mut(&Self::progress_key(progress)) {
             bar.length = Some(length);
-            self.update_bars(status.progress.values());
+            self.update_bars(&status);
         }
     }
 
-    fn update_progress(&self, progress: &SyncProgress) {
+    fn update_progress(&self, progress: &SyncItemProgress) {
         let mut status = self.status.lock().unwrap();
 
         if let Some(bar) = status.progress.get_mut(&Self::progress_key(progress)) {
             bar.position = progress.position;
-            self.update_bars(status.progress.values());
+            self.update_bars(&status);
         }
     }
 
-    fn remove_progress(&self, progress: &SyncProgress) {
+    fn remove_progress(&self, progress: &SyncItemProgress) {
         let mut status = self.status.lock().unwrap();
 
         if status
@@ -235,7 +276,7 @@ impl SyncTask {
             .remove(&Self::progress_key(progress))
             .is_some()
         {
-            self.update_bars(status.progress.values());
+            self.update_bars(&status);
         }
     }
 
@@ -253,6 +294,13 @@ impl SyncTask {
 
     fn send_event(&self, event: Event) {
         let _ = self.event_sender.send(event);
+    }
+
+    fn job_complete(&self) {
+        let mut status = self.status.lock().unwrap();
+        status.complete_jobs += 1;
+
+        self.update_bars(&status);
     }
 
     async fn sync_started(&self, server: Server) {
@@ -274,24 +322,21 @@ impl SyncTask {
     }
 }
 
-impl DownloadProgress for SyncTask {
-    async fn transcode_started(&self, video: &Video) -> impl Progress + Clone + 'static {
-        self.log(SyncLogMessage::TranscodeStarted(video.clone()));
+impl SyncProgress for SyncTask {
+    type DP = SyncTaskDownload;
 
-        SyncProgress::new(self.clone(), video.clone(), false)
+    async fn download_progress(&mut self, video: &Video) -> SyncTaskDownload {
+        SyncTaskDownload {
+            task: self.clone(),
+            video: video.clone(),
+        }
     }
 
-    async fn download_started(&self, video: &Video) -> impl Progress + Clone + 'static {
-        self.log(SyncLogMessage::DownloadStarted(video.clone()));
+    async fn jobs(&mut self, count: usize) {
+        let mut status = self.status.lock().unwrap();
+        status.total_jobs = count as u64;
 
-        SyncProgress::new(self.clone(), video.clone(), true)
-    }
-
-    async fn download_failed(&self, video: &Video, error: anyhow::Error) {
-        self.log(SyncLogMessage::DownloadFailed((
-            video.clone(),
-            error.to_string(),
-        )));
+        self.update_bars(&status);
     }
 }
 

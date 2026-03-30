@@ -1,5 +1,5 @@
 use clap::Args;
-use flick_sync::{DownloadProgress, FlickSync, Progress, Video};
+use flick_sync::{DownloadProgress, FlickSync, Progress, SyncProgress, Video};
 use tracing::{debug, error, instrument, warn};
 
 use crate::{
@@ -84,31 +84,69 @@ impl Progress for ProgressBar {
     }
 }
 
-#[derive(Clone)]
-struct ConsoleProgress {
+struct ConsoleDownloadProgress {
     console: Console,
+    title: String,
+    overall: Bar,
 }
 
-impl DownloadProgress for ConsoleProgress {
-    async fn transcode_started(&self, video_part: &Video) -> impl Progress + Clone + 'static {
-        let title = video_part.title().await;
-
+impl DownloadProgress for ConsoleDownloadProgress {
+    async fn transcode_started(&self) -> impl Progress + Clone + 'static {
         let bar = self
             .console
-            .add_progress_bar(&format!("🔄 {title}"), ProgressType::Percent);
+            .add_progress_bar(&format!("🔄 {}", self.title), ProgressType::Percent);
         bar.set_length(100);
 
         ProgressBar { bar }
     }
 
-    async fn download_started(&self, video_part: &Video) -> impl Progress + Clone + 'static {
-        let title = video_part.title().await;
-
+    async fn download_started(&self) -> impl Progress + Clone + 'static {
         let bar = self
             .console
-            .add_progress_bar(&format!("💾 {title}"), ProgressType::Bytes);
+            .add_progress_bar(&format!("💾 {}", self.title), ProgressType::Bytes);
 
         ProgressBar { bar }
+    }
+
+    async fn download_failed(self, #[expect(unused)] error: anyhow::Error) {
+        self.overall.inc(1);
+    }
+
+    async fn finished(self) {
+        self.overall.inc(1);
+    }
+}
+
+#[derive(Clone)]
+struct ConsoleProgress {
+    console: Console,
+    overall: Bar,
+}
+
+impl ConsoleProgress {
+    fn new(console: Console) -> Self {
+        let overall = console.add_progress_bar("  Total progress", ProgressType::Count);
+        overall.set_position(0);
+
+        Self { overall, console }
+    }
+}
+
+impl SyncProgress for ConsoleProgress {
+    type DP = ConsoleDownloadProgress;
+
+    async fn jobs(&mut self, count: usize) {
+        self.overall.set_length(count as u64);
+    }
+
+    async fn download_progress(&mut self, video: &Video) -> ConsoleDownloadProgress {
+        let title = video.title().await;
+
+        ConsoleDownloadProgress {
+            console: self.console.clone(),
+            title,
+            overall: self.overall.clone(),
+        }
     }
 }
 
@@ -126,7 +164,7 @@ impl Runnable for Sync {
 
         flick_sync.prune_root().await;
 
-        let progress = ConsoleProgress { console };
+        let progress = ConsoleProgress::new(console);
 
         for server in &servers {
             if let Err(e) = server.update_state(true).await {

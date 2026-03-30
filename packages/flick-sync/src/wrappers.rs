@@ -1550,12 +1550,12 @@ impl Video {
         Ok(())
     }
 
-    #[instrument(level = "trace", skip(self, queue, queue_id, progress), fields(video=self.id()))]
+    #[instrument(level = "trace", skip(self, queue, queue_id, download_progress), fields(video=self.id()))]
     async fn wait_for_available<D: DownloadProgress>(
         &self,
         queue: &DownloadQueue,
         queue_id: u32,
-        progress: D,
+        download_progress: &D,
     ) -> Result {
         let mut queue_item = queue.item(queue_id).await?;
 
@@ -1567,7 +1567,7 @@ impl Video {
                     queue_item.update().await?;
                 }
                 QueueItemStatus::Processing => {
-                    let mut progress = progress.transcode_started(self).await;
+                    let mut progress = download_progress.transcode_started().await;
 
                     loop {
                         match queue_item.status() {
@@ -1656,11 +1656,11 @@ impl Video {
     pub(crate) async fn download<D: DownloadProgress>(
         self,
         plex_server: PlexServer,
-        progress: D,
+        download_progress: D,
     ) -> bool {
         let Ok(guard) = self.try_lock_write().await else {
-            progress
-                .download_failed(&self, anyhow!("Failed to lock item for writing"))
+            download_progress
+                .download_failed(anyhow!("Failed to lock item for writing"))
                 .await;
             return false;
         };
@@ -1680,7 +1680,7 @@ impl Video {
             .update_state(|state| state.download = download_state.clone())
             .await
         {
-            progress.download_failed(&self, e).await;
+            download_progress.download_failed(e).await;
             return false;
         }
 
@@ -1688,7 +1688,7 @@ impl Video {
             Ok(q) => q,
             Err(e) => {
                 warn!(error=?e);
-                progress.download_failed(&self, e.into()).await;
+                download_progress.download_failed(e.into()).await;
                 return false;
             }
         };
@@ -1697,7 +1697,7 @@ impl Video {
             && let Err(e) = self.queue_download(&plex_server, &queue).await
         {
             warn!(error=?e);
-            progress.download_failed(&self, e).await;
+            download_progress.download_failed(e).await;
             return false;
         }
 
@@ -1706,15 +1706,16 @@ impl Video {
 
             match download_state {
                 DownloadState::None => {
+                    download_progress.finished().await;
                     return false;
                 }
                 DownloadState::Transcoding { queue_id } => {
                     if let Err(e) = self
-                        .wait_for_available(&queue, queue_id, progress.clone())
+                        .wait_for_available(&queue, queue_id, &download_progress)
                         .await
                     {
                         warn!(error=?e);
-                        progress.download_failed(&self, e).await;
+                        download_progress.download_failed(e).await;
                         return false;
                     }
                 }
@@ -1728,7 +1729,7 @@ impl Video {
                         .await
                         .unwrap();
 
-                    let mut progress = progress.download_started(&self).await;
+                    let mut progress = download_progress.download_started().await;
 
                     if let Err(e) = self
                         .download_media(&queue, queue_id, &guard, &path, &mut progress)
@@ -1736,12 +1737,16 @@ impl Video {
                     {
                         warn!(error=?e);
                         progress.failed(e);
+                        download_progress.finished().await;
                         return false;
                     }
 
                     progress.finished();
                 }
-                DownloadState::Downloaded { .. } | DownloadState::Transcoded { .. } => return true,
+                DownloadState::Downloaded { .. } | DownloadState::Transcoded { .. } => {
+                    download_progress.finished().await;
+                    return true;
+                }
             }
         }
     }

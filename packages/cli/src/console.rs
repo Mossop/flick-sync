@@ -18,6 +18,10 @@ pub struct Bar {
 }
 
 impl Bar {
+    pub fn inc(&self, delta: u64) {
+        self.bar.inc(delta);
+    }
+
     pub fn set_position(&self, position: u64) {
         self.bar.set_position(position);
     }
@@ -116,6 +120,7 @@ impl Drop for BarHideGuard {
 pub enum ProgressType {
     Bytes,
     Percent,
+    Count,
 }
 
 #[derive(Clone)]
@@ -164,6 +169,9 @@ impl Console {
             ProgressType::Percent => {
                 ProgressStyle::with_template("{msg:35!} {wide_bar}  {percent:>9}%         ")
                     .unwrap()
+            }
+            ProgressType::Count => {
+                ProgressStyle::with_template("{msg:35!} {wide_bar}  {pos:>9}/{len:9}").unwrap()
             }
         };
 
