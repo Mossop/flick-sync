@@ -18,9 +18,8 @@ use plex_api::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value, to_value};
-use tempfile::NamedTempFile;
 use time::{Date, OffsetDateTime};
-use tokio::{fs, process::Command};
+use tokio::fs;
 use tracing::{debug, error, info, instrument, trace, warn};
 use typeshare::typeshare;
 use uuid::Uuid;
@@ -420,35 +419,35 @@ impl DownloadState {
     pub(crate) async fn strip_metadata(
         &self,
         #[expect(unused)] guard: &OpWriteGuard,
-        root: &Path,
+        #[expect(unused)] root: &Path,
     ) -> Result {
-        let source_file = match self {
-            Self::Downloaded { path } => root.join(path),
-            Self::Transcoded { path } => root.join(path),
-            _ => return Ok(()),
-        };
+        // let source_file = match self {
+        //     Self::Downloaded { path } => root.join(path),
+        //     Self::Transcoded { path } => root.join(path),
+        //     _ => return Ok(()),
+        // };
 
-        let temp_file = NamedTempFile::new()?;
+        // let temp_file = NamedTempFile::new()?;
 
-        let result = Command::new("ffmpeg")
-            .arg("-y")
-            .arg("-loglevel")
-            .arg("warning")
-            .arg("-i")
-            .arg(&source_file)
-            .arg("-map_metadata")
-            .arg("-1")
-            .arg("-c")
-            .arg("copy")
-            .arg("-map")
-            .arg("0")
-            .arg(temp_file.path())
-            .output()
-            .await?;
+        // let result = Command::new("ffmpeg")
+        //     .arg("-y")
+        //     .arg("-loglevel")
+        //     .arg("warning")
+        //     .arg("-i")
+        //     .arg(&source_file)
+        //     .arg("-map_metadata")
+        //     .arg("-1")
+        //     .arg("-c")
+        //     .arg("copy")
+        //     .arg("-map")
+        //     .arg("0")
+        //     .arg(temp_file.path())
+        //     .output()
+        //     .await?;
 
-        if result.status.success() {
-            fs::copy(temp_file.path(), &source_file).await?;
-        }
+        // if result.status.success() {
+        //     fs::copy(temp_file.path(), &source_file).await?;
+        // }
 
         Ok(())
     }
