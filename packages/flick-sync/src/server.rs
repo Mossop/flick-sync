@@ -11,7 +11,10 @@ use std::{
 
 use anyhow::{anyhow, bail};
 use async_recursion::async_recursion;
-use futures::future::join_all;
+use futures::{
+    FutureExt,
+    future::{BoxFuture, join_all},
+};
 use plex_api::{
     MyPlexBuilder,
     device::DeviceConnection,
@@ -37,7 +40,7 @@ use crate::{
         ServerState, ShowState, VideoState,
     },
     sync::{OpMutex, OpReadGuard, OpWriteGuard, Timeout},
-    util::safe,
+    util::{parallelize, safe},
     wrappers,
 };
 
@@ -705,17 +708,31 @@ impl Server {
     pub async fn write_playlists(&self) {
         info!("Writing playlists");
 
+        let mut jobs: Vec<BoxFuture<()>> = Vec::new();
+
         for collection in self.collections().await {
-            if let Err(e) = collection.write_playlist().await {
-                warn!(error=?e, "Failed to update playlist");
-            }
+            jobs.push(
+                async move {
+                    if let Err(e) = collection.write_playlist().await {
+                        warn!(error=?e, "Failed to update playlist");
+                    }
+                }
+                .boxed(),
+            );
         }
 
         for playlist in self.playlists().await {
-            if let Err(e) = playlist.write_playlist().await {
-                warn!(error=?e, "Failed to update playlist");
-            }
+            jobs.push(
+                async move {
+                    if let Err(e) = playlist.write_playlist().await {
+                        warn!(error=?e, "Failed to update playlist");
+                    }
+                }
+                .boxed(),
+            );
         }
+
+        parallelize(jobs, 10).await;
     }
 
     /// Rebuilds metadata files for the synced items
@@ -735,44 +752,74 @@ impl Server {
     async fn update_thumbnails(&self, rebuild: bool) {
         info!("Updating thumbnails");
 
+        let mut jobs: Vec<BoxFuture<()>> = Vec::new();
+
         for playlist in self.playlists().await {
-            if let Err(e) = playlist.update_thumbnail(rebuild).await {
-                warn!(error=?e);
-            }
+            jobs.push(
+                async move {
+                    if let Err(e) = playlist.update_thumbnail(rebuild).await {
+                        warn!(error=?e);
+                    }
+                }
+                .boxed(),
+            );
         }
 
         for library in self.libraries().await {
             for collection in library.collections().await {
-                if let Err(e) = collection.update_thumbnail(rebuild).await {
-                    warn!(error=?e);
-                }
+                jobs.push(
+                    async move {
+                        if let Err(e) = collection.update_thumbnail(rebuild).await {
+                            warn!(error=?e);
+                        }
+                    }
+                    .boxed(),
+                );
             }
 
             match library {
                 Library::Movie(l) => {
                     for video in l.movies().await {
-                        if let Err(e) = video.update_thumbnail(rebuild).await {
-                            warn!(error=?e);
-                        }
+                        jobs.push(
+                            async move {
+                                if let Err(e) = video.update_thumbnail(rebuild).await {
+                                    warn!(error=?e);
+                                }
+                            }
+                            .boxed(),
+                        );
                     }
                 }
                 Library::Show(l) => {
                     for show in l.shows().await {
-                        if let Err(e) = show.update_thumbnail(rebuild).await {
-                            warn!(error=?e);
-                        }
+                        let inner = show.clone();
+                        jobs.push(
+                            async move {
+                                if let Err(e) = inner.update_thumbnail(rebuild).await {
+                                    warn!(error=?e);
+                                }
+                            }
+                            .boxed(),
+                        );
 
                         for season in show.seasons().await {
                             for video in season.episodes().await {
-                                if let Err(e) = video.update_thumbnail(rebuild).await {
-                                    warn!(error=?e);
-                                }
+                                jobs.push(
+                                    async move {
+                                        if let Err(e) = video.update_thumbnail(rebuild).await {
+                                            warn!(error=?e);
+                                        }
+                                    }
+                                    .boxed(),
+                                );
                             }
                         }
                     }
                 }
             }
         }
+
+        parallelize(jobs, 20).await;
     }
 
     /// Updates metadata files for synced videos.
@@ -780,17 +827,24 @@ impl Server {
     async fn update_metadata(&self, rebuild: bool) {
         info!("Updating metadata files");
 
+        let mut jobs: Vec<BoxFuture<()>> = Vec::new();
+
         for library in self.libraries().await {
             match library {
                 Library::Movie(l) => {
                     for movie in l.movies().await {
-                        if let Err(e) = movie.update_metadata(rebuild).await {
-                            warn!(error=?e);
-                        }
+                        jobs.push(
+                            async move {
+                                if let Err(e) = movie.update_metadata(rebuild).await {
+                                    warn!(error=?e);
+                                }
 
-                        if rebuild {
-                            movie.video().strip_metadata().await;
-                        }
+                                if rebuild {
+                                    movie.video().strip_metadata().await;
+                                }
+                            }
+                            .boxed(),
+                        );
                     }
                 }
                 Library::Show(l) => {
@@ -801,19 +855,26 @@ impl Server {
 
                         for season in show.seasons().await {
                             for episode in season.episodes().await {
-                                if let Err(e) = episode.update_metadata(rebuild).await {
-                                    warn!(error=?e);
-                                }
+                                jobs.push(
+                                    async move {
+                                        if let Err(e) = episode.update_metadata(rebuild).await {
+                                            warn!(error=?e);
+                                        }
 
-                                if rebuild {
-                                    episode.video().strip_metadata().await;
-                                }
+                                        if rebuild {
+                                            episode.video().strip_metadata().await;
+                                        }
+                                    }
+                                    .boxed(),
+                                );
                             }
                         }
                     }
                 }
             }
         }
+
+        parallelize(jobs, 10).await;
     }
 
     /// Verifies the presence of downloads for synced items.
@@ -829,14 +890,21 @@ impl Server {
 
         info!("Verifying downloads");
 
-        for video in self.videos().await {
-            if let Err(e) = video
-                .verify_download(&plex_server, allow_video_deletion)
-                .await
-            {
-                warn!(error=?e);
-            }
-        }
+        parallelize(
+            self.videos().await.into_iter().map(|video| {
+                let plex_server = plex_server.clone();
+                async move {
+                    if let Err(e) = video
+                        .verify_download(&plex_server, allow_video_deletion)
+                        .await
+                    {
+                        warn!(error=?e);
+                    }
+                }
+            }),
+            20,
+        )
+        .await;
     }
 
     /// Attempts to transcode and download all missing items.

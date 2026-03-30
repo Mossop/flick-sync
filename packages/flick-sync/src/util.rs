@@ -1,5 +1,7 @@
 use std::{
     collections::HashMap,
+    collections::VecDeque,
+    future::Future,
     hash::Hash,
     io,
     path::Path,
@@ -28,6 +30,7 @@ macro_rules! derive_list_item {
 }
 
 pub(crate) use derive_list_item;
+use tracing::trace;
 
 pub(crate) fn from_list<'de, D, K, V>(deserializer: D) -> result::Result<HashMap<K, V>, D::Error>
 where
@@ -120,5 +123,169 @@ where
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.project();
         this.inner.poll_shutdown(cx)
+    }
+}
+
+#[pin_project]
+struct Parallel<T>
+where
+    T: Future<Output = ()>,
+{
+    pending: VecDeque<Pin<Box<T>>>,
+    #[pin]
+    running: Vec<Pin<Box<T>>>,
+    jobs: usize,
+}
+
+pub(crate) async fn parallelize<J, T>(futures: J, jobs: usize)
+where
+    J: IntoIterator<Item = T>,
+    T: Future<Output = ()>,
+{
+    let pending: VecDeque<Pin<Box<T>>> = futures.into_iter().map(Box::pin).collect();
+
+    trace!(jobs, count = pending.len(), "Spawning parallel jobs");
+
+    Parallel {
+        pending,
+        running: Vec::new(),
+        jobs,
+    }
+    .await
+}
+
+impl<T> Future for Parallel<T>
+where
+    T: Future<Output = ()>,
+{
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+
+        while this.running.len() < *this.jobs {
+            let Some(next) = this.pending.pop_front() else {
+                break;
+            };
+
+            this.running.push(next);
+        }
+
+        let mut index = 0;
+        while index < this.running.len() {
+            if this.running[index].as_mut().poll(cx).is_ready() {
+                if let Some(next) = this.pending.pop_front() {
+                    this.running[index] = next;
+                } else {
+                    this.running.swap_remove(index);
+                }
+            } else {
+                index += 1;
+            }
+        }
+
+        if this.pending.is_empty() && this.running.is_empty() {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::util::parallelize;
+
+    use futures::task::noop_waker;
+    use std::{
+        future::Future,
+        pin::Pin,
+        sync::{Arc, Mutex},
+        task::{Context, Poll, Waker},
+    };
+
+    #[derive(Default)]
+    struct TestState {
+        started: Vec<usize>,
+        ready: bool,
+        waker: Option<Waker>,
+    }
+
+    struct TestFuture {
+        index: usize,
+        state: Arc<Mutex<TestState>>,
+    }
+
+    impl Future for TestFuture {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            let mut state = self.state.lock().unwrap();
+
+            if !state.started.contains(&self.index) {
+                state.started.push(self.index);
+            }
+
+            if state.ready {
+                Poll::Ready(())
+            } else {
+                state.waker = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        }
+    }
+
+    #[test]
+    fn limits_parallelism_and_backfills_slots() {
+        let states = (0..4)
+            .map(|_| Arc::new(Mutex::new(TestState::default())))
+            .collect::<Vec<_>>();
+        let futures = states.iter().enumerate().map(|(index, state)| TestFuture {
+            index,
+            state: Arc::clone(state),
+        });
+
+        let mut in_parallel = Box::pin(parallelize(futures, 2));
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert_eq!(in_parallel.as_mut().poll(&mut cx), Poll::Pending);
+        assert_eq!(states[0].lock().unwrap().started, vec![0]);
+        assert_eq!(states[1].lock().unwrap().started, vec![1]);
+        assert!(states[2].lock().unwrap().started.is_empty());
+        assert!(states[3].lock().unwrap().started.is_empty());
+
+        {
+            let mut state = states[0].lock().unwrap();
+            state.ready = true;
+            if let Some(waker) = state.waker.take() {
+                waker.wake();
+            }
+        }
+
+        assert_eq!(in_parallel.as_mut().poll(&mut cx), Poll::Pending);
+        assert_eq!(states[2].lock().unwrap().started, vec![2]);
+        assert!(states[3].lock().unwrap().started.is_empty());
+
+        {
+            let mut state = states[1].lock().unwrap();
+            state.ready = true;
+            if let Some(waker) = state.waker.take() {
+                waker.wake();
+            }
+        }
+
+        assert_eq!(in_parallel.as_mut().poll(&mut cx), Poll::Pending);
+        assert_eq!(states[3].lock().unwrap().started, vec![3]);
+
+        for state in &states[2..] {
+            let mut state = state.lock().unwrap();
+            state.ready = true;
+            if let Some(waker) = state.waker.take() {
+                waker.wake();
+            }
+        }
+
+        assert_eq!(in_parallel.as_mut().poll(&mut cx), Poll::Ready(()));
     }
 }

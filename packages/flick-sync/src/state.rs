@@ -776,7 +776,7 @@ impl VideoState {
             thumbnail: Default::default(),
             metadata: Default::default(),
             media_id: media.metadata().id.clone().unwrap(),
-            last_updated: metadata.updated_at.unwrap(),
+            last_updated: metadata.updated_at.unwrap_or(OffsetDateTime::UNIX_EPOCH),
             parts,
             // Determined later
             transcode_profile: None,
