@@ -51,7 +51,6 @@ lazy_static = "1.4.0"
 time = "0.3.20"
 serde = { version = "1.0.158", features = ["derive"] }
 rustls = { version = "0.23.25", default-features = false, features = [
-  "ring",
   "logging",
   "std",
   "tls12",
