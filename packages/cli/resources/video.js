@@ -48,19 +48,15 @@ export class VideoPlayer extends LitElement {
         align-items: stretch;
 
         opacity: 0;
+        cursor: none;
         transition: opacity var(--sl-transition-slow)
           cubic-bezier(0.4, 0, 0.2, 1) 0ms;
 
-        &.visible {
-          opacity: 1;
-        }
-
-        &.casting {
-          opacity: 1;
-        }
-
+        &.visible,
+        &.casting,
         &.paused {
           opacity: 1;
+          cursor: auto;
         }
       }
 
