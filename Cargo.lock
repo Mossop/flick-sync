@@ -1090,7 +1090,7 @@ dependencies = [
 
 [[package]]
 name = "dlna-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "actix-web",
  "anyhow",
@@ -1307,7 +1307,7 @@ dependencies = [
 
 [[package]]
 name = "flick-sync"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "anyhow",
  "async-recursion",
@@ -1335,7 +1335,7 @@ dependencies = [
 
 [[package]]
 name = "flick-sync-cli"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "actix-tls",
  "actix-web",
