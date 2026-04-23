@@ -143,6 +143,9 @@ struct Args {
     #[clap(short, long, env = "FLICK_SYNC_TELEMETRY")]
     telemetry: Option<String>,
 
+    #[clap(long, env = "FLICK_SYNC_TRACE")]
+    trace: bool,
+
     #[clap(subcommand)]
     command: Command,
 }
@@ -218,19 +221,22 @@ async fn wrapped_main(args: Args, console: Console) -> Result {
 
 fn init_logging(
     console: Console,
+    trace: bool,
     telemetry: Option<&str>,
 ) -> result::Result<Option<SdkTracerProvider>, Box<dyn Error>> {
-    let targets = if cfg!(debug_assertions) {
+    let targets = if trace || cfg!(debug_assertions) {
         Targets::new()
             .with_target("flick_sync", Level::TRACE)
             .with_target("flick_sync_cli", Level::TRACE)
             .with_target("dlna_server", Level::DEBUG)
+            .with_target("plex_api", Level::DEBUG)
             .with_default(Level::WARN)
     } else {
         Targets::new()
             .with_target("flick_sync", Level::DEBUG)
             .with_target("flick_sync_cli", Level::DEBUG)
             .with_target("dlna_server", Level::INFO)
+            .with_target("plex_api", Level::INFO)
             .with_default(Level::WARN)
     };
 
@@ -267,6 +273,7 @@ fn init_logging(
             .with_target("flick_sync", Level::TRACE)
             .with_target("flick_sync_cli", Level::TRACE)
             .with_target("dlna_server", Level::TRACE)
+            .with_target("plex_api", Level::TRACE)
             .with_default(Level::INFO);
 
         let telemetry = tracing_opentelemetry::layer()
@@ -291,7 +298,7 @@ async fn main() -> Result {
 
     let console = Console::default();
 
-    let provider = match init_logging(console.clone(), args.telemetry.as_deref()) {
+    let provider = match init_logging(console.clone(), args.trace, args.telemetry.as_deref()) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("Failed to initialise logging: {e}");
