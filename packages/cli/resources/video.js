@@ -48,13 +48,17 @@ export class VideoPlayer extends LitElement {
         align-items: stretch;
 
         opacity: 0;
+        background-color: hsl(from var(--sl-color-neutral-0) h s l / 0);
         cursor: none;
-        transition: opacity var(--sl-transition-slow)
-          cubic-bezier(0.4, 0, 0.2, 1) 0ms;
+        transition:
+          opacity var(--sl-transition-slow) cubic-bezier(0.4, 0, 0.2, 1) 0ms,
+          background-color var(--sl-transition-slow)
+            cubic-bezier(0.4, 0, 0.2, 1) 0ms;
 
         &.visible,
         &.casting,
         &.paused {
+          background-color: hsl(from var(--sl-color-neutral-0) h s l / 0.3);
           opacity: 1;
           cursor: auto;
         }
@@ -76,8 +80,17 @@ export class VideoPlayer extends LitElement {
         display: flex;
         flex-direction: row;
         align-items: center;
-        justify-content: space-evenly;
-        font-size: 300%;
+        justify-content: center;
+        gap: var(--sl-spacing-large);
+        font-size: 200%;
+
+        sl-icon-button::part(base) {
+          color: var(--sl-color-neutral-1000);
+        }
+
+        .togglePlayback {
+          font-size: 300%;
+        }
       }
 
       .controls {
@@ -179,6 +192,11 @@ export class VideoPlayer extends LitElement {
     this.videoElement = null;
     this.castSession = null;
 
+    this.seekBack30 = (event) => this.seekPressed(event, -30);
+    this.seekBack10 = (event) => this.seekPressed(event, -10);
+    this.seekForward10 = (event) => this.seekPressed(event, 10);
+    this.seekForward30 = (event) => this.seekPressed(event, 30);
+
     this.addEventListener("fullscreenchange", () => this.onFullscreenChanged());
   }
 
@@ -191,7 +209,7 @@ export class VideoPlayer extends LitElement {
     }
     castContext.addEventListener(
       cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
-      this.castContextEventListener
+      this.castContextEventListener,
     );
   };
 
@@ -224,7 +242,7 @@ export class VideoPlayer extends LitElement {
     if (this.castSession) {
       this.castController.removeEventListener(
         cast.framework.RemotePlayerEventType.ANY_CHANGE,
-        this.castControllerEventListener
+        this.castControllerEventListener,
       );
       this.castPlayer = null;
       this.castController = null;
@@ -235,11 +253,11 @@ export class VideoPlayer extends LitElement {
     if (session) {
       this.castPlayer = new cast.framework.RemotePlayer();
       this.castController = new cast.framework.RemotePlayerController(
-        this.castPlayer
+        this.castPlayer,
       );
       this.castController.addEventListener(
         cast.framework.RemotePlayerEventType.ANY_CHANGE,
-        this.castControllerEventListener
+        this.castControllerEventListener,
       );
 
       this.isCasting = true;
@@ -256,12 +274,12 @@ export class VideoPlayer extends LitElement {
         castMedia.getStatus(
           null,
           () => this.castControllerEventListener(),
-          (error) => {}
+          (error) => {},
         );
       } else {
         // Otherwise load it
         let loadRequest = new chrome.cast.media.LoadRequest(
-          this.castMediaInfo()
+          this.castMediaInfo(),
         );
         loadRequest.currentTime = this.currentTime;
         loadRequest.autoplay = this.isPlaying;
@@ -315,13 +333,13 @@ export class VideoPlayer extends LitElement {
     if (this.isCastAvailable) {
       cast.framework.CastContext.getInstance().removeEventListener(
         cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
-        this.castContextEventListener
+        this.castContextEventListener,
       );
 
       if (this.castSession) {
         this.castController.removeEventListener(
           cast.framework.RemotePlayerEventType.ANY_CHANGE,
-          this.castControllerEventListener
+          this.castControllerEventListener,
         );
       }
     }
@@ -415,7 +433,7 @@ export class VideoPlayer extends LitElement {
 
     let mediaInfo = new chrome.cast.media.MediaInfo(
       videoUrl.pathname,
-      this.mimeType
+      this.mimeType,
     );
 
     mediaInfo.contentUrl = contentUrl.toString();
@@ -485,29 +503,20 @@ export class VideoPlayer extends LitElement {
         html`<div
           class="buffer"
           style="left: ${left}%; width: ${width}%"
-        ></div>`
+        ></div>`,
       );
     }
 
     return templates;
   }
 
-  seekBack(event) {
+  seekPressed(event, delta) {
     if (event.button != 0) {
       return;
     }
 
     event.stopPropagation();
-    this.seek(Math.max(0, this.currentTime - 30));
-  }
-
-  seekForward(event) {
-    if (event.button != 0) {
-      return;
-    }
-
-    event.stopPropagation();
-    this.seek(this.currentTime + 30);
+    this.seek(Math.max(0, this.currentTime + delta));
   }
 
   renderOverlayInfo() {
@@ -546,7 +555,7 @@ export class VideoPlayer extends LitElement {
         @seeked="${this.onMediaStateChanged}"
       >
         <source type="${this.mimeType}" src="${mediaUrl.toString()}"></source>
-      </video>`
+      </video>`,
     );
   }
 
@@ -571,12 +580,29 @@ export class VideoPlayer extends LitElement {
         ${this.renderOverlayInfo()}
         <div class="main" @click="${this.togglePlayback}">
           <sl-icon-button
-            name="skip-backward"
-            @click="${this.seekBack}"
+            library="material"
+            name="replay_30"
+            @click="${this.seekBack30}"
           ></sl-icon-button>
           <sl-icon-button
-            name="skip-forward"
-            @click="${this.seekForward}"
+            library="material"
+            name="replay_10"
+            @click="${this.seekBack10}"
+          ></sl-icon-button>
+          <sl-icon-button
+            class="togglePlayback"
+            name="${toggleIcon}"
+            @click="${this.togglePlayback}"
+          ></sl-icon-button>
+          <sl-icon-button
+            library="material"
+            name="forward_10"
+            @click="${this.seekForward30}"
+          ></sl-icon-button>
+          <sl-icon-button
+            library="material"
+            name="forward_30"
+            @click="${this.seekForward10}"
           ></sl-icon-button>
         </div>
         <div class="controls">
