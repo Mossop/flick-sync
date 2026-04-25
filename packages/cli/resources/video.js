@@ -85,7 +85,11 @@ export class VideoPlayer extends LitElement {
         font-size: 200%;
 
         sl-icon-button::part(base) {
-          color: var(--sl-color-neutral-1000);
+          color: var(--sl-color-neutral-800);
+        }
+
+        sl-icon-button::part(base):hover {
+          color: var(--sl-color-primary-800);
         }
 
         .togglePlayback {
