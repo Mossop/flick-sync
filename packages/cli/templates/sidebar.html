@@ -4,39 +4,39 @@
 {% if let Some(sidebar) = sidebar %}
 <body hx-ext="sse,morph" sse-connect="/events" class="sidebar" hx-target="#content" hx-select="#content" hx-swap="outerHTML">
   <div id="banner">
-    <sl-icon-button name="list" onclick="openSidebar()"></sl-icon-button>
+    <sl-icon-button library="material" name="menu" onclick="openSidebar()"></sl-icon-button>
     <img id="icon" alt="" src="/resources/logo.svg">
   </div>
   <div id="sidebar-container">
     <aside id="sidebar" hx-boost="true">
-      <div id="sidebar-toggle" class="sidebar-item"><sl-icon-button name="arrow-return-left" onclick="closeSidebar()"></sl-icon-button></div>
-      <a class="sidebar-item link-item" href="/"><sl-icon name="bookmark"></sl-icon><span>On Deck</span></a>
+      <div id="sidebar-toggle" class="sidebar-item"><sl-icon-button library="material" name="chevron_left" onclick="closeSidebar()"></sl-icon-button></div>
+      <a class="sidebar-item link-item" href="/"><sl-icon library="material" name="bookmark_border"></sl-icon><span>On Deck</span></a>
       {% for library in sidebar.libraries %}
         <a class="sidebar-item link-item link-prefix" href="/library/{{ library.server }}/{{ library.id }}">
           {% if library.library_type == LibraryType::Movie %}
-            <sl-icon name="film"></sl-icon>
+            <sl-icon library="material" name="local_movies_outline"></sl-icon>
           {% else %}
-            <sl-icon name="tv"></sl-icon>
+            <sl-icon library="material" name="tv"></sl-icon>
           {% endif %}
           <span>{{ library.title }}</span>
         </a>
       {% endfor %}
       {% for playlist in sidebar.playlists %}
         <a class="sidebar-item link-item link-prefix" href="/playlist/{{ playlist.server }}/{{ playlist.id }}" >
-          <sl-icon name="music-note-list"></sl-icon>
+          <sl-icon library="material" name="collections_outline"></sl-icon>
           <span>{{ playlist.title }}</span>
         </a>
       {% endfor %}
       <cast-icon></cast-icon>
       <a class="sidebar-item link-item" href="/syncs">
-        <sl-icon name="list-check"></sl-icon><span>Sync List</span>
+        <sl-icon library="material" name="checklist"></sl-icon><span>Sync List</span>
       </a>
       <a class="sidebar-item link-item" href="/status">
         <div id="sync-throbber" hx-target="#sync-throbber" sse-swap="sync-status" hx-swap="innerHTML">
           {% if sidebar.is_syncing %}
-            <sl-icon id="spinner" class="spinning" name="arrow-repeat"></sl-icon><span>Syncing</span>
+            <sl-icon id="spinner" class="spinning" library="material" name="sync"></sl-icon><span>Syncing</span>
           {% else %}
-            <sl-icon id="spinner" class="paused" name="arrow-repeat"></sl-icon><span>Status</span>
+            <sl-icon id="spinner" class="paused" library="material" name="sync"></sl-icon><span>Status</span>
           {% endif %}
         </div>
       </a>

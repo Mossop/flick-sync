@@ -14,7 +14,7 @@
         <div>{{ server.duration }}</div>
         <div>{{ server.percent|fmt("{:.0}") }}%</div>
         <sl-format-bytes value="{{ server.size }}"></sl-format-bytes>
-        <sl-icon-button hx-delete="/sync/{{ server.id }}" name="trash3" label="Delete"></sl-icon-button>
+        <sl-icon-button hx-delete="/sync/{{ server.id }}" library="material" name="delete" label="Delete"></sl-icon-button>
       </div>
     </div>
     <table class="sync-table">
@@ -42,7 +42,7 @@
               <td class="duration">{{ sync.duration }}</td>
               <td class="completion">{{ sync.percent|fmt("{:.0}") }}%</td>
               <td class="size"><sl-format-bytes value="{{ sync.size }}"></sl-format-bytes></td>
-              <td class="buttons"><sl-icon-button hx-delete="/sync/{{ server.id }}/{{ sync.id }}" name="trash3" label="Delete"></sl-icon-button></td>
+              <td class="buttons"><sl-icon-button hx-delete="/sync/{{ server.id }}/{{ sync.id }}" library="material" name="delete" label="Delete"></sl-icon-button></td>
             </tr>
           {% endfor %}
         </tbody>
@@ -57,7 +57,7 @@
           {% endfor %}
         </sl-select>
       </div>
-      <sl-button type="submit" size="small" circle><sl-icon name="plus-lg"></sl-icon></sl-button>
+      <sl-button type="submit" size="small" circle><sl-icon library="material" name="plus"></sl-icon></sl-button>
     </form>
   </sl-card>
 {% endfor %}

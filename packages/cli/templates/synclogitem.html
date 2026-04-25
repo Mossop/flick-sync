@@ -1,12 +1,12 @@
 {% if message_type == "success" %}
 <sl-alert variant="success" open>
-  <sl-icon slot="icon" name="check2-circle"></sl-icon>
+  <sl-icon slot="icon" library="material" name="check_circle"></sl-icon>
 {% elif message_type == "error" %}
 <sl-alert variant="danger" open>
-  <sl-icon slot="icon" name="exclamation-octagon"></sl-icon>
+  <sl-icon slot="icon" library="material" name="warning_round"></sl-icon>
 {% else %}
 <sl-alert variant="primary" open>
-  <sl-icon slot="icon" name="info-circle"></sl-icon>
+  <sl-icon slot="icon" library="material" name="info"></sl-icon>
 {% endif %}
   <div class="log-item">
     <div class="message">{{ message }}</div>

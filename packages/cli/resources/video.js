@@ -354,6 +354,8 @@ export class VideoPlayer extends LitElement {
       return;
     }
 
+    event.stopPropagation();
+
     if (this.isCasting) {
       this.castController.playOrPause();
     } else if (this.isPlaying) {
@@ -560,10 +562,8 @@ export class VideoPlayer extends LitElement {
   }
 
   render() {
-    let toggleIcon = this.isPlaying ? "pause-fill" : "play-fill";
-    let fullscreenIcon = this.isFullscreen
-      ? "fullscreen-exit"
-      : "arrows-fullscreen";
+    let toggleIcon = this.isPlaying ? "pause_round" : "play_arrow_round";
+    let fullscreenIcon = this.isFullscreen ? "fullscreen_exit" : "fullscreen";
 
     let playedPercent = (100 * this.currentTime) / this.duration;
 
@@ -591,6 +591,7 @@ export class VideoPlayer extends LitElement {
           ></sl-icon-button>
           <sl-icon-button
             class="togglePlayback"
+            library="material"
             name="${toggleIcon}"
             @click="${this.togglePlayback}"
           ></sl-icon-button>
@@ -607,6 +608,7 @@ export class VideoPlayer extends LitElement {
         </div>
         <div class="controls">
           <sl-icon-button
+            library="material"
             name="${toggleIcon}"
             @click="${this.togglePlayback}"
           ></sl-icon-button>
@@ -623,6 +625,7 @@ export class VideoPlayer extends LitElement {
             ? html`<google-cast-launcher></google-cast-launcher>`
             : nothing}
           <sl-icon-button
+            library="material"
             name="${fullscreenIcon}"
             @click="${this.toggleFullscreen}"
           ></sl-icon-button>

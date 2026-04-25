@@ -1,12 +1,12 @@
 <div class="progress">
   <p>
     {% if is_download %}
-      <sl-icon name="cloud-download"></sl-icon> Downloading
+      <sl-icon library="material" name="cloud_download"></sl-icon> Downloading
     {% else %}
-      <sl-icon name="gpu-card"></sl-icon> Transcoding
+      <sl-icon library="material" name="change_circle"></sl-icon> Transcoding
     {% endif %}
     {{ video }}...
-  </p>
+  </p>d
   {% if let Some(length) = length %}
     <sl-progress-bar id="{{ id }}" value="{{ (position * 100) / length }}">
       {% if is_download %}

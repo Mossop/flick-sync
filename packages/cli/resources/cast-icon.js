@@ -22,7 +22,7 @@ export class CastIcon extends LitElement {
     }
     castContext.addEventListener(
       cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
-      this.castContextEventListener
+      this.castContextEventListener,
     );
   };
 
@@ -64,7 +64,7 @@ export class CastIcon extends LitElement {
         cast.framework.SessionEventType.MEDIA_SESSION,
         (event) => {
           this.updateMediaSession(event.mediaSession?.media);
-        }
+        },
       );
 
       this.updateMediaSession(session.getMediaSession()?.media);
@@ -102,7 +102,8 @@ export class CastIcon extends LitElement {
 
     return html`
       <a class="sidebar-item" href="${this.url}">
-        <sl-icon name="broadcast"></sl-icon> ${this.title}
+        <sl-icon library="material" name="cast_connected"></sl-icon>
+        ${this.title}
       </a>
     `;
   }

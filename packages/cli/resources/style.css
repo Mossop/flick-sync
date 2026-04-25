@@ -71,7 +71,7 @@ body.sidebar {
     }
 
     & > div {
-    display: flex;
+      display: flex;
       flex-direction: row;
       justify-content: start;
       align-items: center;
@@ -79,6 +79,10 @@ body.sidebar {
 
     sl-icon {
       margin-inline-end: var(--sl-spacing-x-small);
+    }
+
+    span {
+      flex: 1;
     }
   }
 
