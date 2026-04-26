@@ -103,7 +103,7 @@ export class CastIcon extends LitElement {
     return html`
       <a class="sidebar-item" href="${this.url}">
         <sl-icon library="material" name="cast_connected"></sl-icon>
-        ${this.title}
+        <span>${this.title}</span>
       </a>
     `;
   }
