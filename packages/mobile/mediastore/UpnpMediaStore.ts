@@ -2,9 +2,48 @@ import { isDownloaded, StateDecoder } from "../state";
 import { Collection, Episode, Movie, Show, Video } from "../state/wrappers";
 import { StateBasedMediaStore } from "./MediaStore";
 
+const NETWORK_TIMEOUT = 5000;
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
+async function fetchWithTimeout(
+  input: URL | RequestInfo,
+  init?: RequestInit,
+): Promise<Response> {
+  let controller = new AbortController();
+  let timeout = setTimeout(() => controller.abort(), NETWORK_TIMEOUT);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export class UpnpMediaStore extends StateBasedMediaStore {
   static async init(storeLocation: URL | string): Promise<UpnpMediaStore> {
-    let response = await fetch(new URL("state.json", storeLocation));
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(new URL("state.json", storeLocation));
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(`Timed out fetching state from ${storeLocation}`);
+      }
+
+      throw new Error(
+        `Failed to connect to ${storeLocation}: ${errorMessage(error)}`,
+      );
+    }
+
     if (!response.ok) {
       throw new Error(
         `Failed to fetch state from ${storeLocation}: ${response.status}`,
@@ -64,9 +103,23 @@ export class UpnpMediaStore extends StateBasedMediaStore {
       String(video.playPosition / 1000),
     );
 
-    let response = await fetch(updateUrl, {
-      method: "POST",
-    });
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(updateUrl, {
+        method: "POST",
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        console.warn("Timed out persisting playback state");
+        return;
+      }
+
+      console.warn(
+        `Error while persisting playback state: ${errorMessage(error)}`,
+      );
+
+      return;
+    }
 
     if (!response.ok) {
       console.warn(`Failed to persist playback state: HTTP ${response.status}`);

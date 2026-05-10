@@ -222,6 +222,8 @@ async function initStore() {
       return;
     }
 
+    console.log(`Loading previous media store from ${storeLocation}`);
+
     let mediaStore = await MediaStore.loadStore(storeLocation);
     if (mediaStore) {
       await updateMediaStore(mediaStore);
