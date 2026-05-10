@@ -190,7 +190,7 @@ impl ServerTemplate {
                 });
             }
 
-            syncs.sort_by(|sa, sb| uniform_title(&sa.name).cmp(&uniform_title(&sb.name)));
+            syncs.sort_by_key(|sa| uniform_title(&sa.name));
 
             servers.push(ServerTemplate {
                 id: server.id().to_owned(),
@@ -207,7 +207,7 @@ impl ServerTemplate {
             });
         }
 
-        servers.sort_by(|sa, sb| uniform_title(&sa.name).cmp(&uniform_title(&sb.name)));
+        servers.sort_by_key(|sa| uniform_title(&sa.name));
 
         servers
     }

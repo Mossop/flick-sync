@@ -108,7 +108,8 @@ export class VideoPlayer extends LitElement {
         --disconnected-color: var(--sl-color-neutral-600);
       }
 
-      sl-icon-button {
+      sl-icon-button,
+      google-cast-launcher {
         font-size: 200%;
       }
 
@@ -125,7 +126,9 @@ export class VideoPlayer extends LitElement {
       }
 
       google-cast-launcher {
-        height: 1.5em;
+        padding: var(--sl-spacing-x-small);
+        width: 1em;
+        height: 1em;
 
         &:hover {
           --connected-color: var(--sl-color-primary-700);
@@ -628,11 +631,13 @@ export class VideoPlayer extends LitElement {
           ${this.isCastAvailable
             ? html`<google-cast-launcher></google-cast-launcher>`
             : nothing}
-          <sl-icon-button
-            library="material"
-            name="${fullscreenIcon}"
-            @click="${this.toggleFullscreen}"
-          ></sl-icon-button>
+          ${!this.isCasting
+            ? html`<sl-icon-button
+                library="material"
+                name="${fullscreenIcon}"
+                @click="${this.toggleFullscreen}"
+              ></sl-icon-button>`
+            : nothing}
         </div>
       </div>
     `;

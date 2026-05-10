@@ -365,7 +365,7 @@ impl Show {
                 .filter(|ss| ss.show == self.id)
                 .collect();
 
-            season_states.sort_by(|sa, sb| sa.index.cmp(&sb.index));
+            season_states.sort_by_key(|sa| sa.index);
 
             season_states
                 .into_iter()

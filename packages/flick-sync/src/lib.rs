@@ -274,10 +274,8 @@ impl FlickSync {
                             items.insert(next);
                         }
                     }
-                    PlaybackState::InProgress { .. } => {
-                        if video.is_downloaded().await {
-                            items.insert(video);
-                        }
+                    PlaybackState::InProgress { .. } if video.is_downloaded().await => {
+                        items.insert(video);
                     }
                     _ => {}
                 }
