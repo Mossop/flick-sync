@@ -27,7 +27,8 @@ use crate::{
     serve::{
         ConnectionInfo, Event, ServiceData,
         events::{
-            ProgressBarTemplate, ServerTemplate, SyncLogTemplate, SyncProgressBar, Thumbnail,
+            ProgressBarTemplate, ServerTemplate, SyncLogTemplate, SyncProgressBar,
+            SyncProgressTemplate, Thumbnail,
         },
     },
     shared::{ByteRangeResponse, disk_info_for_path},
@@ -105,15 +106,10 @@ pub(super) async fn status_page(
         sidebar: Option<Sidebar>,
         log: Vec<SyncLogTemplate>,
         progress_bars: Vec<ProgressBarTemplate>,
+        total_progress: Option<SyncProgressTemplate>,
     }
 
-    let mut template = SyncTemplate {
-        sidebar,
-        log: Vec::new(),
-        progress_bars: Vec::new(),
-    };
-
-    let (log, progress) = {
+    let (log, progress, completed, total) = {
         let status = service_data.status.lock().unwrap();
         (
             status.log.clone(),
@@ -128,7 +124,20 @@ pub(super) async fn status_page(
                     }
                 })
                 .collect::<Vec<SyncProgressBar>>(),
+            status.complete_jobs,
+            status.total_jobs,
         )
+    };
+
+    let mut template = SyncTemplate {
+        sidebar,
+        log: Vec::new(),
+        progress_bars: Vec::new(),
+        total_progress: if completed < total {
+            Some(SyncProgressTemplate { completed, total })
+        } else {
+            None
+        },
     };
 
     for item in log.iter().rev() {

@@ -431,8 +431,8 @@ impl SyncLogItem {
 #[derive(Template)]
 #[template(path = "syncprogress.html")]
 pub(crate) struct SyncProgressTemplate {
-    completed: u64,
-    total: u64,
+    pub(crate) completed: u64,
+    pub(crate) total: u64,
 }
 
 #[derive(Template)]

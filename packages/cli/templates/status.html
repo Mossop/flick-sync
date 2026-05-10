@@ -13,5 +13,9 @@
     {% for progress in progress_bars %}
       {{ progress|safe }}
     {% endfor %}
+
+    {% if let Some(total) = total_progress %}
+      {{ total|safe }}
+    {% endif %}
   </div>
 {% endblock %}
