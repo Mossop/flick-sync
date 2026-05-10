@@ -121,7 +121,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     (position: number): void => {
       let actualPosition = Math.min(Math.max(position, 0), video.totalDuration);
 
-      player.currentTime = actualPosition / 1000;
+      player.seekBy(actualPosition / 1000 - player.currentTime);
       player.play();
     },
     [video, player],
@@ -172,6 +172,34 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     if (needsPersist(currentState.current, lastUpdate.current)) {
       setPlayState(currentState.current);
     }
+  });
+
+  useEventListener(player, "statusChange", ({ status, error }) => {
+    console.log(`Video player status changed to ${status}`);
+
+    if (status == "error") {
+      let errorMessage = error?.message ?? "Unknown video playback error";
+      dispatchSetError(`Failed to play ${video.title}: ${errorMessage}`);
+      setPlaybackStatus((prev) => ({
+        ...prev,
+        isPlaying: false,
+      }));
+      return;
+    }
+
+    if (status == "idle" || status == "loading") {
+      setPlaybackStatus((prev) => ({
+        ...prev,
+        isPlaying: false,
+      }));
+      return;
+    }
+
+    setPlaybackStatus((prev) => ({
+      ...prev,
+      position: player.currentTime * 1000,
+      duration: video.totalDuration,
+    }));
   });
 
   useEventListener(player, "playingChange", ({ isPlaying }) => {
@@ -247,6 +275,7 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
       <View style={styles.inner}>
         <SchemeOverride scheme="dark" />
         <VideoView
+          key={uri}
           player={player}
           style={styles.video}
           contentFit="contain"
