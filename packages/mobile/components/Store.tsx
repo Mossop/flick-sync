@@ -35,8 +35,14 @@ export interface ListSetting {
   ordering: Ordering;
 }
 
+export enum ViewSize {
+  Safe,
+  Zoom,
+}
+
 export interface SettingsState {
   listSettings: Record<string, ListSetting>;
+  viewSize?: ViewSize;
 }
 
 export interface StoreState {
@@ -105,6 +111,10 @@ export function useListSetting(
   return settings.listSettings[id] ?? defaultSetting(container);
 }
 
+export function useSettings(): SettingsState {
+  return useSelector((storeState) => storeState.settings);
+}
+
 const setMediaStore = createAction<{
   mediaStore: MediaStore;
   settings: SettingsState;
@@ -114,6 +124,7 @@ export const reportError = createAction<string>("reportError");
 export const clearError = createAction("clearError");
 export const setListSettings =
   createAction<[id: string, settings: ListSetting]>("setListSettings");
+export const setViewSize = createAction<ViewSize>("setViewSize");
 export const setDiscoveredServers = createAction<string[]>(
   "setDiscoveredServers",
 );
@@ -141,6 +152,9 @@ const reducer = createReducer<StoreState>(
       })
       .addCase(setListSettings, (state, { payload: [id, settings] }) => {
         state.settings.listSettings[id] = settings;
+      })
+      .addCase(setViewSize, (state, { payload: viewSize }) => {
+        state.settings.viewSize = viewSize;
       })
       .addCase(setDiscoveredServers, (state, { payload }) => {
         state.discoveredServers = payload;

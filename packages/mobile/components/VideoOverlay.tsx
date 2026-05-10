@@ -15,6 +15,7 @@ import Scrubber from "./Scrubber";
 import { PADDING } from "../modules/styles";
 import { pad } from "../modules/util";
 import { AppRoutes } from "./AppNavigator";
+import { ViewSize } from "./Store";
 
 export interface PlaybackStatus {
   position: number;
@@ -57,6 +58,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  scrubber: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
 });
 
 function usePrefixedCallbackBuilder(
@@ -86,7 +91,7 @@ function useOverlayState(): [
   ) => (...args: A) => R,
 ] {
   let [visible, setVisible] = useState(true);
-  let timeout = useRef<NodeJS.Timeout | null>(null);
+  let timeout = useRef<number | null>(null);
 
   let initTimeout = (duration?: number) => {
     if (timeout.current) {
@@ -155,15 +160,19 @@ export function Overlay({
   video,
   setPlaying,
   status,
+  viewSize,
   goPrevious,
   goNext,
+  setViewSize,
 }: {
   seek: (position: number) => void;
   video: Video;
+  viewSize: ViewSize;
   setPlaying: (playing: boolean) => void;
   status: PlaybackStatus;
   goPrevious?: () => void;
   goNext?: () => void;
+  setViewSize: (newSize: ViewSize) => void;
 }) {
   let navigation = useNavigation<NativeStackNavigationProp<AppRoutes>>();
   let [visible, updateState, useOverlayAction] = useOverlayState();
@@ -211,6 +220,10 @@ export function Overlay({
     },
     [seek],
   );
+
+  let toggleViewSize = useCallback(() => {
+    setViewSize(viewSize == ViewSize.Zoom ? ViewSize.Safe : ViewSize.Zoom);
+  }, [setViewSize, viewSize]);
 
   return (
     <Pressable style={styles.overlayContainer} onPress={() => updateState()}>
@@ -268,13 +281,16 @@ export function Overlay({
               />
             )}
           </View>
-          <Scrubber
-            nextPosition={nextPosition}
-            position={status.position}
-            totalDuration={status.duration}
-            onScrubbing={onScrubbing}
-            onScrubbingComplete={onScrubbingComplete}
-          />
+          <View style={styles.scrubber}>
+            <Scrubber
+              nextPosition={nextPosition}
+              position={status.position}
+              totalDuration={status.duration}
+              onScrubbing={onScrubbing}
+              onScrubbingComplete={onScrubbingComplete}
+            />
+            <IconButton icon="monitor-screenshot" onPress={toggleViewSize} />
+          </View>
         </Animated.View>
       )}
     </Pressable>

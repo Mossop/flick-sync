@@ -12,7 +12,13 @@ import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { AppRoutes, AppScreenProps } from "../components/AppNavigator";
 import { SchemeOverride } from "../components/ThemeProvider";
 import { defer } from "../modules/util";
-import { reportError, useAction } from "../components/Store";
+import {
+  reportError,
+  setViewSize,
+  useAction,
+  useSettings,
+  ViewSize,
+} from "../components/Store";
 import { useMediaStore, useVideo } from "../mediastore";
 import { useSsdp } from "../mediastore/SsdpService";
 import { PlaybackState } from "../state/base";
@@ -25,6 +31,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "black",
   },
   inner: {
     width: "100%",
@@ -54,6 +61,8 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
   let mediaStore = useMediaStore();
   let dispatchSetError = useAction(reportError);
   let { suspend, resume } = useSsdp();
+  let viewSize = useSettings().viewSize ?? ViewSize.Safe;
+  let dispatchSetViewSize = useAction(setViewSize);
 
   let { server, queue, index } = route.params;
 
@@ -112,7 +121,6 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     (position: number): void => {
       let actualPosition = Math.min(Math.max(position, 0), video.totalDuration);
 
-      // eslint-disable-next-line react-hooks/immutability
       player.currentTime = actualPosition / 1000;
       player.play();
     },
@@ -224,8 +232,18 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     return undefined;
   }, [navigation, index, queue]);
 
+  let updateViewSize = useCallback(
+    (viewSize: ViewSize) => {
+      dispatchSetViewSize(viewSize);
+    },
+    [dispatchSetViewSize],
+  );
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: "black" }]}>
+    <SafeAreaView
+      edges={viewSize == ViewSize.Zoom ? [] : undefined}
+      style={styles.container}
+    >
       <View style={styles.inner}>
         <SchemeOverride scheme="dark" />
         <VideoView
@@ -235,11 +253,13 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
           nativeControls={false}
         />
         <Overlay
+          setViewSize={updateViewSize}
           goPrevious={previous}
           goNext={next}
           seek={seek}
           status={playbackStatus}
           setPlaying={setPlaying}
+          viewSize={viewSize}
           video={video}
         />
       </View>

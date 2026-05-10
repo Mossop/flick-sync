@@ -15,7 +15,7 @@ const SCRUBBER_SIZE = BAR_HEIGHT * 3;
 
 const styles = StyleSheet.create({
   root: {
-    width: "100%",
+    flex: 1,
     flexDirection: "column",
     alignItems: "stretch",
     justifyContent: "flex-start",
