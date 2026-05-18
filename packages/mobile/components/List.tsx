@@ -406,7 +406,11 @@ function Thumbnail({ item, type }: { item: ChildItem; type: ThumbnailType }) {
     type == ThumbnailType.Poster ? styles.posterThumb : styles.videoThumb;
 
   if (!uri) {
-    return <View style={style} />;
+    return (
+      <View style={style}>
+        <MaterialIcons name="broken-image" size={Math.min(style.width, style.height) * 0.5} color="#999999" />
+      </View>
+    );
   }
 
   return (
