@@ -605,12 +605,12 @@ export class VideoPlayer extends LitElement {
           <sl-icon-button
             library="material"
             name="forward_10"
-            @click="${this.seekForward30}"
+            @click="${this.seekForward10}"
           ></sl-icon-button>
           <sl-icon-button
             library="material"
             name="forward_30"
-            @click="${this.seekForward10}"
+            @click="${this.seekForward30}"
           ></sl-icon-button>
         </div>
         <div class="controls">
