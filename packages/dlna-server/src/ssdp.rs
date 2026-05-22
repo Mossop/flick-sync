@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env::consts,
     fmt,
     io::{self, ErrorKind},
@@ -607,7 +607,7 @@ impl SsdpTask {
             ));
         }
 
-        debug!(local_address = %interface.address(), count = messages.len(), "Sending SSDP announcements");
+        trace!(local_address = %interface.address(), count = messages.len(), "Sending SSDP announcements");
 
         Self::send_messages(&socket, interface, target, messages).await;
     }
@@ -704,7 +704,7 @@ impl SsdpTask {
             return;
         }
 
-        debug!(local_address = %local_interface.address(), remote_address = %address, count = messages.len(), "Sending notification responses");
+        trace!(local_address = %local_interface.address(), remote_address = %address, count = messages.len(), "Sending notification responses");
 
         let socket = match local_interface.build_unicast_socket() {
             Ok(s) => s,
@@ -728,20 +728,60 @@ impl SsdpTask {
         if is_ipv4 {
             socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, SSDP_PORT)).into())?;
 
+            let mut connected = false;
+            let mut last_error: Option<io::Error> = None;
+            let mut seen_indexes: HashSet<u32> = HashSet::new();
+
             for interface in interfaces {
-                if let IpAddr::V4(ipaddr) = interface.address() {
-                    socket.join_multicast_v4(&SSDP_IPV4, &ipaddr)?;
+                if interface.multicast()
+                    && !seen_indexes.contains(&interface.index())
+                    && let IpAddr::V4(ipaddr) = interface.address()
+                {
+                    match socket.join_multicast_v4(&SSDP_IPV4, &ipaddr) {
+                        Ok(_) => {
+                            seen_indexes.insert(interface.index());
+                            connected = true;
+                        }
+                        Err(e) => {
+                            debug!(address = %interface.address(), "Failed to bind interface");
+                            last_error = Some(e);
+                        }
+                    }
                 }
+            }
+
+            if !connected && let Some(error) = last_error {
+                return Err(error);
             }
 
             socket.set_multicast_loop_v4(false)?;
         } else {
             socket.bind(&SocketAddr::from((Ipv6Addr::UNSPECIFIED, SSDP_PORT)).into())?;
 
+            let mut connected = false;
+            let mut last_error: Option<io::Error> = None;
+            let mut seen_indexes: HashSet<u32> = HashSet::new();
+
             for interface in interfaces {
-                if !interface.is_ipv4() {
-                    socket.join_multicast_v6(&SSDP_IPV6, interface.index())?;
+                if interface.multicast()
+                    && !seen_indexes.contains(&interface.index())
+                    && !interface.is_ipv4()
+                {
+                    match socket.join_multicast_v6(&SSDP_IPV6, interface.index()) {
+                        Ok(_) => {
+                            seen_indexes.insert(interface.index());
+                            connected = true;
+                        }
+                        Err(e) => {
+                            debug!(address = %interface.address(), index=interface.index(), "Failed to bind interface");
+                            last_error = Some(e);
+                        }
+                    }
                 }
+            }
+
+            if !connected && let Some(error) = last_error {
+                return Err(error);
             }
 
             socket.set_multicast_loop_v6(false)?;
@@ -822,7 +862,7 @@ impl SsdpTask {
                             }
 
                             if let SsdpMessage::MSearch { search_target, .. } = &message {
-                                debug!(?message, local_address = %local_interface.address(), remote_address = %info.addr_src, "Received SSDP message");
+                                trace!(?message, local_address = %local_interface.address(), remote_address = %info.addr_src, "Received SSDP message");
 
                                 self.send_search_response(
                                     &local_interface,
