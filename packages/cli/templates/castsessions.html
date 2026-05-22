@@ -1,0 +1,6 @@
+{% for (url, title) in media %}
+  <a class="sidebar-item" href="{{ url }}" hx-target="#content" hx-select="#content" hx-swap="outerHTML">
+    <sl-icon library="material" name="cast_connected"></sl-icon>
+    <span>{{ title }}</span>
+  </a>
+{% endfor %}

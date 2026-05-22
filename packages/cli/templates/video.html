@@ -6,16 +6,16 @@
   <div id="video-container">
     <video-player
       currentTime="{{ playback_position }}"
-      videoTitle="{{ title }}"
-      airDate="{{ air_date|json }}"
+      server="{{ server }}"
+      video="{{ video }}"
       image="{{ image }}"
-      show="{{ show|json }}"
-      season="{{ season|json }}"
-      episode="{{ episode|json }}"
       url="{{ url }}"
       mimeType="{{ mime_type }}"
       duration="{{ total_duration }}"
     >
+      <sl-menu slot="cast-devices" hx-target="this" hx-swap="innerHTML" sse-swap="cast-devices">
+        {{ cast_devices|safe }}
+      </sl-menu>
     </video-player>
   </div>
 {% endblock %}

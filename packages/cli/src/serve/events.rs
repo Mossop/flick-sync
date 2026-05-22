@@ -5,7 +5,10 @@ use flick_sync::{Collection, FlickSync, PlaybackState, Season, Show, Video, Vide
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tracing::warn;
 
-use crate::shared::uniform_title;
+use crate::{
+    serve::cast::{AvailableDevices, CastSessions},
+    shared::uniform_title,
+};
 
 #[derive(Template)]
 #[template(path = "thumbnail.html")]
@@ -225,6 +228,8 @@ pub(super) enum Event {
         bars: Vec<SyncProgressBar>,
     },
     ThumbnailUpdate(Thumbnail),
+    CastDevices(AvailableDevices),
+    CastingMedia(CastSessions),
 }
 
 impl Event {
@@ -235,6 +240,8 @@ impl Event {
             Self::SyncChange => "sync-change".to_owned(),
             Self::Progress { .. } => "sync-progress".to_owned(),
             Self::ThumbnailUpdate(thumb) => format!("thumbnail-{}", thumb.id),
+            Self::CastDevices(_) => "cast-devices".to_owned(),
+            Self::CastingMedia(_) => "casting-media".to_owned(),
         }
     }
 
@@ -295,6 +302,8 @@ impl Event {
                 let template = ThumbnailTemplate { thumbnail: thumb };
                 template.render()
             }
+            Self::CastDevices(devices) => devices.render(),
+            Self::CastingMedia(sessions) => sessions.render(),
         }
     }
 

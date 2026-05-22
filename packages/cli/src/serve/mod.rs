@@ -26,14 +26,19 @@ use tokio::{
     time,
 };
 use tokio_stream::wrappers::SignalStream;
+use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use crate::{
     Console, Result, Runnable,
     dlna::build_dlna,
-    serve::events::{Event, SyncLogItem, SyncLogMessage, SyncProgressBar},
+    serve::{
+        cast::CastManager,
+        events::{Event, SyncLogItem, SyncLogMessage, SyncProgressBar},
+    },
 };
 
+mod cast;
 mod events;
 mod middleware;
 mod services;
@@ -420,6 +425,7 @@ fn on_connect(connection: &dyn Any, data: &mut Extensions) {
 struct ServiceData {
     flick_sync: FlickSync,
     http_port: u16,
+    cast_manager: CastManager,
     status: Arc<Mutex<SyncStatus>>,
     event_sender: broadcast::Sender<Event>,
     sync_trigger: Arc<Notify>,
@@ -440,20 +446,27 @@ impl Runnable for Serve {
         let status: Arc<Mutex<SyncStatus>> = Default::default();
         let sync_trigger = Arc::new(Notify::new());
 
-        let background_task = if !self.disable_syncing {
-            Some(tokio::spawn(background_task(
-                flick_sync.clone(),
-                status.clone(),
-                event_sender.clone(),
-                sync_trigger.clone(),
-                !self.disable_syncing,
-            )))
-        } else {
-            None
-        };
+        let cancellation = CancellationToken::new();
+
+        if !self.disable_syncing {
+            tokio::spawn(
+                cancellation
+                    .clone()
+                    .run_until_cancelled_owned(background_task(
+                        flick_sync.clone(),
+                        status.clone(),
+                        event_sender.clone(),
+                        sync_trigger.clone(),
+                        !self.disable_syncing,
+                    )),
+            );
+        }
+
+        let cast_manager = CastManager::new(flick_sync.clone(), event_sender.clone());
 
         let service_data = ServiceData {
             flick_sync,
+            cast_manager: cast_manager.clone(),
             http_port: port,
             status,
             event_sender,
@@ -467,6 +480,7 @@ impl Runnable for Serve {
                 .wrap(from_fn(middleware::middleware))
                 .service(services::state)
                 .service(services::events)
+                .service(cast::cast)
                 .service(services::resources)
                 .service(services::thumbnail_image)
                 .service(services::playlist_contents)
@@ -506,7 +520,7 @@ impl Runnable for Serve {
 
         let http_handle = http_server.handle();
 
-        tokio::spawn(http_server);
+        tokio::spawn(cancellation.clone().run_until_cancelled_owned(http_server));
 
         loop {
             select! {
@@ -516,10 +530,8 @@ impl Runnable for Serve {
             }
         }
 
-        if let Some(background_task) = background_task {
-            background_task.abort();
-        }
-
+        cast_manager.destroy();
+        cancellation.cancel();
         http_handle.stop(false).await;
         dlna_server.shutdown().await;
 

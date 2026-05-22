@@ -163,6 +163,14 @@ pub struct Server {
     connection: Arc<Mutex<Option<plex_api::Server>>>,
 }
 
+impl PartialEq for Server {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Server {}
+
 impl fmt::Debug for Server {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Server").field("id", &self.id).finish()

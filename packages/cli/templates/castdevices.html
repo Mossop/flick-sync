@@ -1,0 +1,10 @@
+{% if devices.is_empty() %}
+  <sl-menu-item disabled>Scanning...</sl-menu-item>
+{% else %}
+  {% for (uuid, is_casting, name) in devices %}
+    <sl-menu-item value="{{ uuid }}">
+      <sl-icon slot="prefix" library="material" name="{% if is_casting %}cast_connected{% else %}cast{% endif %}"></sl-icon>
+      {{ name }}
+    </sl-menu-item>
+  {% endfor %}
+{% endif %}

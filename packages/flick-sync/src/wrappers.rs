@@ -569,7 +569,7 @@ pub enum TransferState {
     Downloaded,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct VideoPart {
     server: Server,
     id: String,

@@ -27,7 +27,9 @@
           <span>{{ playlist.title }}</span>
         </a>
       {% endfor %}
-      <cast-icon></cast-icon>
+      <div id="cast-devices" hx-target="this" hx-swap="innerHTML" sse-swap="casting-media">
+        {{ cast_sessions|safe }}
+      </div>
       <a class="sidebar-item link-item" href="/syncs">
         <sl-icon library="material" name="checklist"></sl-icon><span>Sync List</span>
       </a>

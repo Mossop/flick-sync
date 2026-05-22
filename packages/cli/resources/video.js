@@ -1,6 +1,7 @@
 import { LitElement, html, css, nothing, ref, keyed, classMap } from "lit";
 import shoelaceStyles from "@shoelace/themes/dark.styles.js";
 import "@shoelace/components/icon-button/icon-button.js";
+import "@shoelace/components/dropdown/dropdown.js";
 
 function pad(val) {
   if (val > 9) {
@@ -108,8 +109,7 @@ export class VideoPlayer extends LitElement {
         --disconnected-color: var(--sl-color-neutral-600);
       }
 
-      sl-icon-button,
-      google-cast-launcher {
+      sl-icon-button {
         font-size: 200%;
       }
 
@@ -122,17 +122,6 @@ export class VideoPlayer extends LitElement {
 
         &.end {
           text-align: start;
-        }
-      }
-
-      google-cast-launcher {
-        padding: var(--sl-spacing-x-small);
-        width: 1em;
-        height: 1em;
-
-        &:hover {
-          --connected-color: var(--sl-color-primary-700);
-          --disconnected-color: var(--sl-color-neutral-700);
         }
       }
 
@@ -175,14 +164,10 @@ export class VideoPlayer extends LitElement {
     currentTime: { type: Number },
     isPlaying: { state: true },
     isFullscreen: { state: true },
-    isCastAvailable: { state: true },
     isCasting: { state: true },
-    airDate: { type: Object },
+    server: { type: String },
+    video: { type: String },
     image: { type: String },
-    videoTitle: { type: String },
-    show: { type: Object },
-    season: { type: Object },
-    episode: { type: Object },
     url: { type: String },
     mimeType: { type: String },
     duration: { type: Number },
@@ -194,10 +179,8 @@ export class VideoPlayer extends LitElement {
     this.lastReportedTime = 0;
     this.isPlaying = false;
     this.onFullscreenChanged();
-    this.isCastAvailable = window.castAvailable;
     this.isCasting = false;
     this.videoElement = null;
-    this.castSession = null;
 
     this.seekBack30 = (event) => this.seekPressed(event, -30);
     this.seekBack10 = (event) => this.seekPressed(event, -10);
@@ -205,104 +188,6 @@ export class VideoPlayer extends LitElement {
     this.seekForward30 = (event) => this.seekPressed(event, 30);
 
     this.addEventListener("fullscreenchange", () => this.onFullscreenChanged());
-  }
-
-  initCast = () => {
-    this.isCastAvailable = true;
-
-    let castContext = cast.framework.CastContext.getInstance();
-    if (castContext.getCurrentSession()) {
-      this.updateCastSession(castContext.getCurrentSession());
-    }
-    castContext.addEventListener(
-      cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
-      this.castContextEventListener,
-    );
-  };
-
-  castContextEventListener = (event) => {
-    this.updateCastSession(event.session);
-  };
-
-  castControllerEventListener = (event) => {
-    this.isPlaying = !this.castPlayer.isPaused;
-    this.updateTime(this.castPlayer.currentTime);
-  };
-
-  async updateCastSession(session) {
-    if (
-      session &&
-      [
-        cast.framework.SessionState.NO_SESSION,
-        cast.framework.SessionState.SESSION_START_FAILED,
-        cast.framework.SessionState.SESSION_ENDING,
-        cast.framework.SessionState.SESSION_ENDED,
-      ].includes(session.getSessionState())
-    ) {
-      session = null;
-    }
-
-    if (this.castSession == session) {
-      return;
-    }
-
-    if (this.castSession) {
-      this.castController.removeEventListener(
-        cast.framework.RemotePlayerEventType.ANY_CHANGE,
-        this.castControllerEventListener,
-      );
-      this.castPlayer = null;
-      this.castController = null;
-    }
-
-    this.castSession = session;
-
-    if (session) {
-      this.castPlayer = new cast.framework.RemotePlayer();
-      this.castController = new cast.framework.RemotePlayerController(
-        this.castPlayer,
-      );
-      this.castController.addEventListener(
-        cast.framework.RemotePlayerEventType.ANY_CHANGE,
-        this.castControllerEventListener,
-      );
-
-      this.isCasting = true;
-      this.classList.add("casting");
-
-      let castMedia = session.getMediaSession();
-      let mediaInfo = castMedia?.media;
-      let videoUrl = new URL(this.url, document.documentURI);
-
-      // Check if the current video is already playing
-      if (mediaInfo?.contentUrl == videoUrl.toString()) {
-        this.castControllerEventListener();
-
-        castMedia.getStatus(
-          null,
-          () => this.castControllerEventListener(),
-          (error) => {},
-        );
-      } else {
-        // Otherwise load it
-        let loadRequest = new chrome.cast.media.LoadRequest(
-          this.castMediaInfo(),
-        );
-        loadRequest.currentTime = this.currentTime;
-        loadRequest.autoplay = this.isPlaying;
-
-        await this.castSession.loadMedia(loadRequest);
-      }
-    } else {
-      this.castPlayer = null;
-      this.castController = null;
-
-      this.isCasting = false;
-      this.classList.remove("casting");
-
-      await this.updateComplete;
-      this.seek(this.currentTime);
-    }
   }
 
   renderedVideo(element) {
@@ -325,32 +210,16 @@ export class VideoPlayer extends LitElement {
   connectedCallback() {
     super.connectedCallback();
 
-    if (window.castAvailable) {
-      this.initCast();
-    } else {
-      document.addEventListener("cast-available", this.initCast, {
-        once: true,
-      });
+    let url = new URL(document.documentURI);
+    let castDevice = url.searchParams.get("cast");
+
+    if (castDevice) {
+      this.isCasting = true;
+      this.initiateCastConnection(castDevice);
     }
   }
 
   disconnectedCallback() {
-    document.removeEventListener("cast-available", this.initCast);
-
-    if (this.isCastAvailable) {
-      cast.framework.CastContext.getInstance().removeEventListener(
-        cast.framework.CastContextEventType.SESSION_STATE_CHANGED,
-        this.castContextEventListener,
-      );
-
-      if (this.castSession) {
-        this.castController.removeEventListener(
-          cast.framework.RemotePlayerEventType.ANY_CHANGE,
-          this.castControllerEventListener,
-        );
-      }
-    }
-
     this.videoElement?.pause();
 
     super.disconnectedCallback();
@@ -364,7 +233,7 @@ export class VideoPlayer extends LitElement {
     event.stopPropagation();
 
     if (this.isCasting) {
-      this.castController.playOrPause();
+      this.sendCastRequest({ type: this.isPlaying ? "pause" : "play" });
     } else if (this.isPlaying) {
       this.videoElement.pause();
     } else {
@@ -436,49 +305,15 @@ export class VideoPlayer extends LitElement {
     this.onMediaStateChanged();
   }
 
-  castMediaInfo() {
-    let videoUrl = new URL(document.documentURI);
-    let contentUrl = new URL(this.url, document.documentURI);
-
-    let mediaInfo = new chrome.cast.media.MediaInfo(
-      videoUrl.pathname,
-      this.mimeType,
-    );
-
-    mediaInfo.contentUrl = contentUrl.toString();
-    mediaInfo.duration = this.duration / 1000;
-
-    let metadata;
-
-    if (this.show) {
-      metadata = new chrome.cast.media.TvShowMediaMetadata();
-      metadata.originalAirdate = this.airDate;
-      metadata.episode = this.episode;
-      metadata.season = this.season;
-      metadata.seriesTitle = this.show;
-    } else {
-      metadata = new chrome.cast.media.MovieMediaMetadata();
-      metadata.releaseDate = this.airDate;
-    }
-
-    metadata.images = [new chrome.cast.Image(this.image)];
-    metadata.title = this.videoTitle;
-    mediaInfo.metadata = metadata;
-
-    return mediaInfo;
-  }
-
   async seek(targetTime) {
     if (targetTime < 0 || targetTime >= this.duration) {
       return;
     }
 
-    this.currentTime = targetTime;
-
     if (this.isCasting) {
-      this.castPlayer.currentTime = targetTime;
-      this.castController.seek();
+      this.sendCastRequest({ type: "seek", position: targetTime });
     } else {
+      this.currentTime = targetTime;
       this.videoElement.currentTime = targetTime;
     }
   }
@@ -526,6 +361,153 @@ export class VideoPlayer extends LitElement {
 
     event.stopPropagation();
     this.seek(Math.max(0, this.currentTime + delta));
+  }
+
+  sendCastRequest(data) {
+    if (!this.castConnection) {
+      console.warn(
+        "Attempting to send cast request after cast device has disconnected",
+      );
+      return;
+    }
+
+    console.log("Sending cast request", data);
+
+    this.castConnection.send(JSON.stringify(data));
+  }
+
+  initialCastMessage = (event) => {
+    if (event.target != this.castConnection) {
+      return;
+    }
+
+    let message = JSON.parse(event.data);
+    console.log("Initial cast event", message);
+
+    this.castConnection.addEventListener("message", this.onCastMessage);
+
+    if (message.type == "castState") {
+      // If the cast device is already playing the current video then just update our state.
+      if (message.server == this.server && message.video == this.video) {
+        this.onCastMessage(event);
+        return;
+      }
+    }
+
+    this.sendCastRequest({
+      type: "startVideo",
+      server: this.server,
+      video: this.video,
+      position: this.currentTime,
+    });
+  };
+
+  castTick = () => {
+    this.currentTime =
+      this.castLastPosition + (Date.now() - this.castBaseTime) / 1000;
+  };
+
+  onCastMessage = (event) => {
+    if (event.target != this.castConnection) {
+      return;
+    }
+
+    let message = JSON.parse(event.data);
+    console.log("Cast event", message);
+
+    if (
+      message.type == "castState" &&
+      message.server == this.server &&
+      message.video == this.video
+    ) {
+      this.isCasting = true;
+      this.isPlaying =
+        message.state == "playing" || message.state == "buffering";
+      this.castLastPosition = message.position;
+      this.castBaseTime = Date.now();
+      this.currentTime = message.position;
+
+      if (message.state == "playing") {
+        if (!this.castTimer) {
+          this.castTimer = setInterval(this.castTick, 250);
+        }
+      } else if (this.castTimer) {
+        clearInterval(this.castTimer);
+        this.castTimer = null;
+      }
+    } else {
+      this.onCastDisconnect();
+    }
+  };
+
+  onCastDisconnect = () => {
+    if (this.castConnection) {
+      console.log("Disconnecting cast device");
+
+      this.castConnection.removeEventListener(
+        "message",
+        this.initialCastMessage,
+      );
+      this.castConnection.removeEventListener("message", this.onCastMessage);
+      this.castConnection.removeEventListener("close", this.onCastDisconnect);
+      this.castConnection.removeEventListener("error", this.onCastError);
+      this.castConnection = null;
+    }
+
+    if (this.castTimer) {
+      clearInterval(this.castTimer);
+      this.castTimer = null;
+    }
+
+    this.isCasting = false;
+
+    let url = new URL(document.documentURI);
+    url.searchParams.delete("cast");
+    window.history.replaceState(null, null, url);
+  };
+
+  onCastError = (event) => {
+    if (event.target != this.castConnection) {
+      return;
+    }
+
+    console.error("Cast connection error");
+    this.onCastDisconnect();
+  };
+
+  initiateCastConnection(id) {
+    if (this.castConnection) {
+      this.sendCastRequest({ type: "stop" });
+      this.onCastDisconnect();
+    }
+
+    let socketUrl = new URL("/cast", document.documentURI);
+    socketUrl.protocol = "ws";
+    socketUrl.searchParams.set("device", id);
+
+    console.log(`Initiating websocket request to ${socketUrl}`);
+    this.castConnection = new WebSocket(socketUrl);
+
+    this.castConnection.addEventListener("message", this.initialCastMessage, {
+      once: true,
+    });
+    this.castConnection.addEventListener("close", this.onCastDisconnect);
+    this.castConnection.addEventListener("error", this.onCastError);
+
+    let url = new URL(document.documentURI);
+    url.searchParams.set("cast", id);
+    window.history.replaceState(null, null, url);
+  }
+
+  castDeviceSelected(event) {
+    if (event.target.value) {
+      this.initiateCastConnection(event.target.value);
+    }
+  }
+
+  stopCasting() {
+    this.sendCastRequest({ type: "stop" });
+    this.onCastDisconnect();
   }
 
   renderOverlayInfo() {
@@ -628,9 +610,23 @@ export class VideoPlayer extends LitElement {
           <div class="time end">
             -${formatTime(this.duration - this.currentTime)}
           </div>
-          ${this.isCastAvailable
-            ? html`<google-cast-launcher></google-cast-launcher>`
-            : nothing}
+          ${this.isCasting
+            ? html`<sl-icon-button
+                library="material"
+                name="cast_connected"
+                @click="${this.stopCasting}"
+              ></sl-icon-button>`
+            : html`<sl-dropdown
+                placement="top-end"
+                @click=${this.castDeviceSelected}
+              >
+                <sl-icon-button
+                  slot="trigger"
+                  library="material"
+                  name="cast"
+                ></sl-icon-button>
+                <slot name="cast-devices"></slot>
+              </sl-dropdown>`}
           ${!this.isCasting
             ? html`<sl-icon-button
                 library="material"

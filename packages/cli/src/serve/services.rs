@@ -26,6 +26,7 @@ use crate::{
     EmbeddedFileStream, Resources,
     serve::{
         ConnectionInfo, Event, ServiceData,
+        cast::{AvailableDevices, CastSessions},
         events::{
             ProgressBarTemplate, ServerTemplate, SyncLogTemplate, SyncProgressBar,
             SyncProgressTemplate, Thumbnail,
@@ -107,6 +108,7 @@ pub(super) async fn status_page(
         log: Vec<SyncLogTemplate>,
         progress_bars: Vec<ProgressBarTemplate>,
         total_progress: Option<SyncProgressTemplate>,
+        cast_sessions: CastSessions,
     }
 
     let (log, progress, completed, total) = {
@@ -138,6 +140,7 @@ pub(super) async fn status_page(
         } else {
             None
         },
+        cast_sessions: service_data.cast_manager.cast_sessions().await,
     };
 
     for item in log.iter().rev() {
@@ -357,6 +360,7 @@ struct LibraryTemplate<'a> {
     browse_url: &'a str,
     collection_url: &'a str,
     items: Vec<Thumbnail>,
+    cast_sessions: CastSessions,
 }
 
 #[derive(Template)]
@@ -365,6 +369,7 @@ struct ListTemplate {
     sidebar: Option<Sidebar>,
     title: String,
     items: Vec<Thumbnail>,
+    cast_sessions: CastSessions,
 }
 
 #[get("/library/{server}/{id}")]
@@ -409,6 +414,7 @@ pub(super) async fn library_contents(
                 browse_url: &browse_url,
                 collection_url: &collection_url,
                 items: thumbs,
+                cast_sessions: service_data.cast_manager.cast_sessions().await,
             };
 
             render(template)
@@ -427,6 +433,7 @@ pub(super) async fn library_contents(
                 browse_url: &browse_url,
                 collection_url: &collection_url,
                 items: thumbs,
+                cast_sessions: service_data.cast_manager.cast_sessions().await,
             };
 
             render(template)
@@ -472,6 +479,7 @@ pub(super) async fn library_collections(
         browse_url: &browse_url,
         collection_url: &collection_url,
         items: thumbs,
+        cast_sessions: service_data.cast_manager.cast_sessions().await,
     };
 
     render(template)
@@ -534,6 +542,7 @@ pub(super) async fn collection_contents(
         sidebar,
         title: collection.title().await,
         items: thumbs,
+        cast_sessions: service_data.cast_manager.cast_sessions().await,
     };
 
     render(template)
@@ -570,6 +579,7 @@ pub(super) async fn show_contents(
         sidebar,
         title: show.title().await,
         items: thumbs,
+        cast_sessions: service_data.cast_manager.cast_sessions().await,
     };
 
     render(template)
@@ -612,6 +622,7 @@ pub(super) async fn season_contents(
             season.title().await
         ),
         items: thumbs,
+        cast_sessions: service_data.cast_manager.cast_sessions().await,
     };
 
     render(template)
@@ -645,6 +656,7 @@ pub(super) async fn playlist_contents(
         sidebar: Option<Sidebar>,
         title: String,
         items: Vec<Thumbnail>,
+        cast_sessions: CastSessions,
     }
 
     let mut items = Vec::new();
@@ -658,6 +670,7 @@ pub(super) async fn playlist_contents(
         sidebar,
         title: playlist.title().await,
         items,
+        cast_sessions: service_data.cast_manager.cast_sessions().await,
     };
 
     render(template)
@@ -721,12 +734,12 @@ pub(super) async fn video_page(
     let url_base = if let Some(conn_info) = req.conn_data::<ConnectionInfo>() {
         if conn_info.local_addr.port() == 443 {
             format!(
-                "http://{}:{}/",
+                "http://{}:{}",
                 conn_info.local_addr.ip(),
                 service_data.http_port
             )
         } else {
-            format!("http://{}/", conn_info.local_addr)
+            format!("http://{}", conn_info.local_addr)
         }
     } else {
         "".to_string()
@@ -744,16 +757,16 @@ pub(super) async fn video_page(
     #[template(path = "video.html")]
     struct VideoTemplate {
         sidebar: Option<Sidebar>,
+        server: String,
+        video: String,
         title: String,
         playback_position: f64,
-        air_date: Option<String>,
         image: String,
-        show: Option<String>,
-        season: Option<usize>,
-        episode: Option<usize>,
         url: String,
         mime_type: String,
         total_duration: f64,
+        cast_devices: AvailableDevices,
+        cast_sessions: CastSessions,
     }
 
     let playback_state = video.playback_state().await;
@@ -762,37 +775,27 @@ pub(super) async fn video_page(
         PlaybackState::InProgress { position } => position as f64 / 1000.0,
     };
 
-    let (image, show, season, episode) = if let Video::Episode(ref ep) = video {
+    let image = if let Video::Episode(ref ep) = video {
         let season = ep.season().await;
         let show = season.show().await;
 
-        (
-            format!("{url_base}thumbnail/{server_id}/show/{}", show.id()),
-            Some(show.title().await),
-            Some(season.index().await),
-            ep.index().await,
-        )
+        format!("{url_base}/thumbnail/{server_id}/show/{}", show.id())
     } else {
-        (
-            format!("{url_base}thumbnail/{server_id}/video/{}", video.id()),
-            None,
-            None,
-            None,
-        )
+        format!("{url_base}/thumbnail/{server_id}/video/{}", video.id())
     };
 
     let template = VideoTemplate {
         sidebar,
+        server: video.server().id().to_string(),
+        video: video.id().to_string(),
         title: video.title().await,
         playback_position,
         image,
-        air_date: video.air_date().await.map(|date| date.to_string()),
-        show,
-        season,
-        episode,
-        url: format!("{url_base}stream/{server_id}/{}", video.id()),
+        url: format!("{url_base}/stream/{server_id}/{}", video.id()),
         mime_type: mime_type.to_string(),
         total_duration: video.duration().await.as_millis() as f64 / 1000.0,
+        cast_devices: service_data.cast_manager.available_devices().await,
+        cast_sessions: service_data.cast_manager.cast_sessions().await,
     };
 
     render(template)
@@ -968,6 +971,7 @@ pub(super) async fn sync_list(
         servers: Vec<ServerTemplate>,
         available_space: u64,
         profiles: Vec<String>,
+        cast_sessions: CastSessions,
     }
 
     let template = SyncList {
@@ -975,6 +979,7 @@ pub(super) async fn sync_list(
         servers: ServerTemplate::build(&service_data.flick_sync).await,
         available_space: disk_info.available_space,
         profiles,
+        cast_sessions: service_data.cast_manager.cast_sessions().await,
     };
 
     render(template)
@@ -1016,11 +1021,13 @@ pub(super) async fn index_page(
     struct Index {
         sidebar: Option<Sidebar>,
         items: Vec<Thumbnail>,
+        cast_sessions: CastSessions,
     }
 
     let template = Index {
         sidebar,
         items: thumbs,
+        cast_sessions: service_data.cast_manager.cast_sessions().await,
     };
 
     render(template)

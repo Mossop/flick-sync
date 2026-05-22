@@ -61,3 +61,6 @@ opentelemetry-otlp = { version = "0.31.1", features = ["http-proto"] }
 opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio"] }
 tracing-opentelemetry = "0.32.1"
 reqwest = "0.13.2"
+oxicast = "0.0.3"
+actix-ws = { version = "0.4.0", features = ["serde-json"] }
+uuid = "1.23.1"

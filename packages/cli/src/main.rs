@@ -235,7 +235,7 @@ fn init_logging(
         Targets::new()
             .with_target("flick_sync", Level::DEBUG)
             .with_target("flick_sync_cli", Level::DEBUG)
-            .with_target("dlna_server", Level::INFO)
+            .with_target("dlna_server", Level::WARN)
             .with_target("plex_api", Level::INFO)
             .with_default(Level::WARN)
     };
