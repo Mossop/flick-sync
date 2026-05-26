@@ -87,7 +87,11 @@ struct CastState {
 
 impl CastState {
     fn estimate_position(&self) -> f64 {
-        self.status.current_time + (Instant::now() - self.last_update).as_secs_f64()
+        if self.status.player_state == PlayerState::Playing {
+            self.status.current_time + (Instant::now() - self.last_update).as_secs_f64()
+        } else {
+            self.status.current_time
+        }
     }
 }
 

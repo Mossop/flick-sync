@@ -780,6 +780,9 @@ impl Episode {
 
     pub async fn set_playback_state(&self, state: PlaybackState) -> Result {
         self.update_state(|vs| {
+            if vs.playback_state != state {
+                trace!(video = self.id(), ?state, "Updating playback state");
+            }
             vs.playback_state = state;
         })
         .await
@@ -1026,6 +1029,10 @@ impl Movie {
 
     pub async fn set_playback_state(&self, state: PlaybackState) -> Result {
         self.update_state(|vs| {
+            if vs.playback_state != state {
+                trace!(video = self.id(), ?state, "Updating playback state");
+            }
+
             vs.playback_state = state;
         })
         .await
@@ -1199,8 +1206,6 @@ impl Video {
     }
 
     pub async fn set_playback_position(&self, position: u64) -> Result {
-        trace!(video = self.id(), position, "Updating playback position");
-
         let new_state = if position <= (5 * 60000) {
             PlaybackState::Unplayed
         } else {
