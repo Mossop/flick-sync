@@ -28,7 +28,10 @@ use uuid::Uuid;
 use crate::serve::{ConnectionInfo, Event, ServiceData};
 
 const CONTENT_PREFIX: &str = "urn:flicksync:video:";
-const REFRESH_RATE: u64 = 10;
+const REFRESH_RATE: u64 = 5;
+/// The position reported when playback starts can be inaccurate so a fresh
+/// status is requested this soon after.
+const PLAYING_REFRESH_RATE: u64 = 1;
 const PLAYBACK_UPDATE_RATE: u64 = 5;
 const CONNECT_TIMEOUT: u64 = 10;
 
@@ -408,6 +411,7 @@ impl CastDevice {
         let mut playback_update_timeout =
             Box::pin(sleep(Duration::from_secs(PLAYBACK_UPDATE_RATE)));
         let mut refresh_timeout = Box::pin(sleep(Duration::from_secs(REFRESH_RATE)));
+        let mut playing_refresh_pending = false;
 
         loop {
             tokio::select! {
@@ -420,13 +424,32 @@ impl CastDevice {
 
                     match event {
                         CastEvent::MediaStatusChanged(status) => {
+                            let was_playing = self
+                                .state
+                                .lock()
+                                .await
+                                .as_ref()
+                                .is_some_and(|s| s.status.player_state == PlayerState::Playing);
+                            let started_playing =
+                                !was_playing && status.player_state == PlayerState::Playing;
+
                             self.update_state(&flick_sync, Some(status)).await;
                             CastManager::send_devices_status(
                                 &event_sender,
                                 devices.lock().await.values().collect(),
                             )
                             .await;
-                            refresh_timeout = Box::pin(sleep(Duration::from_secs(REFRESH_RATE)));
+
+                            // Don't let further status updates delay a pending
+                            // refresh after playback started.
+                            if started_playing {
+                                playing_refresh_pending = true;
+                                refresh_timeout =
+                                    Box::pin(sleep(Duration::from_secs(PLAYING_REFRESH_RATE)));
+                            } else if !playing_refresh_pending {
+                                refresh_timeout =
+                                    Box::pin(sleep(Duration::from_secs(REFRESH_RATE)));
+                            }
                         }
                         CastEvent::MediaSessionEnded { idle_reason, .. }
                             if idle_reason != IdleReason::Interrupted =>
@@ -477,6 +500,7 @@ impl CastDevice {
                 }
                 _ = &mut refresh_timeout => {
                     refresh_timeout = Box::pin(sleep(Duration::from_secs(REFRESH_RATE)));
+                    playing_refresh_pending = false;
 
                     // Some failures (e.g. write errors) don't generate an event.
                     if !self.client.is_connected() {
