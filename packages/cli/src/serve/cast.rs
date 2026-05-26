@@ -11,7 +11,7 @@ use actix_web::{
 };
 use actix_ws::codec::{CodecMessage, JsonCodec};
 use askama::Template;
-use flick_sync::{FlickSync, Video};
+use flick_sync::{FlickSync, PlaybackState, Video};
 use oxicast::{
     Capability, CastApp, CastClient, CastEvent, IdleReason, Image, MediaInfo, MediaMetadata,
     MediaStatus, PlayerState, discovery,
@@ -85,6 +85,12 @@ struct CastState {
     status: MediaStatus,
 }
 
+impl CastState {
+    fn estimate_position(&self) -> f64 {
+        self.status.current_time + (Instant::now() - self.last_update).as_secs_f64()
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 enum PlayState {
@@ -125,14 +131,11 @@ impl From<Option<&CastState>> for CastStateEvent {
             return CastStateEvent::Stopped;
         };
 
-        let position =
-            state.status.current_time + (Instant::now() - state.last_update).as_secs_f64();
-
         CastStateEvent::CastState {
             server: state.video.server().id().to_string(),
             video: state.video.id().to_string(),
             state: PlayState::from(state.status.player_state),
-            position,
+            position: state.estimate_position(),
         }
     }
 }
@@ -263,37 +266,55 @@ impl CastDevice {
             error!(ip = %self.ip, error = ?e, "Failed to send seek request to cast device");
         }
     }
+
     async fn stop(&self) {
+        self.update_playback_state().await;
+
         if let Err(e) = self.client.stop_media().await {
             error!(ip = %self.ip, error = ?e, "Failed to send seek request to cast device");
         }
     }
 
-    async fn update_state(&self, flick_sync: &FlickSync, status: Option<MediaStatus>) {
-        let mut state = self.state.lock().await;
+    async fn update_playback_state(&self) {
+        if let Some(state) = self.state.lock().await.as_ref() {
+            let position = state.estimate_position();
+            let _ = state
+                .video
+                .set_playback_position((position * 1000.0).round() as u64)
+                .await;
+        }
+    }
 
-        if let Some(status) = status {
-            if let Some(media) = &status.media {
-                if let Some(video) = video_from_content_id(flick_sync, &media.content_id).await {
-                    *state = Some(CastState {
-                        video,
-                        last_update: Instant::now(),
-                        status,
-                    });
-                    let _ = self.sender.send(CastStateEvent::from(state.as_ref()));
-                } else if state.is_some() {
-                    *state = None;
+    async fn update_state(&self, flick_sync: &FlickSync, status: Option<MediaStatus>) {
+        {
+            let mut state = self.state.lock().await;
+
+            if let Some(status) = status {
+                if let Some(media) = &status.media {
+                    if let Some(video) = video_from_content_id(flick_sync, &media.content_id).await
+                    {
+                        *state = Some(CastState {
+                            video,
+                            last_update: Instant::now(),
+                            status,
+                        });
+                        let _ = self.sender.send(CastStateEvent::from(state.as_ref()));
+                    } else if state.is_some() {
+                        *state = None;
+                        let _ = self.sender.send(CastStateEvent::from(state.as_ref()));
+                    }
+                } else if let Some(ref mut cast_state) = *state {
+                    cast_state.status = status;
+                    cast_state.last_update = Instant::now();
                     let _ = self.sender.send(CastStateEvent::from(state.as_ref()));
                 }
-            } else if let Some(ref mut cast_state) = *state {
-                cast_state.status = status;
-                cast_state.last_update = Instant::now();
+            } else if !state.is_none() {
+                *state = None;
                 let _ = self.sender.send(CastStateEvent::from(state.as_ref()));
             }
-        } else if !state.is_none() {
-            *state = None;
-            let _ = self.sender.send(CastStateEvent::from(state.as_ref()));
         }
+
+        self.update_playback_state().await;
     }
 
     async fn monitor(
@@ -309,32 +330,51 @@ impl CastDevice {
         CastManager::send_devices_status(&event_sender, devices.lock().await.values().collect())
             .await;
 
-        while let Some(event) = self.client.next_event().await {
-            trace!(ip=%self.ip, ?event, "Cast event");
+        let mut timeout = Box::pin(sleep(Duration::from_secs(5)));
 
-            match event {
-                CastEvent::MediaStatusChanged(status) => {
-                    self.update_state(&flick_sync, Some(status)).await;
-                    CastManager::send_devices_status(
-                        &event_sender,
-                        devices.lock().await.values().collect(),
-                    )
-                    .await;
+        loop {
+            tokio::select! {
+                cast_event = self.client.next_event() => {
+                    let Some(event) = cast_event else {
+                        break;
+                    };
+
+                    trace!(ip=%self.ip, ?event, "Cast event");
+
+                    match event {
+                        CastEvent::MediaStatusChanged(status) => {
+                            self.update_state(&flick_sync, Some(status)).await;
+                            CastManager::send_devices_status(
+                                &event_sender,
+                                devices.lock().await.values().collect(),
+                            )
+                            .await;
+                        }
+                        CastEvent::MediaSessionEnded { idle_reason, .. }
+                            if idle_reason != IdleReason::Interrupted =>
+                        {
+                            if idle_reason == IdleReason::Finished && let Some(state) = self.state.lock().await.as_ref() {
+                                let _ = state.video.set_playback_state(PlaybackState::Played).await;
+                            }
+
+                            self.update_state(&flick_sync, None).await;
+                            CastManager::send_devices_status(
+                                &event_sender,
+                                devices.lock().await.values().collect(),
+                            )
+                            .await;
+                        }
+                        CastEvent::Reconnecting { attempt } if attempt >= 5 => {
+                            break;
+                        }
+                        _ => {}
+                    }
                 }
-                CastEvent::MediaSessionEnded { idle_reason, .. }
-                    if idle_reason != IdleReason::Interrupted =>
-                {
-                    self.update_state(&flick_sync, None).await;
-                    CastManager::send_devices_status(
-                        &event_sender,
-                        devices.lock().await.values().collect(),
-                    )
-                    .await;
+                _ = &mut timeout => {
+                    timeout = Box::pin(sleep(Duration::from_secs(5)));
+
+                    self.update_playback_state().await;
                 }
-                CastEvent::Reconnecting { attempt } if attempt >= 5 => {
-                    break;
-                }
-                _ => {}
             }
         }
 
