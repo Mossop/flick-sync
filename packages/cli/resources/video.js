@@ -25,6 +25,325 @@ function formatTime(time) {
   }
 }
 
+class PlaybackDevice {
+  #player = null;
+
+  constructor(player) {
+    this.#player = player;
+  }
+
+  get isCasting() {
+    return false;
+  }
+
+  buffers() {
+    return null;
+  }
+
+  get player() {
+    return this.#player;
+  }
+
+  get isPlaying() {
+    return this.#player.isPlaying;
+  }
+
+  set isPlaying(val) {
+    this.#player.isPlaying = val;
+  }
+
+  get currentTime() {
+    return this.#player.currentTime;
+  }
+
+  set currentTime(val) {
+    this.#player.currentTime = val;
+  }
+
+  rendered() {}
+
+  render() {
+    return nothing;
+  }
+}
+
+class CastPlayback extends PlaybackDevice {
+  #castState = "idle";
+  #castConnection = null;
+  #castLastPosition;
+  #castBaseTime;
+  #castTimer;
+
+  constructor(player, device) {
+    super(player);
+    this.#castBaseTime = Date.now();
+    this.#castLastPosition = this.currentTime;
+    this.#initiateCastConnection(device);
+    this.#castTimer = setInterval(this.#castTick, 250);
+  }
+
+  get isCasting() {
+    return true;
+  }
+
+  get currentTime() {
+    return super.currentTime;
+  }
+
+  set currentTime(val) {
+    this.#castBaseTime = Date.now();
+    this.#castLastPosition = val;
+    super.currentTime = val;
+  }
+
+  #estimateTime() {
+    if (this.#castState == "playing") {
+      return this.#castLastPosition + (Date.now() - this.#castBaseTime) / 1000;
+    }
+
+    return this.#castLastPosition;
+  }
+
+  #castTick = () => {
+    super.currentTime = this.#estimateTime();
+  };
+
+  #sendCastRequest(data) {
+    if (!this.#castConnection) {
+      console.warn(
+        "Attempting to send cast request after cast device has disconnected",
+      );
+      return;
+    }
+
+    console.log("Sending cast request", data);
+
+    this.#castConnection.send(JSON.stringify(data));
+  }
+
+  #initialCastMessage = (event) => {
+    if (event.target != this.#castConnection) {
+      return;
+    }
+
+    let message = JSON.parse(event.data);
+    console.log("Initial cast event", message);
+
+    this.#castConnection.addEventListener("message", this.#onCastMessage);
+
+    if (message.type == "castState") {
+      // If the cast device is already playing the current video then just update our state.
+      if (
+        message.server == this.player.server &&
+        message.video == this.player.video
+      ) {
+        this.#onCastMessage(event);
+        return;
+      }
+    }
+
+    this.#sendCastRequest({
+      type: "startVideo",
+      server: this.player.server,
+      video: this.player.video,
+      position: this.currentTime,
+    });
+  };
+
+  #onCastMessage = (event) => {
+    if (event.target != this.#castConnection) {
+      return;
+    }
+
+    let message = JSON.parse(event.data);
+    console.log("Cast event", message);
+
+    if (
+      message.type == "castState" &&
+      message.server == this.player.server &&
+      message.video == this.player.video
+    ) {
+      this.#castState = message.state;
+      this.player.isPlaying =
+        message.state == "playing" || message.state == "buffering";
+      this.currentTime = message.position;
+    } else {
+      this.#onCastDisconnect();
+    }
+  };
+
+  #onCastDisconnect = () => {
+    if (this.#castConnection) {
+      console.log("Disconnecting cast device");
+
+      this.#castConnection.removeEventListener(
+        "message",
+        this.#initialCastMessage,
+      );
+      this.#castConnection.removeEventListener("message", this.#onCastMessage);
+      this.#castConnection.removeEventListener("close", this.#onCastDisconnect);
+      this.#castConnection.removeEventListener("error", this.#onCastError);
+      this.#castConnection = null;
+    }
+
+    if (this.#castTimer) {
+      clearInterval(this.#castTimer);
+      this.#castTimer = null;
+    }
+
+    let url = new URL(document.documentURI);
+    url.searchParams.delete("cast");
+    window.history.replaceState(null, null, url);
+
+    this.player.playbackDevice = new LocalPlayback(this.player);
+  };
+
+  #onCastError = (event) => {
+    if (event.target != this.#castConnection) {
+      return;
+    }
+
+    console.error("Cast connection error");
+    this.#onCastDisconnect();
+  };
+
+  #initiateCastConnection(id) {
+    if (this.#castConnection) {
+      this.#sendCastRequest({ type: "stop" });
+      this.#onCastDisconnect();
+    }
+
+    let socketUrl = new URL("/cast", document.documentURI);
+    socketUrl.protocol = "ws";
+    socketUrl.searchParams.set("device", id);
+
+    console.log(`Initiating websocket request to ${socketUrl}`);
+    this.#castConnection = new WebSocket(socketUrl);
+
+    this.#castConnection.addEventListener("message", this.#initialCastMessage, {
+      once: true,
+    });
+    this.#castConnection.addEventListener("close", this.#onCastDisconnect);
+    this.#castConnection.addEventListener("error", this.#onCastError);
+
+    let url = new URL(document.documentURI);
+    url.searchParams.set("cast", id);
+    window.history.replaceState(null, null, url);
+  }
+
+  play() {
+    this.#sendCastRequest({ type: "play" });
+  }
+
+  pause() {
+    this.#sendCastRequest({ type: "pause" });
+  }
+
+  stop() {
+    this.#sendCastRequest({ type: "stop" });
+    this.#onCastDisconnect();
+  }
+
+  seek(newTime) {
+    this.#sendCastRequest({ type: "seek", position: newTime });
+  }
+}
+
+class LocalPlayback extends PlaybackDevice {
+  #videoElement = null;
+  #lastReportedTime;
+
+  constructor(player) {
+    super(player);
+    this.#lastReportedTime = this.currentTime;
+  }
+
+  rendered() {
+    let element = this.player.renderRoot.querySelector("video");
+
+    if (this.#videoElement === element) {
+      return;
+    }
+
+    this.#videoElement?.pause();
+    this.#videoElement = element;
+
+    if (this.#videoElement) {
+      this.#videoElement.currentTime = this.currentTime;
+      if (this.isPlaying) {
+        this.#videoElement.play();
+      } else {
+        this.#videoElement.pause();
+      }
+    }
+  }
+
+  updateTime(newTime) {
+    if (Math.abs(this.#lastReportedTime - newTime) > 10) {
+      this.#lastReportedTime = newTime;
+
+      let updateUrl = document.documentURI.replace("/library/", "/playback/");
+      fetch(`${updateUrl}?position=${this.currentTime}`, {
+        method: "POST",
+      }).catch((e) => {
+        console.error(e);
+      });
+    }
+
+    this.currentTime = newTime;
+  }
+
+  onMediaStateChanged = () => {
+    if (!this.#videoElement) {
+      return;
+    }
+
+    this.isPlaying = !(this.#videoElement.paused || this.#videoElement.ended);
+    this.updateTime(this.#videoElement.currentTime);
+  };
+
+  buffers() {
+    return this.#videoElement?.buffered;
+  }
+
+  play() {
+    this.#videoElement?.play();
+  }
+
+  pause() {
+    this.#videoElement?.pause();
+  }
+
+  stop() {
+    this.#videoElement?.pause();
+  }
+
+  seek(newTime) {
+    this.#videoElement.currentTime = newTime;
+  }
+
+  render() {
+    let mediaUrl = new URL(this.player.url, document.documentURI);
+    mediaUrl = new URL(mediaUrl.pathname, document.documentURI);
+
+    return keyed(
+      mediaUrl.toString(),
+      html`
+      <video
+        autoplay
+        preload="auto"
+        @ended="${this.onMediaStateChanged}"
+        @pause="${this.onMediaStateChanged}"
+        @play="${this.onMediaStateChanged}"
+        @timeupdate="${this.onMediaStateChanged}"
+        @seeked="${this.onMediaStateChanged}"
+      >
+        <source type="${this.player.mimeType}" src="${mediaUrl.toString()}"></source>
+      </video>`,
+    );
+  }
+}
+
 export class VideoPlayer extends LitElement {
   static styles = [
     shoelaceStyles,
@@ -164,7 +483,7 @@ export class VideoPlayer extends LitElement {
     currentTime: { type: Number },
     isPlaying: { state: true },
     isFullscreen: { state: true },
-    isCasting: { state: true },
+    playbackDevice: { state: true },
     server: { type: String },
     video: { type: String },
     image: { type: String },
@@ -176,11 +495,8 @@ export class VideoPlayer extends LitElement {
   constructor() {
     super();
     this.currentTime = 0;
-    this.lastReportedTime = 0;
-    this.isPlaying = false;
+    this.isPlaying = true;
     this.onFullscreenChanged();
-    this.isCasting = false;
-    this.videoElement = null;
 
     this.seekBack30 = (event) => this.seekPressed(event, -30);
     this.seekBack10 = (event) => this.seekPressed(event, -10);
@@ -214,15 +530,10 @@ export class VideoPlayer extends LitElement {
     let castDevice = url.searchParams.get("cast");
 
     if (castDevice) {
-      this.isCasting = true;
-      this.initiateCastConnection(castDevice);
+      this.playbackDevice = new CastPlayback(this, castDevice);
+    } else {
+      this.playbackDevice = new LocalPlayback(this);
     }
-  }
-
-  disconnectedCallback() {
-    this.videoElement?.pause();
-
-    super.disconnectedCallback();
   }
 
   togglePlayback(event) {
@@ -232,12 +543,10 @@ export class VideoPlayer extends LitElement {
 
     event.stopPropagation();
 
-    if (this.isCasting) {
-      this.sendCastRequest({ type: this.isPlaying ? "pause" : "play" });
-    } else if (this.isPlaying) {
-      this.videoElement.pause();
+    if (this.isPlaying) {
+      this.playbackDevice.pause();
     } else {
-      this.videoElement.play();
+      this.playbackDevice.play();
     }
   }
 
@@ -277,45 +586,12 @@ export class VideoPlayer extends LitElement {
     }
   }
 
-  updateTime(newTime) {
-    if (Math.abs(this.lastReportedTime - newTime) > 10) {
-      this.lastReportedTime = newTime;
-
-      let updateUrl = document.documentURI.replace("/library/", "/playback/");
-      fetch(`${updateUrl}?position=${this.currentTime}`, {
-        method: "POST",
-      }).catch((e) => {
-        console.error(e);
-      });
-    }
-
-    this.currentTime = newTime;
-  }
-
-  onMediaStateChanged() {
-    if (!this.videoElement) {
-      return;
-    }
-
-    this.isPlaying = !(this.videoElement.paused || this.videoElement.ended);
-    this.updateTime(this.videoElement.currentTime);
-  }
-
-  onMediaEnded() {
-    this.onMediaStateChanged();
-  }
-
   async seek(targetTime) {
     if (targetTime < 0 || targetTime >= this.duration) {
       return;
     }
 
-    if (this.isCasting) {
-      this.sendCastRequest({ type: "seek", position: targetTime });
-    } else {
-      this.currentTime = targetTime;
-      this.videoElement.currentTime = targetTime;
-    }
+    this.playbackDevice.seek(targetTime);
   }
 
   onProgressClicked(event) {
@@ -333,7 +609,7 @@ export class VideoPlayer extends LitElement {
   }
 
   renderBuffers() {
-    let ranges = this.videoElement?.buffered;
+    let ranges = this.playbackDevice.buffers();
     if (!ranges) {
       return [];
     }
@@ -363,155 +639,19 @@ export class VideoPlayer extends LitElement {
     this.seek(Math.max(0, this.currentTime + delta));
   }
 
-  sendCastRequest(data) {
-    if (!this.castConnection) {
-      console.warn(
-        "Attempting to send cast request after cast device has disconnected",
-      );
-      return;
-    }
-
-    console.log("Sending cast request", data);
-
-    this.castConnection.send(JSON.stringify(data));
-  }
-
-  initialCastMessage = (event) => {
-    if (event.target != this.castConnection) {
-      return;
-    }
-
-    let message = JSON.parse(event.data);
-    console.log("Initial cast event", message);
-
-    this.castConnection.addEventListener("message", this.onCastMessage);
-
-    if (message.type == "castState") {
-      // If the cast device is already playing the current video then just update our state.
-      if (message.server == this.server && message.video == this.video) {
-        this.onCastMessage(event);
-        return;
-      }
-    }
-
-    this.sendCastRequest({
-      type: "startVideo",
-      server: this.server,
-      video: this.video,
-      position: this.currentTime,
-    });
-  };
-
-  castTick = () => {
-    this.currentTime =
-      this.castLastPosition + (Date.now() - this.castBaseTime) / 1000;
-  };
-
-  onCastMessage = (event) => {
-    if (event.target != this.castConnection) {
-      return;
-    }
-
-    let message = JSON.parse(event.data);
-    console.log("Cast event", message);
-
-    if (
-      message.type == "castState" &&
-      message.server == this.server &&
-      message.video == this.video
-    ) {
-      this.isCasting = true;
-      this.isPlaying =
-        message.state == "playing" || message.state == "buffering";
-      this.castLastPosition = message.position;
-      this.castBaseTime = Date.now();
-      this.currentTime = message.position;
-
-      if (message.state == "playing") {
-        if (!this.castTimer) {
-          this.castTimer = setInterval(this.castTick, 250);
-        }
-      } else if (this.castTimer) {
-        clearInterval(this.castTimer);
-        this.castTimer = null;
-      }
-    } else {
-      this.onCastDisconnect();
-    }
-  };
-
-  onCastDisconnect = () => {
-    if (this.castConnection) {
-      console.log("Disconnecting cast device");
-
-      this.castConnection.removeEventListener(
-        "message",
-        this.initialCastMessage,
-      );
-      this.castConnection.removeEventListener("message", this.onCastMessage);
-      this.castConnection.removeEventListener("close", this.onCastDisconnect);
-      this.castConnection.removeEventListener("error", this.onCastError);
-      this.castConnection = null;
-    }
-
-    if (this.castTimer) {
-      clearInterval(this.castTimer);
-      this.castTimer = null;
-    }
-
-    this.isCasting = false;
-
-    let url = new URL(document.documentURI);
-    url.searchParams.delete("cast");
-    window.history.replaceState(null, null, url);
-  };
-
-  onCastError = (event) => {
-    if (event.target != this.castConnection) {
-      return;
-    }
-
-    console.error("Cast connection error");
-    this.onCastDisconnect();
-  };
-
-  initiateCastConnection(id) {
-    if (this.castConnection) {
-      this.sendCastRequest({ type: "stop" });
-      this.onCastDisconnect();
-    }
-
-    let socketUrl = new URL("/cast", document.documentURI);
-    socketUrl.protocol = "ws";
-    socketUrl.searchParams.set("device", id);
-
-    console.log(`Initiating websocket request to ${socketUrl}`);
-    this.castConnection = new WebSocket(socketUrl);
-
-    this.castConnection.addEventListener("message", this.initialCastMessage, {
-      once: true,
-    });
-    this.castConnection.addEventListener("close", this.onCastDisconnect);
-    this.castConnection.addEventListener("error", this.onCastError);
-
-    let url = new URL(document.documentURI);
-    url.searchParams.set("cast", id);
-    window.history.replaceState(null, null, url);
-  }
-
   castDeviceSelected(event) {
     if (event.target.value) {
-      this.initiateCastConnection(event.target.value);
+      this.playbackDevice.stop();
+      this.playbackDevice = new CastPlayback(this, event.target.value);
     }
   }
 
   stopCasting() {
-    this.sendCastRequest({ type: "stop" });
-    this.onCastDisconnect();
+    this.playbackDevice.stop();
   }
 
   renderOverlayInfo() {
-    if (this.isPlaying && !this.isCasting) {
+    if (this.isPlaying && !this.playbackDevice.isCasting) {
       return nothing;
     }
 
@@ -524,30 +664,8 @@ export class VideoPlayer extends LitElement {
     `;
   }
 
-  renderVideo() {
-    if (this.isCasting) {
-      return nothing;
-    }
-
-    let mediaUrl = new URL(this.url, document.documentURI);
-    mediaUrl = new URL(mediaUrl.pathname, document.documentURI);
-
-    return keyed(
-      mediaUrl.toString(),
-      html`
-      <video
-        ${ref(this.renderedVideo)}
-        autoplay
-        preload="auto"
-        @ended="${this.onMediaEnded}"
-        @pause="${this.onMediaStateChanged}"
-        @play="${this.onMediaStateChanged}"
-        @timeupdate="${this.onMediaStateChanged}"
-        @seeked="${this.onMediaStateChanged}"
-      >
-        <source type="${this.mimeType}" src="${mediaUrl.toString()}"></source>
-      </video>`,
-    );
+  updated() {
+    this.playbackDevice.rendered();
   }
 
   render() {
@@ -558,13 +676,13 @@ export class VideoPlayer extends LitElement {
 
     let classes = {
       overlay: true,
-      casting: this.isCasting,
+      casting: this.playbackDevice.isCasting,
       playing: this.isPlaying,
       paused: !this.isPlaying,
     };
 
     return html`
-      ${this.renderVideo()}
+      ${this.playbackDevice.render()}
       <div class=${classMap(classes)} @mousemove="${this.showOverlay}">
         ${this.renderOverlayInfo()}
         <div class="main" @click="${this.togglePlayback}">
@@ -610,7 +728,7 @@ export class VideoPlayer extends LitElement {
           <div class="time end">
             -${formatTime(this.duration - this.currentTime)}
           </div>
-          ${this.isCasting
+          ${this.playbackDevice.isCasting
             ? html`<sl-icon-button
                 library="material"
                 name="cast_connected"
@@ -627,7 +745,7 @@ export class VideoPlayer extends LitElement {
                 ></sl-icon-button>
                 <slot name="cast-devices"></slot>
               </sl-dropdown>`}
-          ${!this.isCasting
+          ${!this.playbackDevice.isCasting
             ? html`<sl-icon-button
                 library="material"
                 name="${fullscreenIcon}"
