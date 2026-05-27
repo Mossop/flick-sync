@@ -2773,6 +2773,7 @@ dependencies = [
 [[package]]
 name = "oxicast"
 version = "0.0.3"
+source = "git+https://github.com/Mossop/oxicast?branch=combined#863119975366324a110e2d0faeb2333f4ae6559e"
 dependencies = [
  "bytes",
  "mdns-sd",

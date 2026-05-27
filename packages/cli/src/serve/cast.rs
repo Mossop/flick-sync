@@ -329,6 +329,18 @@ impl CastDevice {
         devices: CastDevices,
         event_sender: broadcast::Sender<Event>,
     ) {
+        if let Ok(receiver_status) = self.client.receiver_status().await
+            && let Some(running_app) = receiver_status
+                .applications
+                .into_iter()
+                .find(|a| a.app_id == CastApp::DefaultMediaReceiver.app_id())
+        {
+            match self.client.join_session(&running_app).await {
+                Ok(_) => trace!(ip=%self.ip, "Joined existing session"),
+                Err(e) => warn!(ip=%self.ip, error = ?e, "Failed to join existing session"),
+            }
+        }
+
         if let Ok(media_status) = self.client.media_status().await {
             trace!(ip=%self.ip, ?media_status, "Initial media status");
             self.update_state(&flick_sync, media_status).await;
