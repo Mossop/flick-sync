@@ -54,6 +54,7 @@ rustls = { version = "0.23.25", default-features = false, features = [
   "logging",
   "std",
   "tls12",
+  "aws-lc-rs",
 ] }
 sysinfo = "0.38.4"
 opentelemetry = "0.31.0"
