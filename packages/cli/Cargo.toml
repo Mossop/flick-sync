@@ -3,9 +3,6 @@ name = "flick-sync-cli"
 version = "2.1.0"
 edition = "2024"
 
-[features]
-vendored-openssl = ["dep:openssl"]
-
 [[bin]]
 name = "flick-sync"
 path = "src/main.rs"
@@ -37,7 +34,6 @@ tokio-util = "0.7.13"
 image = "0.25.5"
 pin-project = "1.1.10"
 rust-embed = "8.6.0"
-openssl = { version = "0.10", features = ["vendored"], optional = true }
 tokio-stream = { version = "0.1.17", features = ["signal", "sync"] }
 actix-web = { version = "4.9.0", default-features = false, features = [
   "macros",
