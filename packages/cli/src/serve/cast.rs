@@ -28,6 +28,8 @@ use uuid::Uuid;
 use crate::serve::{ConnectionInfo, Event, ServiceData};
 
 const CONTENT_PREFIX: &str = "urn:flicksync:video:";
+const REFRESH_RATE: u64 = 10;
+const PLAYBACK_UPDATE_RATE: u64 = 5;
 
 #[derive(Template, Clone)]
 #[template(path = "castdevices.html")]
@@ -328,13 +330,16 @@ impl CastDevice {
         event_sender: broadcast::Sender<Event>,
     ) {
         if let Ok(media_status) = self.client.media_status().await {
+            trace!(ip=%self.ip, ?media_status, "Initial media status");
             self.update_state(&flick_sync, media_status).await;
         }
 
         CastManager::send_devices_status(&event_sender, devices.lock().await.values().collect())
             .await;
 
-        let mut timeout = Box::pin(sleep(Duration::from_secs(5)));
+        let mut playback_update_timeout =
+            Box::pin(sleep(Duration::from_secs(PLAYBACK_UPDATE_RATE)));
+        let mut refresh_timeout = Box::pin(sleep(Duration::from_secs(REFRESH_RATE)));
 
         loop {
             tokio::select! {
@@ -353,6 +358,7 @@ impl CastDevice {
                                 devices.lock().await.values().collect(),
                             )
                             .await;
+                            refresh_timeout = Box::pin(sleep(Duration::from_secs(REFRESH_RATE)));
                         }
                         CastEvent::MediaSessionEnded { idle_reason, .. }
                             if idle_reason != IdleReason::Interrupted =>
@@ -367,6 +373,7 @@ impl CastDevice {
                                 devices.lock().await.values().collect(),
                             )
                             .await;
+                            refresh_timeout = Box::pin(sleep(Duration::from_secs(REFRESH_RATE)));
                         }
                         CastEvent::Reconnecting { attempt } if attempt >= 5 => {
                             break;
@@ -374,10 +381,16 @@ impl CastDevice {
                         _ => {}
                     }
                 }
-                _ = &mut timeout => {
-                    timeout = Box::pin(sleep(Duration::from_secs(5)));
+                _ = &mut playback_update_timeout => {
+                    playback_update_timeout = Box::pin(sleep(Duration::from_secs(PLAYBACK_UPDATE_RATE)));
 
                     self.update_playback_state().await;
+                }
+                _ = &mut refresh_timeout => {
+                    refresh_timeout = Box::pin(sleep(Duration::from_secs(REFRESH_RATE)));
+
+                    // This forces a status update to be delivered in the normal event stream.
+                    let _ = self.client.media_status().await;
                 }
             }
         }
