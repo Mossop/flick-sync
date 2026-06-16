@@ -1,5 +1,10 @@
 import { StyleSheet, View } from "react-native";
-import { VideoMetadata, VideoView, useVideoPlayer } from "expo-video";
+import {
+  VideoSource,
+  VideoView,
+  createVideoPlayer,
+  VideoPlayer as ExpoVideoPlayer,
+} from "expo-video";
 import { useEventListener } from "expo";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as StatusBar from "expo-status-bar";
@@ -20,9 +25,10 @@ import {
   ViewSize,
 } from "../components/Store";
 import { useMediaStore, useVideo } from "../mediastore";
-import { useSsdp } from "../mediastore/SsdpService";
+import { useSsdpSuspense } from "../mediastore/SsdpService";
 import { PlaybackState } from "../state/base";
 import { Overlay, PlaybackStatus } from "../components/VideoOverlay";
+import { Video } from "../state";
 
 export const PLAYBACK_UPDATE_INTERVAL = 5000;
 
@@ -56,22 +62,55 @@ function needsPersist(
   return oldState.state != newState.state;
 }
 
-export default function VideoPlayer({ route }: AppScreenProps<"video">) {
+function useVideoPlayer(
+  videoSource: VideoSource,
+  init: (player: ExpoVideoPlayer) => void,
+): ExpoVideoPlayer | null {
+  let currentPlayer = useRef<ExpoVideoPlayer | null>(null);
+  let [player, setPlayer] = useState<ExpoVideoPlayer | null>(null);
+
+  useEffect(() => {
+    currentPlayer.current?.release();
+
+    currentPlayer.current = createVideoPlayer(videoSource);
+    init(currentPlayer.current);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPlayer(currentPlayer.current);
+
+    return () => {
+      currentPlayer.current?.release();
+      currentPlayer.current = null;
+    };
+  }, [init, videoSource]);
+
+  return player;
+}
+
+function VideoDisplay({
+  uri,
+  player,
+  video,
+  route,
+}: {
+  uri: string;
+  player: ExpoVideoPlayer;
+  video: Video;
+  route: AppScreenProps<"video">["route"];
+}) {
   let navigation = useNavigation<NativeStackNavigationProp<AppRoutes>>();
   let mediaStore = useMediaStore();
   let dispatchSetError = useAction(reportError);
-  let { suspend, resume } = useSsdp();
-  let viewSize = useSettings().viewSize ?? ViewSize.Safe;
   let dispatchSetViewSize = useAction(setViewSize);
+  let viewSize = useSettings().viewSize ?? ViewSize.Safe;
 
-  let { server, queue, index } = route.params;
+  let { queue, index } = route.params;
 
-  let video = useVideo(server, queue[index]);
+  let [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>(() => ({
+    position: player.currentTime * 1000,
+    duration: video.totalDuration,
+    isPlaying: false,
+  }));
 
-  let startPosition =
-    video.playbackState.state == "played" || route.params.restart
-      ? 0
-      : video.playPosition;
   let startState: PlaybackState =
     video.playbackState.state == "played" || route.params.restart
       ? { state: "unplayed" }
@@ -88,79 +127,21 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     [mediaStore, video],
   );
 
-  let [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>(() => ({
-    position: startPosition,
-    duration: video.totalDuration,
-    isPlaying: false,
-  }));
-
-  let uri: string | undefined = mediaStore.videoUri(video);
-  if (!uri) {
-    dispatchSetError("Unexpected non-downloaded video");
-    navigation.pop();
-  }
-
-  let metadata: VideoMetadata = {
-    title: video.title,
-    artwork: mediaStore.thumbnailUri(video),
-  };
-
-  let player = useVideoPlayer({ uri, metadata }, (p) => {
-    console.log(
-      `Initializing video playback of ${uri} at position ${startPosition}`,
-    );
-
-    p.timeUpdateEventInterval = 1;
-    p.keepScreenOnWhilePlaying = true;
-    p.showNowPlayingNotification = true;
-    p.currentTime = startPosition / 1000;
-    p.play();
-  });
-
-  let seek = useCallback(
-    (position: number): void => {
-      let actualPosition = Math.min(Math.max(position, 0), video.totalDuration);
-
-      player.seekBy(actualPosition / 1000 - player.currentTime);
-      player.play();
-    },
-    [video, player],
-  );
-
-  useEffect(() => {
-    suspend();
-    return () => {
-      resume();
-    };
-  }, [suspend, resume]);
-
-  useEffect(() => {
-    console.log("mount");
-    StatusBar.setStatusBarHidden(true, "fade");
-
-    defer(async () => {
-      await NavigationBar.setVisibilityAsync("hidden");
-      await ScreenOrientation.lockAsync(OrientationLock.LANDSCAPE);
-    });
-
-    return () => {
-      console.log("unmount");
-      StatusBar.setStatusBarHidden(false, "fade");
-
-      defer(async () => {
-        await NavigationBar.setVisibilityAsync("visible");
-        await ScreenOrientation.unlockAsync();
-      });
-    };
-  }, []);
-
   useEffect(() => {
     return () => {
       setPlayState(currentState.current);
     };
   }, [setPlayState]);
 
+  useEffect(() => {
+    player.play();
+  }, [player]);
+
   useEventListener(player, "timeUpdate", ({ currentTime }) => {
+    if (player.status == "loading") {
+      return;
+    }
+
     let position = currentTime * 1000;
     currentState.current = { state: "inprogress", position };
 
@@ -235,6 +216,23 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     [player],
   );
 
+  let updateViewSize = useCallback(
+    (viewSize: ViewSize) => {
+      dispatchSetViewSize(viewSize);
+    },
+    [dispatchSetViewSize],
+  );
+
+  let seek = useCallback(
+    (position: number): void => {
+      let actualPosition = Math.min(Math.max(position, 0), video.totalDuration);
+
+      player.seekBy(actualPosition / 1000 - player.currentTime);
+      player.play();
+    },
+    [video, player],
+  );
+
   let previous = useMemo(() => {
     if (index > 0) {
       return () => {
@@ -260,12 +258,97 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     return undefined;
   }, [navigation, index, queue]);
 
-  let updateViewSize = useCallback(
-    (viewSize: ViewSize) => {
-      dispatchSetViewSize(viewSize);
-    },
-    [dispatchSetViewSize],
+  return (
+    <>
+      <VideoView
+        key={uri}
+        player={player}
+        style={styles.video}
+        contentFit="contain"
+        nativeControls={false}
+      />
+      <Overlay
+        setViewSize={updateViewSize}
+        goPrevious={previous}
+        goNext={next}
+        seek={seek}
+        status={playbackStatus}
+        setPlaying={setPlaying}
+        viewSize={viewSize}
+        video={video}
+      />
+    </>
   );
+}
+
+export default function VideoPlayer({ route }: AppScreenProps<"video">) {
+  let navigation = useNavigation<NativeStackNavigationProp<AppRoutes>>();
+  let mediaStore = useMediaStore();
+  let dispatchSetError = useAction(reportError);
+  let viewSize = useSettings().viewSize ?? ViewSize.Safe;
+
+  let { server, queue, index } = route.params;
+
+  let video = useVideo(server, queue[index]);
+
+  let startPosition = useMemo(
+    () =>
+      video.playbackState.state == "played" || route.params.restart
+        ? 0
+        : video.playPosition,
+    [video, route.params.restart],
+  );
+
+  let uri: string | undefined = mediaStore.videoUri(video);
+  if (!uri) {
+    dispatchSetError("Unexpected non-downloaded video");
+    navigation.pop();
+  }
+
+  let artwork = mediaStore.thumbnailUri(video);
+
+  let playerInit = useCallback(
+    (player: ExpoVideoPlayer) => {
+      player.timeUpdateEventInterval = 1;
+      player.keepScreenOnWhilePlaying = true;
+      player.showNowPlayingNotification = true;
+      player.currentTime = startPosition / 1000;
+    },
+    [startPosition],
+  );
+
+  let videoSource = useMemo(
+    (): VideoSource => ({
+      uri,
+      metadata: {
+        title: video.title,
+        artwork,
+      },
+    }),
+    [uri, video.title, artwork],
+  );
+
+  let player = useVideoPlayer(videoSource, playerInit);
+
+  useSsdpSuspense();
+
+  useEffect(() => {
+    StatusBar.setStatusBarHidden(true, "fade");
+
+    defer(async () => {
+      await NavigationBar.setVisibilityAsync("hidden");
+      await ScreenOrientation.lockAsync(OrientationLock.LANDSCAPE);
+    });
+
+    return () => {
+      StatusBar.setStatusBarHidden(false, "fade");
+
+      defer(async () => {
+        await NavigationBar.setVisibilityAsync("visible");
+        await ScreenOrientation.unlockAsync();
+      });
+    };
+  }, []);
 
   return (
     <SafeAreaView
@@ -274,23 +357,9 @@ export default function VideoPlayer({ route }: AppScreenProps<"video">) {
     >
       <View style={styles.inner}>
         <SchemeOverride scheme="dark" />
-        <VideoView
-          key={uri}
-          player={player}
-          style={styles.video}
-          contentFit="contain"
-          nativeControls={false}
-        />
-        <Overlay
-          setViewSize={updateViewSize}
-          goPrevious={previous}
-          goNext={next}
-          seek={seek}
-          status={playbackStatus}
-          setPlaying={setPlaying}
-          viewSize={viewSize}
-          video={video}
-        />
+        {uri && player && (
+          <VideoDisplay uri={uri} video={video} route={route} player={player} />
+        )}
       </View>
     </SafeAreaView>
   );

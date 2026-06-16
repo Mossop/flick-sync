@@ -194,6 +194,16 @@ export function useSsdp(): SsdpContextValue {
   return useContext(SsdpContext);
 }
 
+export function useSsdpSuspense() {
+  let { suspend, resume } = useContext(SsdpContext);
+
+  useEffect(() => {
+    suspend();
+
+    return () => resume();
+  }, [suspend, resume]);
+}
+
 export function useActiveSearch() {
   let { setSearchInterval } = useSsdp();
 
