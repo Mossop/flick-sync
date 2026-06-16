@@ -75,7 +75,10 @@ export default memo(function MediaStorePicker() {
         {discoveredServers.map((url) => (
           <Suspense key={url} fallback={null}>
             <RemoteStoreItem
-              storePromise={UpnpMediaStore.init(url).catch(() => null)}
+              storePromise={UpnpMediaStore.init(url).catch((error) => {
+                console.error(error);
+                return null;
+              })}
             />
           </Suspense>
         ))}

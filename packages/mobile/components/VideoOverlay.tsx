@@ -143,13 +143,16 @@ function OverlayMeta({ video }: { video: Video }) {
     );
   }
 
+  let episode = video.index ? `e${pad(video.index)}` : "";
+
   return (
     <View style={styles.overlayMeta}>
       <Text variant="titleLarge" numberOfLines={1} ellipsizeMode="tail">
         {video.season.show.title}
       </Text>
       <Text variant="titleMedium" numberOfLines={1} ellipsizeMode="tail">
-        s{pad(video.season.index)}e{pad(video.index)} - {video.title}
+        s{pad(video.season.index)}
+        {episode} - {video.title}
       </Text>
     </View>
   );

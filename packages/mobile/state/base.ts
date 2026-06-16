@@ -71,7 +71,7 @@ export interface MovieDetail {
 
 export interface EpisodeDetail {
   season: string;
-  index: number;
+  index?: number;
 }
 
 export interface VideoPartState {

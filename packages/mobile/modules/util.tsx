@@ -33,7 +33,15 @@ function sorted<T>(
 export function byIndex(episodes: readonly Episode[]): Episode[] {
   return sorted(episodes, (a, b) => {
     if (a.season.index == b.season.index) {
-      return a.index - b.index;
+      if (a.index && b.index) {
+        return a.index - b.index;
+      }
+
+      if (a.airDate && b.airDate) {
+        return a.airDate.localeCompare(b.airDate);
+      }
+
+      return 0;
     }
     return a.season.index - b.season.index;
   });

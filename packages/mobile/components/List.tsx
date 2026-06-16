@@ -447,11 +447,14 @@ function MetaInfo(props: TextProps<never>) {
 
 function ListMeta({ item }: { item: ChildItem }) {
   if (item instanceof Episode) {
+    let episode = item.index ? `e${pad(item.index)}` : "";
+
     return (
       <View style={styles.listMeta}>
         <MetaTitle>{item.title}</MetaTitle>
         <MetaSub>
-          s{pad(item.season.index)}e{pad(item.index)} - {item.season.show.title}
+          s{pad(item.season.index)}
+          {episode} - {item.season.show.title}
         </MetaSub>
         <MetaInfo>{duration(item)}</MetaInfo>
       </View>

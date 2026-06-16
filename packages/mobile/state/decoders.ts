@@ -160,7 +160,7 @@ const MovieDetailDecoder = JsonDecoder.object<MovieDetail>(
 const EpisodeDetailDecoder = JsonDecoder.object<EpisodeDetail>(
   {
     season: JsonDecoder.string,
-    index: JsonDecoder.number,
+    index: JsonDecoder.optional(JsonDecoder.number),
   },
   "EpisodeState",
 );

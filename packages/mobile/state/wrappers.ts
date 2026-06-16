@@ -519,7 +519,7 @@ export class Episode
     return this.server.getSeason(this.state.detail.season);
   }
 
-  public get index(): number {
+  public get index(): number | undefined {
     return this.state.detail.index;
   }
 }
