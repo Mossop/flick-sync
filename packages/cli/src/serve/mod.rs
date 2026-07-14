@@ -44,6 +44,9 @@ mod middleware;
 mod services;
 
 const LOG_LIMIT: usize = 20;
+const INITIAL_SYNC_DELAY: Duration = Duration::from_secs(30);
+const SYNC_INTERVAL: Duration = Duration::from_secs(30 * 60);
+const SYNC_RETRY_DELAY: Duration = Duration::from_secs(30);
 
 #[derive(Args)]
 pub struct Serve {
@@ -353,9 +356,12 @@ async fn background_task(
     full_sync: bool,
 ) {
     select! {
-        _ = time::sleep(Duration::from_secs(30)).fuse() => {},
+        _ = time::sleep(INITIAL_SYNC_DELAY).fuse() => {},
         _ = wakeup.notified().fuse() => {},
     }
+
+    let mut last_succeeded = true;
+    let mut next_delay = SYNC_INTERVAL;
 
     loop {
         status.lock().unwrap().is_syncing = true;
@@ -364,12 +370,15 @@ async fn background_task(
 
         flick_sync.prune_root().await;
 
+        let mut any_failed = false;
+
         for server in flick_sync.servers().await {
             task.sync_started(server.clone()).await;
 
             if let Err(e) = server.update_state(full_sync).await {
                 warn!(server=server.id(), error=?e, "Failed to update server");
                 task.sync_failed(server, e).await;
+                any_failed = true;
                 continue;
             }
 
@@ -384,20 +393,42 @@ async fn background_task(
                     Ok(complete) => {
                         server.write_playlists().await;
                         task.sync_finished(server, complete).await;
+                        if !complete {
+                            any_failed = true;
+                        }
                     }
-                    Err(e) => task.sync_failed(server, e).await,
+                    Err(e) => {
+                        task.sync_failed(server, e).await;
+                        any_failed = true;
+                    }
                 }
             } else {
                 task.sync_finished(server, false).await;
             }
         }
 
+        if any_failed {
+            if last_succeeded {
+                next_delay = SYNC_RETRY_DELAY;
+            } else {
+                next_delay *= 2;
+
+                if next_delay > SYNC_INTERVAL {
+                    next_delay = SYNC_INTERVAL;
+                }
+            }
+        } else {
+            next_delay = SYNC_INTERVAL;
+        }
+
+        last_succeeded = !any_failed;
+
         status.lock().unwrap().is_syncing = false;
         task.send_event(Event::SyncChange);
         let _ = event_sender.send(Event::SyncEnd);
 
         select! {
-            _ = time::sleep(Duration::from_secs(30 * 60)).fuse() => {},
+            _ = time::sleep(next_delay).fuse() => {},
             _ = wakeup.notified().fuse() => {},
         }
     }
