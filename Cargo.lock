@@ -525,6 +525,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
 
 [[package]]
+name = "async-timeouts"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "893716ed30e6a33c7b241ab868b050b583983eb2eba3c016cb1c10cfca6cc5b8"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1370,6 +1379,7 @@ version = "2.1.0"
 dependencies = [
  "anyhow",
  "async-recursion",
+ "async-timeouts",
  "file-format",
  "futures",
  "lazy_static",

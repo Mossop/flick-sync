@@ -8,11 +8,13 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     result,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
 
 use anyhow::{anyhow, bail};
+use async_timeouts::Timeout as AsyncTimeout;
 use futures::io::AsyncWrite;
 use pathdiff::diff_paths;
 use pin_project::pin_project;
@@ -26,7 +28,7 @@ use time::{Date, OffsetDateTime};
 use tokio::{
     fs::{File, OpenOptions, create_dir_all, metadata},
     io::{AsyncWriteExt, BufWriter},
-    sync::OwnedSemaphorePermit,
+    sync::{Notify, OwnedSemaphorePermit},
     time::sleep,
 };
 use tracing::{debug, info, instrument, trace, warn};
@@ -48,6 +50,7 @@ use crate::{
 type EventWriter = xml::writer::EventWriter<std::fs::File>;
 
 const METADATA_DIR: &str = ".metadata";
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum FileType {
@@ -499,6 +502,7 @@ struct WriterProgress<'a, W, P> {
     offset: u64,
     #[pin]
     writer: W,
+    timeout: AsyncTimeout,
     progress: &'a mut P,
     access_permit: &'a mut Option<OwnedSemaphorePermit>,
 }
@@ -513,10 +517,17 @@ where
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<result::Result<usize, futures::io::Error>> {
+        let timeout = self.timeout.clone();
+
         let this = self.project();
+
         let result = this.writer.poll_write(cx, buf);
 
         if let Poll::Ready(Ok(count)) = result {
+            if count > 0 {
+                tokio::spawn(async move { timeout.reset(DOWNLOAD_TIMEOUT).await });
+            }
+
             *this.offset += count as u64;
             if *this.offset > 8096 {
                 this.access_permit.take();
@@ -532,10 +543,16 @@ where
         cx: &mut Context<'_>,
         bufs: &[IoSlice<'_>],
     ) -> Poll<result::Result<usize, futures::io::Error>> {
+        let timeout = self.timeout.clone();
+
         let this = self.project();
         let result = this.writer.poll_write_vectored(cx, bufs);
 
         if let Poll::Ready(Ok(count)) = result {
+            if count > 0 {
+                tokio::spawn(async move { timeout.reset(DOWNLOAD_TIMEOUT).await });
+            }
+
             this.access_permit.take();
             *this.offset += count as u64;
             this.progress.progress(*this.offset);
@@ -1492,15 +1509,32 @@ impl Video {
             progress.length(len);
         }
 
+        let timed_out = Arc::new(Notify::new());
+        let timed_out_inner = timed_out.clone();
+        let timeout = AsyncTimeout::set(DOWNLOAD_TIMEOUT, async move {
+            timed_out_inner.notify_one();
+        })
+        .await;
+
         let writer = WriterProgress {
             offset,
             writer: AsyncWriteAdapter::new(BufWriter::new(file)),
             progress,
             access_permit: &mut None,
+            timeout,
         };
         info!(path=?path, offset, "Downloading source file");
 
-        item.download(writer, offset..).await?;
+        tokio::select! {
+            result = item.download(writer, offset..) => {
+                if let Err(e) = result {
+                    bail!(e);
+                }
+            }
+            _ = timed_out.notified() => {
+                bail!("Download timed out");
+            }
+        };
 
         info!(path=?path, "Download complete");
 
