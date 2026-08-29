@@ -44,14 +44,6 @@ class PlaybackDevice {
     return this.#player;
   }
 
-  get isPlaying() {
-    return this.#player.isPlaying;
-  }
-
-  set isPlaying(val) {
-    this.#player.isPlaying = val;
-  }
-
   get currentTime() {
     return this.#player.currentTime;
   }
@@ -270,7 +262,7 @@ class LocalPlayback extends PlaybackDevice {
 
     if (this.#videoElement) {
       this.#videoElement.currentTime = this.currentTime;
-      if (this.isPlaying) {
+      if (this.player.isPlaying !== false) {
         this.#videoElement.play();
       } else {
         this.#videoElement.pause();
@@ -298,7 +290,9 @@ class LocalPlayback extends PlaybackDevice {
       return;
     }
 
-    this.isPlaying = !(this.#videoElement.paused || this.#videoElement.ended);
+    this.player.isPlaying = !(
+      this.#videoElement.paused || this.#videoElement.ended
+    );
     this.updateTime(this.#videoElement.currentTime);
   };
 
@@ -495,7 +489,7 @@ export class VideoPlayer extends LitElement {
   constructor() {
     super();
     this.currentTime = 0;
-    this.isPlaying = true;
+    this.isPlaying = null;
     this.onFullscreenChanged();
 
     this.seekBack30 = (event) => this.seekPressed(event, -30);
@@ -504,23 +498,6 @@ export class VideoPlayer extends LitElement {
     this.seekForward30 = (event) => this.seekPressed(event, 30);
 
     this.addEventListener("fullscreenchange", () => this.onFullscreenChanged());
-  }
-
-  renderedVideo(element) {
-    if (this.videoElement != element) {
-      this.videoElement?.pause();
-    }
-
-    this.videoElement = element;
-
-    if (this.videoElement) {
-      this.videoElement.currentTime = this.currentTime;
-      if (this.isPlaying) {
-        this.videoElement.play();
-      } else {
-        this.videoElement.pause();
-      }
-    }
   }
 
   connectedCallback() {
@@ -543,10 +520,10 @@ export class VideoPlayer extends LitElement {
 
     event.stopPropagation();
 
-    if (this.isPlaying) {
-      this.playbackDevice.pause();
-    } else {
+    if (this.isPlaying !== true) {
       this.playbackDevice.play();
+    } else {
+      this.playbackDevice.pause();
     }
   }
 
