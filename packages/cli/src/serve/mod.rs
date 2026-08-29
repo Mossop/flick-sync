@@ -528,6 +528,7 @@ impl Runnable for Serve {
                 .service(services::delete_sync)
                 .service(services::delete_server)
                 .service(services::create_sync)
+                .service(services::start_sync)
                 .service(services::index_page)
         })
         .on_connect(on_connect)

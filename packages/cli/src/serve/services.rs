@@ -949,6 +949,13 @@ pub(super) async fn create_sync(
     }
 }
 
+#[post("/start_sync")]
+pub(super) async fn start_sync(ThinData(service_data): ThinData<ServiceData>) -> HttpResponse {
+    let _ = service_data.event_sender.send(Event::SyncChange);
+    service_data.sync_trigger.notify_waiters();
+    HttpResponse::Ok().finish()
+}
+
 #[get("/syncs")]
 pub(super) async fn sync_list(
     ThinData(service_data): ThinData<ServiceData>,

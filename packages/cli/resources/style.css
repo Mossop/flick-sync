@@ -224,7 +224,10 @@ body.sidebar {
 }
 
 #synclist-header {
-  text-align: end;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
 }
 
 #server-cards {
