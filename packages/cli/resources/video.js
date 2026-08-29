@@ -496,6 +496,7 @@ export class VideoPlayer extends LitElement {
     this.seekBack10 = (event) => this.seekPressed(event, -10);
     this.seekForward10 = (event) => this.seekPressed(event, 10);
     this.seekForward30 = (event) => this.seekPressed(event, 30);
+    this.keyPressed = (event) => this.#keyPressed(event);
 
     this.addEventListener("fullscreenchange", () => this.onFullscreenChanged());
   }
@@ -511,15 +512,47 @@ export class VideoPlayer extends LitElement {
     } else {
       this.playbackDevice = new LocalPlayback(this);
     }
+
+    document.addEventListener("keydown", this.keyPressed);
   }
 
-  togglePlayback(event) {
+  disconnectedCallback() {
+    super.disconnectedCallback();
+
+    document.removeEventListener("keydown", this.keyPressed);
+  }
+
+  #keyPressed(event) {
+    let delta = event.shiftKey ? 30 : 10;
+
+    switch (event.key) {
+      case "ArrowLeft":
+        this.seek(Math.max(0, this.currentTime - delta));
+        break;
+      case "ArrowRight":
+        this.seek(Math.max(0, this.currentTime + delta));
+        break;
+      case " ":
+        this.togglePlayback();
+        break;
+      default:
+        return;
+    }
+
+    event.stopPropagation();
+    event.preventDefault();
+  }
+
+  togglePlaybackClicked(event) {
     if (event.button != 0) {
       return;
     }
 
     event.stopPropagation();
+    this.togglePlayback();
+  }
 
+  togglePlayback() {
     if (this.isPlaying !== true) {
       this.playbackDevice.play();
     } else {
@@ -662,7 +695,7 @@ export class VideoPlayer extends LitElement {
       ${this.playbackDevice.render()}
       <div class=${classMap(classes)} @mousemove="${this.showOverlay}">
         ${this.renderOverlayInfo()}
-        <div class="main" @click="${this.togglePlayback}">
+        <div class="main" @click="${this.togglePlaybackClicked}">
           <sl-icon-button
             library="material"
             name="replay_30"
@@ -677,7 +710,7 @@ export class VideoPlayer extends LitElement {
             class="togglePlayback"
             library="material"
             name="${toggleIcon}"
-            @click="${this.togglePlayback}"
+            @click="${this.togglePlaybackClicked}"
           ></sl-icon-button>
           <sl-icon-button
             library="material"
@@ -694,7 +727,7 @@ export class VideoPlayer extends LitElement {
           <sl-icon-button
             library="material"
             name="${toggleIcon}"
-            @click="${this.togglePlayback}"
+            @click="${this.togglePlaybackClicked}"
           ></sl-icon-button>
           <div class="time start">${formatTime(this.currentTime)}</div>
           <div class="progress" @click="${this.onProgressClicked}">
