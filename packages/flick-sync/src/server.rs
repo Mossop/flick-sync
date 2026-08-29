@@ -25,10 +25,7 @@ use plex_api::{
     media_container::server::library::MetadataType,
 };
 use scoped_futures::{ScopedBoxFuture, ScopedFutureExt};
-use tokio::{
-    fs::{read_dir, remove_dir, remove_dir_all, remove_file},
-    sync::{Mutex, RwLockMappedWriteGuard, RwLockWriteGuard},
-};
+use tokio::fs::{read_dir, remove_dir, remove_dir_all, remove_file};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
@@ -39,6 +36,7 @@ use crate::{
         CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, SeasonState,
         ServerState, ShowState, VideoState,
     },
+    sync::{Mutex, RwLockMappedWriteGuard, RwLockWriteGuard},
     sync::{OpMutex, OpReadGuard, OpWriteGuard, Timeout},
     util::{parallelize, safe},
     wrappers,
@@ -250,7 +248,7 @@ impl Server {
         Self {
             id: id.to_owned(),
             inner: inner.clone(),
-            connection: Arc::new(Mutex::new(None)),
+            connection: Arc::new(Mutex::new("connection", None)),
         }
     }
 

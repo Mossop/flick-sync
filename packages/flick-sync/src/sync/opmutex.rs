@@ -19,10 +19,11 @@ use pin_project::pin_project;
 use tokio::{
     fs,
     io::{AsyncRead, AsyncSeek, BufReader, ReadBuf},
-    sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock},
     time::timeout,
 };
 use tracing::trace;
+
+use crate::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 type Lock = Arc<RwLock<()>>;
 
@@ -87,7 +88,7 @@ impl OpMutex {
             .unwrap()
             .entry(key.clone())
             .and_modify(|(_, count)| *count += 1)
-            .or_insert_with(|| (Lock::default(), 1))
+            .or_insert_with(|| (Lock::new(RwLock::new("OpMutex", ())), 1))
             .0
             .clone()
     }

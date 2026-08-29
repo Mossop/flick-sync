@@ -183,42 +183,56 @@ macro_rules! thumbnail_methods {
                 thumbnail.needs_update(last_updated)
             };
 
+            if !must_download {
+                return Ok(());
+            }
+
             self.update_state(|s| s.thumbnail = thumbnail.clone())
                 .await?;
 
-            if must_download {
-                let server = self.server.connect().await?;
-                let item = server.item_by_id(&self.id).await?;
-                debug!("Updating thumbnail for {}", item.title());
+            std::mem::drop(guard);
 
-                let image = if let Some(ref thumb) = item.metadata().thumb {
-                    thumb.clone()
-                } else if let Some(ref composite) = item.metadata().composite {
-                    composite.clone()
-                } else {
-                    warn!("No thumbnail found for {}", item.title());
-                    return Ok(());
-                };
+            let server = self.server.connect().await?;
+            let item = server.item_by_id(&self.id).await?;
+            debug!("Updating thumbnail for {}", item.title());
 
-                let target = self.server.inner.path.join(&thumbnail_path);
+            let image = if let Some(ref thumb) = item.metadata().thumb {
+                thumb.clone()
+            } else if let Some(ref composite) = item.metadata().composite {
+                composite.clone()
+            } else {
+                warn!("No thumbnail found for {}", item.title());
+                return Ok(());
+            };
 
-                if let Some(parent) = target.parent() {
-                    create_dir_all(parent).await?;
-                }
+            let mut buffer: Vec<u8> = Vec::new();
+            let file = AsyncWriteAdapter::new(&mut buffer);
+            server
+                .transcode_artwork(&image, 320, 320, Default::default(), file)
+                .await?;
 
-                let file = AsyncWriteAdapter::new(File::create(&target).await?);
-                server
-                    .transcode_artwork(&image, 320, 320, Default::default(), file)
-                    .await?;
+            let Ok(guard) = self.try_lock_write().await else {
+                return Ok(());
+            };
 
-                let state = RelatedFileState::Stored {
-                    path: thumbnail_path,
-                    updated: OffsetDateTime::now_utc(),
-                };
+            let target = self.server.inner.path.join(&thumbnail_path);
 
-                self.update_state(|s| s.thumbnail = state).await?;
-                trace!("Thumbnail for {} successfully updated", item.title());
+            if let Some(parent) = target.parent() {
+                create_dir_all(parent).await?;
             }
+
+            let mut file = File::create(target).await?;
+            file.write_all(&buffer).await?;
+
+            let state = RelatedFileState::Stored {
+                path: thumbnail_path,
+                updated: OffsetDateTime::now_utc(),
+            };
+
+            self.update_state(|s| s.thumbnail = state).await?;
+            trace!("Thumbnail for {} successfully updated", item.title());
+
+            std::mem::drop(guard);
 
             Ok(())
         }

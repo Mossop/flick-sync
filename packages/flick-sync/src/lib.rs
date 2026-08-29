@@ -27,12 +27,17 @@ use state::{ServerState, State};
 use time::OffsetDateTime;
 use tokio::{
     fs::{read_dir, read_to_string, remove_dir_all, remove_file},
-    sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, Semaphore},
+    sync::Semaphore,
 };
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
-use crate::{config::H264Profile, schema::MigratableStore, util::safe_write};
+use crate::{
+    config::H264Profile,
+    schema::MigratableStore,
+    sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    util::safe_write,
+};
 pub use crate::{
     config::{OutputStyle, ServerConnection},
     server::{DownloadProgress, ItemType, Progress, Server, SyncItemInfo, SyncProgress},
@@ -195,10 +200,10 @@ impl FlickSync {
         Ok(Self {
             inner: Arc::new(Inner {
                 download_permits: Arc::new(Semaphore::new(config.max_downloads.unwrap_or(4))),
-                config: RwLock::new(config),
-                state: RwLock::new(state),
+                config: RwLock::new("config", config),
+                state: RwLock::new("state", state),
                 path: path.to_owned(),
-                servers: Default::default(),
+                servers: Mutex::new("servers", Default::default()),
             }),
         })
     }
@@ -346,7 +351,7 @@ impl FlickSync {
             .collect()
     }
 
-    #[instrument(skip_all)]
+    #[instrument(level = "trace", skip_all)]
     pub async fn prune_root(&self) {
         info!("Pruning root filesystem");
 
