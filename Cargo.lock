@@ -2923,7 +2923,7 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 [[package]]
 name = "plex-api"
 version = "0.0.12"
-source = "git+https://github.com/worried-networking/plex-api.rs?rev=bbbf4e97b3e862b124e6d3f92eb7c0d1b2deb91c#bbbf4e97b3e862b124e6d3f92eb7c0d1b2deb91c"
+source = "git+https://github.com/worried-networking/plex-api.rs?rev=eebb89f5bfa8f970eedd5523539245727ce05d4f#eebb89f5bfa8f970eedd5523539245727ce05d4f"
 dependencies = [
  "content_disposition",
  "enum_dispatch",
@@ -2944,7 +2944,7 @@ dependencies = [
  "serde_repr",
  "serde_urlencoded",
  "serde_with",
- "sysinfo 0.39.2",
+ "sysinfo 0.40.1",
  "thiserror",
  "time",
  "tracing",
@@ -3092,9 +3092,9 @@ checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
 
 [[package]]
 name = "quick-xml"
-version = "0.40.1"
+version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2474bd2e5029e7ccb6abb2ba48cf2383a333851dedf495901544281590c7da7f"
+checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
 dependencies = [
  "memchr",
  "serde",
@@ -4066,9 +4066,9 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.39.2"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14311e7e9a03114cd4b65eedd54e8fed2945e17f08586ae97ef53bc0669f9581"
+checksum = "0e8a3edbe0394ce115f3917a00349dd242be09eb5a091ed509eaf67b55cfb8a8"
 dependencies = [
  "libc",
  "memchr",
