@@ -1,0 +1,28 @@
+{
+	"luci-app-flick-sync": {
+		"description": "Grant access to Flick Sync configuration",
+		"read": {
+			"ubus": {
+				"service": [
+					"list"
+				],
+				"file": [
+					"read"
+				]
+			},
+			"uci": [
+				"flick-sync"
+			],
+			"file": {
+				"/var/run/flick-sync/store": [
+					"read"
+				]
+			}
+		},
+		"write": {
+			"uci": [
+				"flick-sync"
+			]
+		}
+	}
+}

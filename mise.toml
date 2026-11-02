@@ -14,6 +14,16 @@ env = { CROSS_CONTAINER_OPTS = "--platform linux/amd64" }
 description = "Cross-compile flick-sync for The Raspberry Pi 4"
 run = "cross build --release --target aarch64-unknown-linux-gnu"
 
+[tasks."build:openwrt"]
+env = { CROSS_CONTAINER_OPTS = "--platform linux/amd64" }
+description = "Cross-compile flick-sync for aarch64 OpenWrt devices (e.g. the GL.iNet GL-BE10000)"
+run = "cross build --release --target aarch64-unknown-linux-musl"
+
+[tasks."package:openwrt"]
+description = "Builds opkg packages (.ipk) of flick-sync and its LuCI app for aarch64 OpenWrt devices"
+depends = ["build:openwrt"]
+run = "./openwrt/build-ipk.sh target/aarch64-unknown-linux-musl/release/flick-sync"
+
 [tasks.build]
 description = "Builds the flick-sync server"
 sources = [

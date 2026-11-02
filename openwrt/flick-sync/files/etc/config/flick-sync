@@ -1,0 +1,14 @@
+config flick-sync 'main'
+	# Set to '0' to prevent the service from starting.
+	option enabled '1'
+	# The directory to store synced media and state in. Leave blank to search
+	# mounted external storage: the root of every partition under /tmp/mountd
+	# and every directory one level below is checked for a flicksync.json file.
+	option store ''
+	# The port for the web interface. Port 80 is used by LuCI.
+	option port '3000'
+	# Optional TLS certificate and private key (PEM) to serve over HTTPS.
+	option certificate ''
+	option private_key ''
+	# Set to '0' to sync from Plex. By default existing content is served only.
+	option disable_syncing '1'

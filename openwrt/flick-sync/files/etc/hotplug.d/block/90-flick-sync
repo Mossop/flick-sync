@@ -1,0 +1,36 @@
+# Restarts flick-sync when the storage holding its store goes away, and when
+# storage appears while no store has been found. Restarting re-enters the
+# start script's search for a store.
+#
+# The start script records the store it is using in STORE_FILE.
+
+STORE_FILE=/var/run/flick-sync/store
+
+[ "$DEVTYPE" = "partition" ] || [ "$DEVTYPE" = "disk" ] || exit 0
+/etc/init.d/flick-sync enabled || exit 0
+
+store_available() {
+	local store
+
+	[ -f "$STORE_FILE" ] || return 1
+	store=$(cat "$STORE_FILE")
+	[ -n "$store" ] && [ -e "$store/flicksync.json" ]
+}
+
+case "$ACTION" in
+remove)
+	store_available && exit 0
+	logger -t flick-sync "Storage removed and store is unavailable, restarting"
+	/etc/init.d/flick-sync restart
+	;;
+add)
+	# Mounting happens after the device appears, so wait before checking.
+	# Run in the background so that other hotplug handlers are not delayed.
+	(
+		sleep 5
+		store_available && exit 0
+		logger -t flick-sync "Storage added while no store is available, restarting"
+		/etc/init.d/flick-sync restart
+	) &
+	;;
+esac

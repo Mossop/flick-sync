@@ -1,0 +1,53 @@
+#!/bin/sh
+# Starts flick-sync, locating the store on mounted external storage when no
+# store has been configured.
+#
+# Partitions are mounted at /tmp/mountd/<name>. The root of every partition
+# and every directory one level below it are checked for a flicksync.json
+# file. The first match is used.
+#
+# Exits non-zero when no store can be found so that procd can retry once the
+# storage has been mounted.
+
+MOUNT_ROOT=/tmp/mountd
+# Where the store in use is recorded for the block hotplug handler.
+STORE_FILE=/var/run/flick-sync/store
+
+find_store() {
+	local partition dir
+
+	for partition in "$MOUNT_ROOT"/*; do
+		[ -d "$partition" ] || continue
+
+		if [ -f "$partition/flicksync.json" ]; then
+			echo "$partition"
+			return 0
+		fi
+
+		for dir in "$partition"/*; do
+			if [ -d "$dir" ] && [ -f "$dir/flicksync.json" ]; then
+				echo "$dir"
+				return 0
+			fi
+		done
+	done
+
+	return 1
+}
+
+if [ -z "$FLICK_SYNC_STORE" ]; then
+	FLICK_SYNC_STORE=$(find_store)
+
+	if [ -z "$FLICK_SYNC_STORE" ]; then
+		logger -t flick-sync "No store configured and no flicksync.json found under $MOUNT_ROOT"
+		exit 1
+	fi
+
+	logger -t flick-sync "Using store $FLICK_SYNC_STORE"
+	export FLICK_SYNC_STORE
+fi
+
+mkdir -p "$(dirname "$STORE_FILE")"
+echo "$FLICK_SYNC_STORE" > "$STORE_FILE"
+
+exec /usr/bin/flick-sync "$@"
