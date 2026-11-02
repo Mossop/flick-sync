@@ -8,6 +8,8 @@ node = "22"
 vars = { tuple = "aarch64-unknown-linux-gnu" }
 env = { CROSS_CONTAINER_OPTS = "--platform linux/amd64" }
 sources = [
+  "Cargo.lock",
+  "packages/*/Cargo.toml",
   "packages/**/*.rs",
   "packages/cli/resources/**/*",
   "packages/cli/templates/*.html",
@@ -19,19 +21,19 @@ run = [
 ]
 
 [tasks."build:pizero"]
+extends = "crossbuild"
 description = "Cross-compile flick-sync for The Raspberry Pi Zero"
 vars = { tuple = "arm-unknown-linux-gnueabihf" }
-extends = "crossbuild"
 
 [tasks."build:pi4"]
+extends = "crossbuild"
 description = "Cross-compile flick-sync for The Raspberry Pi 4"
 vars = { tuple = "aarch64-unknown-linux-gnu" }
-extends = "crossbuild"
 
 [tasks."build:openwrt"]
+extends = "crossbuild"
 description = "Cross-compile flick-sync for aarch64 OpenWrt devices (e.g. the GL.iNet GL-BE10000)"
 vars = { tuple = "aarch64-unknown-linux-musl" }
-extends = "crossbuild"
 
 [tasks."package:openwrt"]
 description = "Builds opkg packages (.ipk) of flick-sync and its LuCI app for aarch64 OpenWrt devices"
@@ -41,6 +43,8 @@ run = "./openwrt/build-ipk.sh target/aarch64-unknown-linux-musl/release/flick-sy
 [tasks.build]
 description = "Builds the flick-sync server"
 sources = [
+  "Cargo.lock",
+  "packages/*/Cargo.toml",
   "packages/**/*.rs",
   "packages/cli/resources/**/*",
   "packages/cli/templates/*.html",
