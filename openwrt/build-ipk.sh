@@ -102,6 +102,15 @@ chmod 755 "$PKG/data/usr/bin/flick-sync" "$PKG/data/etc/init.d/flick-sync" \
 chmod 644 "$PKG/data/etc/config/flick-sync" "$PKG/data/etc/hotplug.d/block/90-flick-sync"
 echo "/etc/config/flick-sync" > "$PKG/control/conffiles"
 write_default_scripts "$PKG/control"
+# default_postinst only starts the service, and procd leaves an already running
+# instance alone unless its definition (arguments, environment or config file)
+# changed. Restart it on an upgrade or reinstall so the new binary is used.
+cat >> "$PKG/control/postinst" <<'SCRIPT'
+[ -n "${IPKG_INSTROOT}" ] || [ "${PKG_UPGRADE}" != "1" ] || {
+	/etc/init.d/flick-sync running && /etc/init.d/flick-sync restart
+}
+exit 0
+SCRIPT
 cat > "$WORK/flick-sync.fields" <<FIELDS
 Section: multimedia
 Priority: optional
