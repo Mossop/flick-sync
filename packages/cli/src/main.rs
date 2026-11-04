@@ -143,8 +143,10 @@ struct Args {
     #[clap(short, long, env = "FLICK_SYNC_TELEMETRY")]
     telemetry: Option<String>,
 
-    #[clap(long, env = "FLICK_SYNC_TRACE")]
-    trace: bool,
+    /// Only log messages at this level or above (error, warn, info, debug or
+    /// trace). Overrides the default logging configuration.
+    #[clap(long, env = "FLICK_SYNC_LOG_LEVEL")]
+    log_level: Option<Level>,
 
     #[clap(subcommand)]
     command: Command,
@@ -221,10 +223,12 @@ async fn wrapped_main(args: Args, console: Console) -> Result {
 
 fn init_logging(
     console: Console,
-    trace: bool,
+    log_level: Option<Level>,
     telemetry: Option<&str>,
 ) -> result::Result<Option<SdkTracerProvider>, Box<dyn Error>> {
-    let targets = if trace || cfg!(debug_assertions) {
+    let targets = if let Some(level) = log_level {
+        Targets::new().with_default(level)
+    } else if cfg!(debug_assertions) {
         Targets::new()
             .with_target("flick_sync", Level::TRACE)
             .with_target("flick_sync_cli", Level::TRACE)
@@ -302,7 +306,7 @@ async fn main() -> Result {
 
     let console = Console::default();
 
-    let provider = match init_logging(console.clone(), args.trace, args.telemetry.as_deref()) {
+    let provider = match init_logging(console.clone(), args.log_level, args.telemetry.as_deref()) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("Failed to initialise logging: {e}");

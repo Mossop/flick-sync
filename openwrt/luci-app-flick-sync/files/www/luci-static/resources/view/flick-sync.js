@@ -123,6 +123,15 @@ return view.extend({
 		o.rmempty = false;
 		o.default = '1';
 
+		o = s.option(form.ListValue, 'log_level', _('Log level'),
+			_('Only log messages at this level or above to the system log.'));
+		o.value('error', _('Error'));
+		o.value('warn', _('Warning'));
+		o.value('info', _('Info'));
+		o.value('debug', _('Debug'));
+		o.value('trace', _('Trace'));
+		o.default = 'warn';
+
 		return m.render();
 	}
 });
