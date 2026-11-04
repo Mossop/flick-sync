@@ -30,6 +30,7 @@ use crate::serve::{ConnectionInfo, Event, ServiceData};
 const CONTENT_PREFIX: &str = "urn:flicksync:video:";
 const REFRESH_RATE: u64 = 10;
 const PLAYBACK_UPDATE_RATE: u64 = 5;
+const CONNECT_TIMEOUT: u64 = 10;
 
 #[derive(Template, Clone)]
 #[template(path = "castdevices.html")]
@@ -387,7 +388,12 @@ impl CastDevice {
                             .await;
                             refresh_timeout = Box::pin(sleep(Duration::from_secs(REFRESH_RATE)));
                         }
-                        CastEvent::Reconnecting { attempt } if attempt >= 5 => {
+                        CastEvent::HeartbeatTimeout => {
+                            warn!(ip=%self.ip, "Cast device stopped responding");
+                            break;
+                        }
+                        CastEvent::Disconnected(reason) => {
+                            warn!(ip=%self.ip, ?reason, "Cast device disconnected");
                             break;
                         }
                         _ => {}
@@ -400,6 +406,12 @@ impl CastDevice {
                 }
                 _ = &mut refresh_timeout => {
                     refresh_timeout = Box::pin(sleep(Duration::from_secs(REFRESH_RATE)));
+
+                    // Some failures (e.g. write errors) don't generate an event.
+                    if !self.client.is_connected() {
+                        warn!(ip=%self.ip, "Lost connection to cast device");
+                        break;
+                    }
 
                     // This forces a status update to be delivered in the normal event stream.
                     let _ = self.client.media_status().await;
@@ -500,9 +512,7 @@ impl CastManager {
             };
 
             while let Some(device) = stream.recv().await {
-                let mut devices_l = devices.lock().await;
-
-                if devices_l.contains_key(&device.ip) {
+                if devices.lock().await.contains_key(&device.ip) {
                     continue;
                 }
 
@@ -512,7 +522,18 @@ impl CastManager {
 
                 debug!(name = device.name, ip = %device.ip, capabilities=?device.capabilities, "Found cast device");
 
-                match device.connect().await {
+                // Auto-reconnect is disabled as it takes over a minute to give
+                // up on a device that has gone away. Instead, when the
+                // connection is lost the device is dropped straight away and
+                // will be picked up again by discovery once it is back.
+                // The devices lock must not be held while connecting as that
+                // would block everything else until the connection completes.
+                let connect = CastClient::builder(device.ip.to_string(), device.port)
+                    .auto_reconnect(false)
+                    .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT))
+                    .connect();
+
+                match connect.await {
                     Ok(client) => {
                         let (sender, _) = broadcast::channel(5);
                         let cast_device = CastDevice {
@@ -524,7 +545,7 @@ impl CastManager {
                             sender,
                         };
 
-                        devices_l.insert(device.ip, cast_device.clone());
+                        devices.lock().await.insert(device.ip, cast_device.clone());
 
                         tokio::spawn(token.clone().run_until_cancelled_owned(cast_device.monitor(
                             flick_sync.clone(),
