@@ -25,6 +25,16 @@ function formatTime(time) {
   }
 }
 
+function showError(message) {
+  let alert = document.createElement("sl-alert");
+  alert.variant = "danger";
+  alert.closable = true;
+  alert.duration = 15000;
+  alert.textContent = message;
+  document.body.append(alert);
+  customElements.whenDefined("sl-alert").then(() => alert.toast());
+}
+
 class PlaybackDevice {
   #player = null;
 
@@ -149,6 +159,13 @@ class CastPlayback extends PlaybackDevice {
 
     let message = JSON.parse(event.data);
     console.log("Cast event", message);
+
+    if (message.type == "error") {
+      console.error("Cast error", message.message);
+      showError(message.message);
+      this.#onCastDisconnect();
+      return;
+    }
 
     if (
       message.type == "castState" &&
