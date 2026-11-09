@@ -421,7 +421,7 @@ impl Show {
                     if output_style == OutputStyle::Standardized {
                         format!("dvdcover.{extension}")
                     } else {
-                        format!("{}.{extension}", &self.id)
+                        format!("{}.{extension}", self.id)
                     }
                 }
                 FileType::Metadata => {

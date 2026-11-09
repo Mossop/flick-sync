@@ -292,7 +292,7 @@ impl<W: Write> ToXml<W> for Root {
                 st
             }
         }) {
-            format!("{} ({})", &self.server_name, hostname)
+            format!("{} ({})", self.server_name, hostname)
         } else {
             self.server_name.clone()
         };

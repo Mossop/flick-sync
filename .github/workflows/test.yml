@@ -12,45 +12,29 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
 
-      - name: Setup build cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
+      # Also caches the build, reports compiler, clippy and rustfmt problems
+      # as annotations, and makes warnings fail the build (RUSTFLAGS is set
+      # to "-D warnings").
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-          components: rustfmt, clippy
+          components: clippy
+
+      # rustfmt.toml uses options that are only available on nightly.
+      - name: Install nightly rustfmt
+        run: rustup toolchain install nightly --profile minimal --component rustfmt --allow-downgrade
 
       - name: Cargo check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --all-features
+        run: cargo check --all-features
 
       - name: Clippy
-        uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features
+        run: cargo clippy --all-features
 
       - name: Rustfmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --check
+        run: cargo +nightly fmt --check
 
       - name: Run tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --all-features
+        run: cargo test --all-features

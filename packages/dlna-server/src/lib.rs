@@ -29,7 +29,11 @@ pub struct CustomService {
     pub location: String,
 }
 
-#[cfg_attr(feature = "rt-async", path = "rt/async_std.rs")]
+// The tokio runtime (the default) takes precedence when both are enabled.
+#[cfg_attr(
+    all(feature = "rt-async", not(feature = "rt-tokio")),
+    path = "rt/async_std.rs"
+)]
 #[cfg_attr(feature = "rt-tokio", path = "rt/tokio.rs")]
 mod rt;
 mod services;
