@@ -732,7 +732,7 @@ pub(super) async fn video_page(
     };
 
     let url_base = if let Some(conn_info) = req.conn_data::<ConnectionInfo>() {
-        if conn_info.local_addr.port() == 443 {
+        if Some(conn_info.local_addr.port()) == service_data.https_port {
             format!(
                 "http://{}:{}",
                 conn_info.local_addr.ip(),

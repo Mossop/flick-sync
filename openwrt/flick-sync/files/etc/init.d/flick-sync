@@ -104,19 +104,38 @@ add_hostname() {
 	echo "$address $hostname.$domain $hostname" > "$HOSTS_FILE"
 	reload_dnsmasq
 
-	logger -t flick-sync "Serving on http://$hostname.$domain/ ($address)"
+	logger -t flick-sync "Hostname $hostname.$domain points to $address"
+}
+
+# add_hostname_redirect <address> <port> <dest_port>
+#
+# Forwards <port> on the hostname's address to <dest_port> on the router.
+add_hostname_redirect() {
+	json_add_object ""
+	json_add_string type redirect
+	json_add_string name "flick-sync-hostname-$2"
+	json_add_string src lan
+	json_add_string proto tcp
+	json_add_string src_dip "$1"
+	json_add_string src_dport "$2"
+	json_add_string dest_port "$3"
+	json_add_string target DNAT
+	json_close_object
 }
 
 start_service() {
-	local enabled store port certificate private_key disable_syncing log_level
-	local mdns_zones zone hostname hostname_address hostname_added=0
+	local enabled store port https_port certificate private_key https=0
+	local disable_syncing log_level mdns_zones zone
+	local hostname hostname_address hostname_added=0
 
 	config_load flick-sync
 	config_get_bool enabled main enabled 1
 	config_get store main store
 	config_get port main port 3000
+	config_get https_port main https_port 3443
 	config_get certificate main certificate
 	config_get private_key main private_key
+	[ -n "$certificate" ] && [ -n "$private_key" ] && https=1
 	config_get_bool disable_syncing main disable_syncing 1
 	config_get log_level main log_level warn
 	config_get mdns_zones main mdns_zones lan
@@ -134,8 +153,10 @@ start_service() {
 
 	procd_open_instance
 	procd_set_param command "$PROG" --log-level "$log_level" serve --port "$port"
-	[ -n "$certificate" ] && procd_append_param command --certificate "$certificate"
-	[ -n "$private_key" ] && procd_append_param command --private-key "$private_key"
+	if [ "$https" -eq 1 ]; then
+		procd_append_param command --https-port "$https_port" \
+			--certificate "$certificate" --private-key "$private_key"
+	fi
 	[ "$disable_syncing" -eq 1 ] && procd_append_param command --disable-syncing
 	# Logs go to the system log, so make sure they aren't coloured.
 	procd_set_param env NO_COLOR=1
@@ -159,18 +180,10 @@ start_service() {
 		add_firewall_rule HTTP "$zone" tcp "$port"
 	done
 	if [ "$hostname_added" -eq 1 ]; then
-		# Lets the hostname be used without a port by forwarding port 80 on
-		# its address to the web interface.
-		json_add_object ""
-		json_add_string type redirect
-		json_add_string name "flick-sync-hostname"
-		json_add_string src lan
-		json_add_string proto tcp
-		json_add_string src_dip "$hostname_address"
-		json_add_string src_dport 80
-		json_add_string dest_port "$port"
-		json_add_string target DNAT
-		json_close_object
+		# Lets the hostname be used without a port by forwarding the standard
+		# ports on its address to the web interface.
+		add_hostname_redirect "$hostname_address" 80 "$port"
+		[ "$https" -eq 1 ] && add_hostname_redirect "$hostname_address" 443 "$https_port"
 	fi
 	json_close_array
 	procd_close_data
