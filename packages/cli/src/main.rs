@@ -244,11 +244,27 @@ fn init_logging(
             .with_default(Level::WARN)
     };
 
-    let formatter = tracing_subscriber::fmt::layer()
-        .with_ansi(true)
-        .pretty()
-        .with_writer(console)
-        .with_filter(targets);
+    // Only colour the output when writing to a terminal, so that logs
+    // captured elsewhere (e.g. the system log on OpenWrt) stay readable.
+    let ansi = ::console::colors_enabled();
+
+    let formatter = if ::console::Term::stdout().is_term() {
+        tracing_subscriber::fmt::layer()
+            .with_ansi(ansi)
+            .pretty()
+            .with_writer(console)
+            .boxed()
+    } else {
+        // Captured logs are easier to read with one line per message, and
+        // whatever captures them normally records the time itself.
+        tracing_subscriber::fmt::layer()
+            .with_ansi(ansi)
+            .compact()
+            .without_time()
+            .with_writer(console)
+            .boxed()
+    }
+    .with_filter(targets);
 
     let registry = Registry::default().with(formatter);
 
