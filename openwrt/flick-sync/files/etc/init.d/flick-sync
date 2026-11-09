@@ -42,8 +42,10 @@ start_service() {
 	[ -n "$certificate" ] && procd_append_param command --certificate "$certificate"
 	[ -n "$private_key" ] && procd_append_param command --private-key "$private_key"
 	[ "$disable_syncing" -eq 1 ] && procd_append_param command --disable-syncing
+	# Logs go to the system log, so make sure they aren't coloured.
+	procd_set_param env NO_COLOR=1
 	# An empty store makes the start script search mounted storage for one.
-	[ -n "$store" ] && procd_set_param env FLICK_SYNC_STORE="$store"
+	[ -n "$store" ] && procd_append_param env FLICK_SYNC_STORE="$store"
 	# Retry forever every 10 seconds. The store will not be available until
 	# the external storage it lives on has been mounted, and flick-sync exits
 	# when the store is missing.
