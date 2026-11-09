@@ -7,16 +7,14 @@ STOP=10
 
 PROG=/usr/libexec/flick-sync/start
 
-# Allows the mDNS responses that cast device discovery relies on.
-add_mdns_firewall_rule() {
-	local zone=$1
-
+# add_firewall_rule <name> <zone> <proto> <port>
+add_firewall_rule() {
 	json_add_object ""
 	json_add_string type rule
-	json_add_string name "Allow-flick-sync-mDNS-$zone"
-	json_add_string src "$zone"
-	json_add_string proto udp
-	json_add_string dest_port 5353
+	json_add_string name "Allow-flick-sync-$1-$2"
+	json_add_string src "$2"
+	json_add_string proto "$3"
+	json_add_string dest_port "$4"
 	json_add_string target ACCEPT
 	json_close_object
 }
@@ -58,7 +56,10 @@ start_service() {
 	procd_open_data
 	json_add_array firewall
 	for zone in $mdns_zones; do
-		add_mdns_firewall_rule "$zone"
+		# Cast device discovery uses mDNS.
+		add_firewall_rule mDNS "$zone" udp 5353
+		# Cast devices fetch the media from the web server.
+		add_firewall_rule HTTP "$zone" tcp "$port"
 	done
 	json_close_array
 	procd_close_data

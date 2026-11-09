@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -130,6 +130,9 @@ enum CastStateEvent {
     },
     Stopped,
     Disconnected,
+    Error {
+        message: String,
+    },
 }
 
 impl From<Option<&CastState>> for CastStateEvent {
@@ -158,6 +161,21 @@ async fn video_from_content_id(flick_sync: &FlickSync, content_id: &str) -> Opti
     server.video(params.next()?).await
 }
 
+/// Finds the local address used to reach the given remote address. Nothing is
+/// sent, connecting a UDP socket just selects the route.
+fn local_addr_for(remote: IpAddr) -> Option<IpAddr> {
+    let bind: SocketAddr = match remote {
+        IpAddr::V4(_) => (Ipv4Addr::UNSPECIFIED, 0).into(),
+        IpAddr::V6(_) => (Ipv6Addr::UNSPECIFIED, 0).into(),
+    };
+
+    let socket = UdpSocket::bind(bind).ok()?;
+    socket.connect((remote, 9)).ok()?;
+    let local = socket.local_addr().ok()?.ip();
+
+    (!local.is_unspecified()).then_some(local)
+}
+
 #[derive(Clone)]
 struct CastDevice {
     id: String,
@@ -178,21 +196,39 @@ impl CastDevice {
         self.sender.subscribe()
     }
 
+    /// Tells connected clients that casting failed.
+    fn report_error(&self, message: impl Into<String>) {
+        let _ = self.sender.send(CastStateEvent::Error {
+            message: message.into(),
+        });
+    }
+
+    /// The base URL that the cast device can reach this server on.
+    fn url_base(&self, http_port: u16) -> Option<String> {
+        let local = local_addr_for(self.ip)?;
+        Some(format!("http://{}", SocketAddr::new(local, http_port)))
+    }
+
     async fn load(&self, url_base: &str, video: Video, start_position: f64) {
         let mime_type = match video.file().await {
             Ok(Some(file)) => match file.mime_type().await {
                 Ok(m) => m,
                 Err(e) => {
                     warn!(ip = %self.ip, video=video.id(), error = ?e, "Unable to cast media, failed to determine mimetype");
+                    self.report_error(
+                        "Unable to cast the video, its type could not be determined.",
+                    );
                     return;
                 }
             },
             Ok(None) => {
                 warn!(ip = %self.ip, video=video.id(), "Unable to cast media, file missing");
+                self.report_error("Unable to cast the video, it has not been downloaded.");
                 return;
             }
             Err(_) => {
                 warn!(ip = %self.ip, video=video.id(), "Unable to cast media, timed out acquiring file lock");
+                self.report_error("Unable to cast the video, it is currently in use.");
                 return;
             }
         };
@@ -242,17 +278,25 @@ impl CastDevice {
             video.id()
         ));
 
+        debug!(ip = %self.ip, video=video.id(), url = media.content_url, "Casting media");
+
         if let Err(e) = self.client.launch_app(&CastApp::DefaultMediaReceiver).await {
             warn!(ip = %self.ip, video=video.id(), error = ?e, "Unable to cast media, failed to launch media receiver");
+            self.report_error(
+                "Unable to cast the video, the cast device could not start its media player.",
+            );
             return;
         }
 
+        // A load failure reported later by the device arrives as a LoadFailed
+        // event, handled in monitor.
         if let Err(e) = self
             .client
             .load_media(&media, true, start_position, None)
             .await
         {
             warn!(ip = %self.ip, video=video.id(), error = ?e, "Unable to cast media, failed to load media");
+            self.report_error(format!("The cast device was unable to load the video: {e}"));
         }
     }
 
@@ -387,6 +431,22 @@ impl CastDevice {
                             )
                             .await;
                             refresh_timeout = Box::pin(sleep(Duration::from_secs(REFRESH_RATE)));
+                        }
+                        CastEvent::LoadFailed { detailed_error_code, .. } => {
+                            warn!(ip=%self.ip, ?detailed_error_code, "Cast device failed to load media");
+                            let code = detailed_error_code
+                                .map(|code| format!(" (error {code})"))
+                                .unwrap_or_default();
+                            self.report_error(format!(
+                                "The cast device was unable to load the video{code}. Check that it can connect to this server."
+                            ));
+
+                            self.update_state(&flick_sync, None).await;
+                            CastManager::send_devices_status(
+                                &event_sender,
+                                devices.lock().await.values().collect(),
+                            )
+                            .await;
                         }
                         CastEvent::HeartbeatTimeout => {
                             warn!(ip=%self.ip, "Cast device stopped responding");
@@ -596,7 +656,12 @@ pub(super) async fn cast(
         return Ok(HttpResponse::NotFound().finish());
     };
 
-    let url_base = if let Some(conn_info) = req.conn_data::<ConnectionInfo>() {
+    // The cast device needs an address it can reach this server on, which is
+    // not necessarily the one the browser used, e.g. when the cast device is on
+    // a different network interface.
+    let url_base = if let Some(url_base) = device.url_base(service_data.http_port) {
+        url_base
+    } else if let Some(conn_info) = req.conn_data::<ConnectionInfo>() {
         if conn_info.local_addr.port() == 443 {
             format!(
                 "http://{}:{}",
@@ -675,4 +740,17 @@ pub(super) async fn cast(
     });
 
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use super::local_addr_for;
+
+    #[test]
+    fn local_addr_for_loopback() {
+        let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        assert_eq!(local_addr_for(loopback), Some(loopback));
+    }
 }
