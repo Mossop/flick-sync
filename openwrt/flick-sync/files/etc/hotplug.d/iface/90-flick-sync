@@ -1,0 +1,15 @@
+# Restores the address added for flick-sync's hostname when the LAN interface
+# comes back up, e.g. after the network is restarted, which removes it.
+#
+# The init script records the address in STATE_FILE while it is in use.
+
+STATE_FILE=/var/run/flick-sync/hostname
+
+[ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ] || exit 0
+[ -f "$STATE_FILE" ] || exit 0
+
+read -r address device < "$STATE_FILE"
+device=${DEVICE:-$device}
+
+ip addr replace "$address" dev "$device" &&
+	echo "$address $device" > "$STATE_FILE"

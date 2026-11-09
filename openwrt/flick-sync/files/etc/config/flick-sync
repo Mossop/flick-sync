@@ -20,3 +20,10 @@ config flick-sync 'main'
 	# 'lan wan' to also use cast devices on the WAN side. Zones other than 'lan'
 	# only accept traffic from private network addresses.
 	option mdns_zones 'lan'
+	# A name in the local domain (e.g. media.lan) for reaching the web interface
+	# without a port. While the service runs, hostname_address is added to the
+	# LAN, the name is published for it and port 80 on it is forwarded to the
+	# web interface. Choose an unused address in the LAN subnet outside of the
+	# DHCP range. Nothing is done unless an address is set.
+	option hostname 'media'
+	option hostname_address ''

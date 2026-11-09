@@ -99,7 +99,8 @@ cp -R "$ROOT/openwrt/flick-sync/files/." "$PKG/data/"
 cp "$BINARY" "$PKG/data/usr/bin/flick-sync"
 chmod 755 "$PKG/data/usr/bin/flick-sync" "$PKG/data/etc/init.d/flick-sync" \
 	"$PKG/data/usr/libexec/flick-sync/start"
-chmod 644 "$PKG/data/etc/config/flick-sync" "$PKG/data/etc/hotplug.d/block/90-flick-sync"
+chmod 644 "$PKG/data/etc/config/flick-sync" "$PKG/data/etc/hotplug.d/block/90-flick-sync" \
+	"$PKG/data/etc/hotplug.d/iface/90-flick-sync"
 echo "/etc/config/flick-sync" > "$PKG/control/conffiles"
 write_default_scripts "$PKG/control"
 cat > "$WORK/flick-sync.fields" <<FIELDS
