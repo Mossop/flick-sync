@@ -11,10 +11,14 @@
 				]
 			},
 			"uci": [
-				"flick-sync"
+				"flick-sync",
+				"dhcp"
 			],
 			"file": {
 				"/var/run/flick-sync/store": [
+					"read"
+				],
+				"/var/run/flick-sync/hostname": [
 					"read"
 				]
 			}
