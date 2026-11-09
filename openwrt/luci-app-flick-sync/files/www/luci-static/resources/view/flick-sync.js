@@ -132,6 +132,12 @@ return view.extend({
 		o.value('trace', _('Trace'));
 		o.default = 'warn';
 
+		o = s.option(form.ListValue, 'mdns_zones', _('Cast device discovery'),
+			_('Networks to allow cast device discovery (mDNS, UDP port 5353) from through the firewall while the server is running.'));
+		o.value('lan', _('LAN only'));
+		o.value('lan wan', _('LAN and WAN'));
+		o.default = 'lan';
+
 		return m.render();
 	}
 });
