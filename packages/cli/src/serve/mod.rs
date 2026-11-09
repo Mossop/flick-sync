@@ -1,9 +1,7 @@
 use std::{
     any::Any,
     collections::{HashMap, VecDeque},
-    fs,
     net::{Ipv4Addr, SocketAddr},
-    result,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -15,14 +13,10 @@ use actix_tls::accept::rustls_0_23::TlsStream;
 use actix_web::{
     App, HttpServer, dev::Extensions, middleware::from_fn, rt::net::TcpStream, web::ThinData,
 };
-use anyhow::{Context, anyhow, bail};
 use clap::{Args, builder::FalseyValueParser};
 use flick_sync::{DownloadProgress, FlickSync, Progress, Server, SyncProgress, Video};
 use futures::{FutureExt, StreamExt, select};
-use rustls::{
-    ServerConfig,
-    pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
-};
+use rustls::ServerConfig;
 use tokio::{
     signal::unix::{SignalKind, signal},
     sync::{Notify, broadcast},
@@ -38,6 +32,7 @@ use crate::{
     serve::{
         cast::CastManager,
         events::{Event, SyncLogItem, SyncLogMessage, SyncProgressBar},
+        tls::ReloadingCertResolver,
     },
 };
 
@@ -45,6 +40,7 @@ mod cast;
 mod events;
 mod middleware;
 mod services;
+mod tls;
 
 const LOG_LIMIT: usize = 20;
 const INITIAL_SYNC_DELAY: Duration = Duration::from_secs(30);
@@ -462,43 +458,6 @@ fn on_connect(connection: &dyn Any, data: &mut Extensions) {
     }
 }
 
-fn is_pem(data: &[u8]) -> bool {
-    data.windows(10).any(|w| w == b"-----BEGIN")
-}
-
-/// Loads a certificate chain in PEM format, or a single certificate in DER
-/// format.
-fn load_certificates(path: &str) -> Result<Vec<CertificateDer<'static>>> {
-    let data = fs::read(path).with_context(|| format!("Failed to read certificate {path}"))?;
-
-    if !is_pem(&data) {
-        return Ok(vec![CertificateDer::from(data)]);
-    }
-
-    let certs = CertificateDer::pem_slice_iter(&data)
-        .collect::<result::Result<Vec<_>, _>>()
-        .map_err(|e| anyhow!("Failed to parse certificate {path}: {e}"))?;
-
-    if certs.is_empty() {
-        bail!("No certificates found in {path}");
-    }
-
-    Ok(certs)
-}
-
-/// Loads a private key in PEM or DER format.
-fn load_private_key(path: &str) -> Result<PrivateKeyDer<'static>> {
-    let data = fs::read(path).with_context(|| format!("Failed to read private key {path}"))?;
-
-    if is_pem(&data) {
-        PrivateKeyDer::from_pem_slice(&data)
-            .map_err(|e| anyhow!("Failed to parse private key {path}: {e}"))
-    } else {
-        PrivateKeyDer::try_from(data)
-            .map_err(|e| anyhow!("Failed to parse private key {path}: {e}"))
-    }
-}
-
 #[derive(Clone)]
 struct ServiceData {
     flick_sync: FlickSync,
@@ -544,14 +503,19 @@ impl Runnable for Serve {
 
         let tls_config = match (&self.certificate, &self.private_key) {
             (Some(cert_file), Some(key_file)) => {
-                let certs = load_certificates(cert_file)?;
-                let private_key = load_private_key(key_file)?;
+                let resolver = Arc::new(ReloadingCertResolver::new(cert_file, key_file)?);
+
+                // Pick up renewed certificates without needing a restart.
+                tokio::spawn(
+                    cancellation
+                        .clone()
+                        .run_until_cancelled_owned(resolver.clone().watch()),
+                );
 
                 Some(
                     ServerConfig::builder()
                         .with_no_client_auth()
-                        .with_single_cert(certs, private_key)
-                        .context("Invalid TLS certificate or private key")?,
+                        .with_cert_resolver(resolver),
                 )
             }
             (None, None) => None,
