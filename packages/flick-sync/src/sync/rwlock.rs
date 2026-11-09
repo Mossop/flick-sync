@@ -1,10 +1,10 @@
 use std::{
     ops::{Deref, DerefMut},
+    sync,
     sync::Arc,
     time::Instant,
 };
 
-use std::sync;
 use tokio::sync as tsync;
 use tracing::debug;
 

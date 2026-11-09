@@ -39,8 +39,7 @@ mod util;
 use config::SetOutputStyle;
 use serve::Serve;
 use server::{Add, Login, Recover, Remove};
-use sync::BuildMetadata;
-use sync::{Prune, Sync};
+use sync::{BuildMetadata, Prune, Sync};
 use util::{List, Stats};
 
 pub type Result<T = ()> = anyhow::Result<T>;

@@ -36,8 +36,10 @@ use crate::{
         CollectionState, DownloadState, LibraryState, LibraryType, PlaylistState, SeasonState,
         ServerState, ShowState, VideoState,
     },
-    sync::{Mutex, RwLockMappedWriteGuard, RwLockWriteGuard},
-    sync::{OpMutex, OpReadGuard, OpWriteGuard, Timeout},
+    sync::{
+        Mutex, OpMutex, OpReadGuard, OpWriteGuard, RwLockMappedWriteGuard, RwLockWriteGuard,
+        Timeout,
+    },
     util::{parallelize, safe},
     wrappers,
 };

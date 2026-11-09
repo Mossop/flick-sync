@@ -1,6 +1,5 @@
 use std::{
-    collections::HashMap,
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     future::Future,
     hash::Hash,
     io,
@@ -194,15 +193,16 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::util::parallelize;
-
-    use futures::task::noop_waker;
     use std::{
         future::Future,
         pin::Pin,
         sync::{Arc, Mutex},
         task::{Context, Poll, Waker},
     };
+
+    use futures::task::noop_waker;
+
+    use crate::util::parallelize;
 
     #[derive(Default)]
     struct TestState {
