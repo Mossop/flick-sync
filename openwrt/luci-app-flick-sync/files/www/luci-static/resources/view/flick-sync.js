@@ -138,6 +138,16 @@ return view.extend({
 		o.value('lan wan', _('LAN and WAN (private addresses only)'));
 		o.default = 'lan';
 
+		o = s.option(form.Value, 'hostname', _('Hostname'),
+			_('Name in the local domain for reaching the web interface without a port, e.g. http://media.lan/. Only used when an address is set below.'));
+		o.datatype = 'hostname';
+		o.placeholder = 'media';
+		o.default = 'media';
+
+		o = s.option(form.Value, 'hostname_address', _('Hostname address'),
+			_('An unused address in the LAN subnet, outside of the DHCP range. While the server runs it is added to the router, the hostname points to it, and port 80 on it is forwarded to the web interface. Leave blank to not set up a hostname.'));
+		o.datatype = 'ip4addr("nomask")';
+
 		return m.render();
 	}
 });
