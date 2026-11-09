@@ -7,8 +7,23 @@ STOP=10
 
 PROG=/usr/libexec/flick-sync/start
 
+# Allows the mDNS responses that cast device discovery relies on.
+add_mdns_firewall_rule() {
+	local zone=$1
+
+	json_add_object ""
+	json_add_string type rule
+	json_add_string name "Allow-flick-sync-mDNS-$zone"
+	json_add_string src "$zone"
+	json_add_string proto udp
+	json_add_string dest_port 5353
+	json_add_string target ACCEPT
+	json_close_object
+}
+
 start_service() {
 	local enabled store port certificate private_key disable_syncing log_level
+	local mdns_zones zone
 
 	config_load flick-sync
 	config_get_bool enabled main enabled 1
@@ -18,6 +33,7 @@ start_service() {
 	config_get private_key main private_key
 	config_get_bool disable_syncing main disable_syncing 1
 	config_get log_level main log_level warn
+	config_get mdns_zones main mdns_zones lan
 
 	[ "$enabled" -eq 1 ] || return 0
 
@@ -35,7 +51,25 @@ start_service() {
 	procd_set_param stdout 1
 	procd_set_param stderr 1
 	procd_set_param file /etc/config/flick-sync
+
+	# These rules only apply while the service is running.
+	procd_open_data
+	json_add_array firewall
+	for zone in $mdns_zones; do
+		add_mdns_firewall_rule "$zone"
+	done
+	json_close_array
+	procd_close_data
+
 	procd_close_instance
+}
+
+service_started() {
+	procd_set_config_changed firewall
+}
+
+service_stopped() {
+	procd_set_config_changed firewall
 }
 
 stop_service() {

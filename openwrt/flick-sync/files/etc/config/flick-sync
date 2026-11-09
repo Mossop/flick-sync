@@ -14,3 +14,7 @@ config flick-sync 'main'
 	option disable_syncing '1'
 	# Only log messages at this level or above: error, warn, info, debug or trace.
 	option log_level 'warn'
+	# Firewall zones to accept mDNS (UDP port 5353) from while the service is
+	# running. Cast devices are discovered using mDNS. Use 'lan wan' to also
+	# find cast devices on the WAN side.
+	option mdns_zones 'lan'
