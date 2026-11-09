@@ -1,7 +1,9 @@
 use std::{
     any::Any,
     collections::{HashMap, VecDeque},
+    fs,
     net::{Ipv4Addr, SocketAddr},
+    result,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -13,6 +15,7 @@ use actix_tls::accept::rustls_0_23::TlsStream;
 use actix_web::{
     App, HttpServer, dev::Extensions, middleware::from_fn, rt::net::TcpStream, web::ThinData,
 };
+use anyhow::{Context, anyhow, bail};
 use clap::{Args, builder::FalseyValueParser};
 use flick_sync::{DownloadProgress, FlickSync, Progress, Server, SyncProgress, Video};
 use futures::{FutureExt, StreamExt, select};
@@ -53,8 +56,15 @@ pub struct Serve {
     /// The port to use for the web server.
     #[clap(short, long, env = "FLICK_SYNC_PORT")]
     port: Option<u16>,
+    /// The port to serve HTTPS on, when a certificate and private key are given.
+    #[clap(long, env = "FLICK_SYNC_HTTPS_PORT", default_value_t = 443)]
+    https_port: u16,
+    /// The TLS certificate (chain) to serve HTTPS with, e.g. a .cer file, in
+    /// PEM or DER format.
     #[clap(short, long, env = "FLICK_SYNC_CERTIFICATE")]
     certificate: Option<String>,
+    /// The private key for the TLS certificate, e.g. a .key file, in PEM or DER
+    /// format.
     #[clap(short = 'k', long, env = "FLICK_SYNC_PRIVATE_KEY")]
     private_key: Option<String>,
     #[clap(short, long, env = "FLICK_SYNC_DISABLE_SYNCING", value_parser = FalseyValueParser::new())]
@@ -452,10 +462,49 @@ fn on_connect(connection: &dyn Any, data: &mut Extensions) {
     }
 }
 
+fn is_pem(data: &[u8]) -> bool {
+    data.windows(10).any(|w| w == b"-----BEGIN")
+}
+
+/// Loads a certificate chain in PEM format, or a single certificate in DER
+/// format.
+fn load_certificates(path: &str) -> Result<Vec<CertificateDer<'static>>> {
+    let data = fs::read(path).with_context(|| format!("Failed to read certificate {path}"))?;
+
+    if !is_pem(&data) {
+        return Ok(vec![CertificateDer::from(data)]);
+    }
+
+    let certs = CertificateDer::pem_slice_iter(&data)
+        .collect::<result::Result<Vec<_>, _>>()
+        .map_err(|e| anyhow!("Failed to parse certificate {path}: {e}"))?;
+
+    if certs.is_empty() {
+        bail!("No certificates found in {path}");
+    }
+
+    Ok(certs)
+}
+
+/// Loads a private key in PEM or DER format.
+fn load_private_key(path: &str) -> Result<PrivateKeyDer<'static>> {
+    let data = fs::read(path).with_context(|| format!("Failed to read private key {path}"))?;
+
+    if is_pem(&data) {
+        PrivateKeyDer::from_pem_slice(&data)
+            .map_err(|e| anyhow!("Failed to parse private key {path}: {e}"))
+    } else {
+        PrivateKeyDer::try_from(data)
+            .map_err(|e| anyhow!("Failed to parse private key {path}: {e}"))
+    }
+}
+
 #[derive(Clone)]
 struct ServiceData {
     flick_sync: FlickSync,
     http_port: u16,
+    /// The port HTTPS is served on, if it is.
+    https_port: Option<u16>,
     cast_manager: CastManager,
     status: Arc<Mutex<SyncStatus>>,
     event_sender: broadcast::Sender<Event>,
@@ -493,12 +542,32 @@ impl Runnable for Serve {
             );
         }
 
+        let tls_config = match (&self.certificate, &self.private_key) {
+            (Some(cert_file), Some(key_file)) => {
+                let certs = load_certificates(cert_file)?;
+                let private_key = load_private_key(key_file)?;
+
+                Some(
+                    ServerConfig::builder()
+                        .with_no_client_auth()
+                        .with_single_cert(certs, private_key)
+                        .context("Invalid TLS certificate or private key")?,
+                )
+            }
+            (None, None) => None,
+            _ => {
+                warn!("Both a certificate and a private key are needed to serve HTTPS");
+                None
+            }
+        };
+
         let cast_manager = CastManager::new(flick_sync.clone(), event_sender.clone());
 
         let service_data = ServiceData {
             flick_sync,
             cast_manager: cast_manager.clone(),
             http_port: port,
+            https_port: tls_config.as_ref().map(|_| self.https_port),
             status,
             event_sender,
             sync_trigger,
@@ -534,18 +603,9 @@ impl Runnable for Serve {
         .on_connect(on_connect)
         .bind((Ipv4Addr::UNSPECIFIED, port))?;
 
-        if let (Some(cert_file), Some(key_file)) = (self.certificate, self.private_key) {
-            let certs = CertificateDer::pem_file_iter(cert_file)?
-                .map(|cert| cert.unwrap())
-                .collect();
-            let private_key = PrivateKeyDer::from_pem_file(key_file)?;
-            let server_config = ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(certs, private_key)
-                .unwrap();
-
-            http_server =
-                http_server.bind_rustls_0_23((Ipv4Addr::UNSPECIFIED, 443), server_config)?;
+        if let Some(server_config) = tls_config {
+            http_server = http_server
+                .bind_rustls_0_23((Ipv4Addr::UNSPECIFIED, self.https_port), server_config)?;
         }
 
         let http_server = http_server.run();

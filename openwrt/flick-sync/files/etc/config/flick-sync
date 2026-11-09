@@ -7,9 +7,13 @@ config flick-sync 'main'
 	option store ''
 	# The port for the web interface. Port 80 is used by LuCI.
 	option port '3000'
-	# Optional TLS certificate and private key (PEM) to serve over HTTPS.
+	# Optional paths to a TLS certificate (e.g. a .cer file) and its private key
+	# (e.g. a .key file), in PEM or DER format. When both are set the web
+	# interface is also served over HTTPS on https_port. Port 443 is used by
+	# LuCI.
 	option certificate ''
 	option private_key ''
+	option https_port '3443'
 	# Set to '0' to sync from Plex. By default existing content is served only.
 	option disable_syncing '1'
 	# Only log messages at this level or above: error, warn, info, debug or trace.
@@ -22,8 +26,9 @@ config flick-sync 'main'
 	option mdns_zones 'lan'
 	# A name in the local domain (e.g. media.lan) for reaching the web interface
 	# without a port. While the service runs, hostname_address is added to the
-	# LAN, the name is published for it and port 80 on it is forwarded to the
-	# web interface. Choose an unused address in the LAN subnet outside of the
-	# DHCP range. Nothing is done unless an address is set.
+	# LAN, the name is published for it, port 80 on it is forwarded to the web
+	# interface and, when HTTPS is enabled, port 443 to https_port. Choose an
+	# unused address in the LAN subnet outside of the DHCP range. Nothing is
+	# done unless an address is set.
 	option hostname 'media'
 	option hostname_address ''

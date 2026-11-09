@@ -110,12 +110,19 @@ return view.extend({
 		o.default = '3000';
 
 		o = s.option(form.Value, 'certificate', _('TLS certificate'),
-			_('Optional path to a PEM certificate to serve the web interface over HTTPS.'));
+			_('Optional path to a certificate (e.g. a .cer file, PEM or DER) to also serve the web interface over HTTPS.'));
 		o.datatype = 'file';
 
 		o = s.option(form.Value, 'private_key', _('TLS private key'),
-			_('Path to the PEM private key for the certificate above.'));
+			_('Path to the private key for the certificate above (e.g. a .key file, PEM or DER).'));
 		o.datatype = 'file';
+		o.depends({ certificate: /.+/ });
+
+		o = s.option(form.Value, 'https_port', _('HTTPS port'),
+			_('Port for the web interface over HTTPS. Port 443 is used by the router administration pages.'));
+		o.datatype = 'port';
+		o.placeholder = '3443';
+		o.default = '3443';
 		o.depends({ certificate: /.+/ });
 
 		o = s.option(form.Flag, 'disable_syncing', _('Disable syncing'),
@@ -145,7 +152,7 @@ return view.extend({
 		o.default = 'media';
 
 		o = s.option(form.Value, 'hostname_address', _('Hostname address'),
-			_('An unused address in the LAN subnet, outside of the DHCP range. While the server runs it is added to the router, the hostname points to it, and port 80 on it is forwarded to the web interface. Leave blank to not set up a hostname.'));
+			_('An unused address in the LAN subnet, outside of the DHCP range. While the server runs it is added to the router, the hostname points to it, and ports 80 and, with HTTPS, 443 on it are forwarded to the web interface. Leave blank to not set up a hostname.'));
 		o.datatype = 'ip4addr("nomask")';
 
 		return m.render();
