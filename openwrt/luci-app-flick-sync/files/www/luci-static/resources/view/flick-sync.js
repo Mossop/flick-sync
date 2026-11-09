@@ -135,7 +135,7 @@ return view.extend({
 		o = s.option(form.ListValue, 'mdns_zones', _('Cast devices'),
 			_('Networks to allow cast devices on through the firewall while the server is running. Opens mDNS (UDP port 5353) to discover them and the web interface port so they can fetch media.'));
 		o.value('lan', _('LAN only'));
-		o.value('lan wan', _('LAN and WAN'));
+		o.value('lan wan', _('LAN and WAN (private addresses only)'));
 		o.default = 'lan';
 
 		return m.render();

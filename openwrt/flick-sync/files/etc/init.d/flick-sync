@@ -7,14 +7,28 @@ STOP=10
 
 PROG=/usr/libexec/flick-sync/start
 
+# Private and link-local address ranges. Traffic from zones other than the
+# LAN is only accepted from these, so that the rules don't open the server up
+# to the internet.
+PRIVATE_SUBNETS="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 fc00::/7 fe80::/10"
+
 # add_firewall_rule <name> <zone> <proto> <port>
 add_firewall_rule() {
+	local subnet
+
 	json_add_object ""
 	json_add_string type rule
 	json_add_string name "Allow-flick-sync-$1-$2"
 	json_add_string src "$2"
 	json_add_string proto "$3"
 	json_add_string dest_port "$4"
+	if [ "$2" != lan ]; then
+		json_add_array src_ip
+		for subnet in $PRIVATE_SUBNETS; do
+			json_add_string "" "$subnet"
+		done
+		json_close_array
+	fi
 	json_add_string target ACCEPT
 	json_close_object
 }
