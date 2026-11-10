@@ -337,6 +337,17 @@ impl CastDevice {
     }
 
     async fn update_state(&self, flick_sync: &FlickSync, status: Option<MediaStatus>) {
+        // An interrupted session means the device is switching to new media,
+        // the status for that will follow. Applying this would mark the old
+        // media as idle and reset its playback position.
+        if let Some(status) = &status
+            && status.player_state == PlayerState::Idle
+            && status.idle_reason == Some(IdleReason::Interrupted)
+        {
+            trace!(ip=%self.ip, "Ignoring interrupted media status");
+            return;
+        }
+
         {
             let mut state = self.state.lock().await;
 

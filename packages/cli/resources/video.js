@@ -75,6 +75,9 @@ class CastPlayback extends PlaybackDevice {
   #castLastPosition;
   #castBaseTime;
   #castTimer;
+  // True after asking the device to start this video until it reports that it
+  // is playing it.
+  #startingVideo = false;
 
   constructor(player, device) {
     super(player);
@@ -144,6 +147,7 @@ class CastPlayback extends PlaybackDevice {
       }
     }
 
+    this.#startingVideo = true;
     this.#sendCastRequest({
       type: "startVideo",
       server: this.player.server,
@@ -172,10 +176,15 @@ class CastPlayback extends PlaybackDevice {
       message.server == this.player.server &&
       message.video == this.player.video
     ) {
+      this.#startingVideo = false;
       this.#castState = message.state;
       this.player.isPlaying =
         message.state == "playing" || message.state == "buffering";
       this.currentTime = message.position;
+    } else if (message.type == "castState" && this.#startingVideo) {
+      // The device may still report the media it was previously playing
+      // until our video has loaded.
+      console.log("Ignoring cast state for other media while starting video");
     } else {
       this.#onCastDisconnect();
     }
