@@ -278,6 +278,12 @@ class CastPlayback extends PlaybackDevice {
       return;
     }
 
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = this.player.isPlaying
+        ? "playing"
+        : "paused";
+    }
+
     if (this.#castState == "playing") {
       if (this.#audioElement.paused) {
         log(`Audio sync: playing local audio`);
@@ -566,7 +572,37 @@ class CastPlayback extends PlaybackDevice {
 
     if (this.#audioElement) {
       this.#audioElement.pause();
+      this.#removeMediaSessionHandlers();
     }
+  }
+
+  // While local audio is playing, media controls such as those on bluetooth
+  // headphones act on it. Rather than letting the browser pause or play the
+  // audio directly pass the request on to the cast device, the local audio
+  // follows once the device reports its new state.
+  #installMediaSessionHandlers() {
+    if (!("mediaSession" in navigator)) {
+      return;
+    }
+
+    navigator.mediaSession.setActionHandler("play", () => {
+      log("Audio sync: media session play");
+      this.play();
+    });
+    navigator.mediaSession.setActionHandler("pause", () => {
+      log("Audio sync: media session pause");
+      this.pause();
+    });
+  }
+
+  #removeMediaSessionHandlers() {
+    if (!("mediaSession" in navigator)) {
+      return;
+    }
+
+    navigator.mediaSession.setActionHandler("play", null);
+    navigator.mediaSession.setActionHandler("pause", null);
+    navigator.mediaSession.playbackState = "none";
   }
 
   // Called when the player is removed from the page. The cast device carries on
@@ -654,8 +690,11 @@ class CastPlayback extends PlaybackDevice {
     this.#audioSeekCheckAt = null;
 
     if (!this.#audioElement) {
+      this.#removeMediaSessionHandlers();
       return;
     }
+
+    this.#installMediaSessionHandlers();
 
     this.#seekAudio(this.#audioTarget(), "audio element created");
     this.#updateAudioPlayState();
