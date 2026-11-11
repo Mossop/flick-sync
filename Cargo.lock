@@ -2793,8 +2793,9 @@ dependencies = [
 
 [[package]]
 name = "oxicast"
-version = "0.0.4"
-source = "git+https://github.com/Mossop/oxicast?branch=load-failed-event#dc228bad48968e61880e1e0d375ba9a9339deb65"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55d73bcd8fa51f1c8b492f51247a653ee0672320f2f339ee1a5bea4b9eb3ec62"
 dependencies = [
  "bytes",
  "mdns-sd",

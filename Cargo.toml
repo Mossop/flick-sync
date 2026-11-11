@@ -2,5 +2,5 @@
 members = ["packages/flick-sync", "packages/dlna-server", "packages/cli"]
 resolver = "3"
 
-[patch.crates-io]
-oxicast = { git = "https://github.com/Mossop/oxicast", branch = "load-failed-event" }
+# [patch.crates-io]
+# oxicast = { git = "https://github.com/Mossop/oxicast", branch = "load-failed-event" }
