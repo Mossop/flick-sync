@@ -733,6 +733,9 @@ pub(super) async fn cast(
             return;
         }
 
+        // Whether this client has muted the device to play the audio locally.
+        let mut device_muted = false;
+
         loop {
             tokio::select! {
                 ws_message = ws_stream.recv() => {
@@ -743,7 +746,7 @@ pub(super) async fn cast(
                     match msg {
                         CodecMessage::Ping(bytes) => {
                             if ws_session.session_mut().pong(&bytes).await.is_err() {
-                                return;
+                                break;
                             }
                         }
                         CodecMessage::Item(CastRequest::StartVideo { server, video, position }) => {
@@ -762,6 +765,7 @@ pub(super) async fn cast(
                             device.seek(position).await
                         }
                         CodecMessage::Item(CastRequest::SetMuted { muted }) => {
+                            device_muted = muted;
                             device.set_muted(muted).await
                         }
                         CodecMessage::Item(CastRequest::Stop) => {
@@ -781,6 +785,12 @@ pub(super) async fn cast(
                     }
                 }
             }
+        }
+
+        // The local audio stops when the client goes away so don't leave the
+        // device silent.
+        if device_muted {
+            device.set_muted(false).await;
         }
 
         let _ = ws_session.close(None).await;
