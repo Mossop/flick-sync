@@ -321,6 +321,12 @@ impl CastDevice {
         }
     }
 
+    async fn set_muted(&self, muted: bool) {
+        if let Err(e) = self.client.set_muted(muted).await {
+            error!(ip = %self.ip, error = ?e, "Failed to send mute request to cast device");
+        }
+    }
+
     async fn stop(&self) {
         self.update_playback_state().await;
 
@@ -677,6 +683,9 @@ enum CastRequest {
     Seek {
         position: f64,
     },
+    SetMuted {
+        muted: bool,
+    },
     Stop,
 }
 
@@ -751,6 +760,9 @@ pub(super) async fn cast(
                         }
                         CodecMessage::Item(CastRequest::Seek { position }) => {
                             device.seek(position).await
+                        }
+                        CodecMessage::Item(CastRequest::SetMuted { muted }) => {
+                            device.set_muted(muted).await
                         }
                         CodecMessage::Item(CastRequest::Stop) => {
                             device.stop().await;

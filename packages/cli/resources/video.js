@@ -705,6 +705,7 @@ class CastPlayback extends PlaybackDevice {
     log(
       `Audio sync: local audio turned ${this.localAudio ? "on" : "off"}`,
     );
+    this.#sendCastRequest({ type: "setMuted", muted: this.localAudio });
     this.player.requestUpdate();
   }
 
