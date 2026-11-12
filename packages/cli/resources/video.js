@@ -5,7 +5,9 @@ import "@shoelace/components/dropdown/dropdown.js";
 import "@shoelace/components/button/button.js";
 
 // User adjustable delay applied to the local audio, in milliseconds.
-const AUDIO_OFFSET_KEY = "castAudioOffset";
+// Local audio settings are stored per cast device under this prefix followed by
+// the device ID.
+const AUDIO_SETTINGS_KEY_PREFIX = "castAudio:";
 const AUDIO_OFFSET_STEP = 50;
 // Drift (in seconds) beyond which the local audio is seeked rather than
 // gradually corrected.
@@ -175,21 +177,45 @@ class CastPlayback extends PlaybackDevice {
   #audioSeekCheckAt = null;
   #audioRateChangedAt = -Infinity;
   #audioPauseRequestedAt = -Infinity;
+  #deviceId;
 
   constructor(player, device) {
     super(player);
+    this.#deviceId = device;
     this.#castState = "idle";
     this.#castBaseTime = Date.now();
     this.#castLastPosition = this.currentTime;
+    this.localAudio = false;
+    this.#loadAudioSettings();
     this.#initiateCastConnection(device);
     this.#castTimer = setInterval(this.#castTick, 250);
-    this.localAudio = false;
+  }
 
+  #loadAudioSettings() {
     try {
-      this.#audioOffset =
-        parseInt(localStorage.getItem(AUDIO_OFFSET_KEY), 10) || 0;
+      let settings = JSON.parse(
+        localStorage.getItem(AUDIO_SETTINGS_KEY_PREFIX + this.#deviceId),
+      );
+      if (settings) {
+        this.localAudio = !!settings.localAudio;
+        this.#audioOffset = parseInt(settings.offset, 10) || 0;
+      }
     } catch (e) {
-      console.warn("Unable to read audio offset", e);
+      console.warn("Unable to read local audio settings", e);
+    }
+  }
+
+  #saveAudioSettings() {
+    try {
+      localStorage.setItem(
+        AUDIO_SETTINGS_KEY_PREFIX + this.#deviceId,
+        JSON.stringify({
+          localAudio: this.localAudio,
+          offset: this.#audioOffset,
+        }),
+      );
+    } catch (e) {
+      console.warn("Unable to store local audio settings", e);
     }
   }
 
@@ -478,13 +504,7 @@ class CastPlayback extends PlaybackDevice {
   adjustAudioOffset(delta) {
     this.#audioOffset += delta;
     log(`Audio sync: offset changed to ${this.#audioOffset}ms`);
-
-    try {
-      localStorage.setItem(AUDIO_OFFSET_KEY, this.#audioOffset.toString());
-    } catch (e) {
-      console.warn("Unable to store audio offset", e);
-    }
-
+    this.#saveAudioSettings();
     this.player.requestUpdate();
   }
 
@@ -510,6 +530,12 @@ class CastPlayback extends PlaybackDevice {
     log("Initial cast event", message);
 
     this.#castConnection.addEventListener("message", this.#onCastMessage);
+
+    // Local audio was left on the last time this device was used.
+    if (this.localAudio) {
+      log("Audio sync: local audio restored on");
+      this.#sendCastRequest({ type: "setMuted", muted: true });
+    }
 
     if (message.type == "castState") {
       // If the cast device is already playing the current video then just update our state.
@@ -730,6 +756,7 @@ class CastPlayback extends PlaybackDevice {
       `Audio sync: local audio turned ${this.localAudio ? "on" : "off"}`,
     );
     this.#sendCastRequest({ type: "setMuted", muted: this.localAudio });
+    this.#saveAudioSettings();
     this.player.requestUpdate();
   }
 

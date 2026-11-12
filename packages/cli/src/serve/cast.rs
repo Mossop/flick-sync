@@ -638,7 +638,9 @@ impl CastManager {
                     Ok(client) => {
                         let (sender, _) = broadcast::channel(5);
                         let cast_device = CastDevice {
-                            id: Uuid::new_v4().to_string(),
+                            // Prefer the device's own ID so that it stays the
+                            // same across reconnects and restarts.
+                            id: device.uuid.unwrap_or_else(|| Uuid::new_v4().to_string()),
                             ip: device.ip,
                             name: device.name,
                             state: Arc::default(),
