@@ -34,6 +34,9 @@ const AUDIO_SEEK_CHECK_DELAY = 2000;
 // Time (in milliseconds) after which a seek that hasn't completed is no longer
 // waited for.
 const AUDIO_SEEK_TIMEOUT = 5000;
+// Time (in milliseconds) to wait for the cast device to pause after asking it
+// to before the local audio follows the device again.
+const AUDIO_PAUSE_TIMEOUT = 5000;
 // Maximum amount (in seconds) that seeks will aim ahead of the target.
 const AUDIO_MAX_SEEK_LEAD = 0.5;
 // Initial amount (in seconds) that seeks aim ahead of the target until a better
@@ -171,6 +174,7 @@ class CastPlayback extends PlaybackDevice {
   #audioSeekLearn = false;
   #audioSeekCheckAt = null;
   #audioRateChangedAt = -Infinity;
+  #audioPauseRequestedAt = -Infinity;
 
   constructor(player, device) {
     super(player);
@@ -273,7 +277,18 @@ class CastPlayback extends PlaybackDevice {
     return Math.max(0, this.#estimateTime() - this.#audioOffset / 1000);
   }
 
+  // True between asking the cast device to pause and it reporting that it has.
+  #audioPausePending() {
+    return (
+      performance.now() - this.#audioPauseRequestedAt < AUDIO_PAUSE_TIMEOUT
+    );
+  }
+
   #updateAudioPlayState() {
+    if (this.#castState != "playing") {
+      this.#audioPauseRequestedAt = -Infinity;
+    }
+
     if (!this.#audioElement) {
       return;
     }
@@ -284,7 +299,7 @@ class CastPlayback extends PlaybackDevice {
         : "paused";
     }
 
-    if (this.#castState == "playing") {
+    if (this.#castState == "playing" && !this.#audioPausePending()) {
       if (this.#audioElement.paused) {
         log(`Audio sync: playing local audio`);
 
@@ -401,7 +416,7 @@ class CastPlayback extends PlaybackDevice {
   // amounts require a seek.
   #syncAudio() {
     let audio = this.#audioElement;
-    if (!audio || audio.seeking) {
+    if (!audio || audio.seeking || this.#audioPausePending()) {
       return;
     }
 
@@ -660,11 +675,20 @@ class CastPlayback extends PlaybackDevice {
   }
 
   play() {
+    this.#audioPauseRequestedAt = -Infinity;
     this.#sendCastRequest({ type: "play" });
   }
 
   pause() {
     this.#sendCastRequest({ type: "pause" });
+
+    // The cast device takes a moment to pause so stop the local audio straight
+    // away rather than waiting for it to report that it has paused.
+    if (this.#audioElement && !this.#audioElement.paused) {
+      log("Audio sync: pausing local audio, pause requested");
+      this.#audioPauseRequestedAt = performance.now();
+      this.#audioElement.pause();
+    }
   }
 
   stop() {
